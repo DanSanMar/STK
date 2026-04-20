@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# --- INFORMACIÓN DEL PROYECTO ---
-VERSION="1.2"
-DESCRIPCION="Herramienta integral de mantenimiento para Linux"
-AUTOR="DanSanMar"
-
 # --- CONFIGURACIÓN DE COLORES ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
@@ -26,53 +21,14 @@ pintar() {
 }
 
 mostrar_logo() {
+    # Fuente de bloque sólido para máxima legibilidad
     echo -e "${CIAN}  ██████  ████████ ██   ██"
     echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ "
     echo -e "${AZUL}  ██████     ██    █████  "
     echo -e "${AZUL}       ██    ██    ██  ██ "
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██"
-    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT       v${VERSION} ${RESET}"
+    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT       v1.0 ${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-}
-
-obtener_rendimiento() {
-    echo ""
-    pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
-    
-    # CPU
-    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1)
-    CPU_LOAD=$(( 100 - CPU_IDLE ))
-    echo -ne "  CPU:  [ "
-    for i in {1..20}; do
-        if [ $CPU_LOAD -ge $((i*5)) ]; then echo -ne "${VERDE}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${CPU_LOAD}%"
-
-    # RAM
-    MEM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
-    MEM_USED=$(free -m | awk '/Mem:/ { print $3 }')
-    MEM_PERC=$(( MEM_USED * 100 / MEM_TOTAL ))
-    echo -ne "  RAM:  [ "
-    for i in {1..20}; do
-        if [ $MEM_PERC -ge $((i*5)) ]; then echo -ne "${AZUL}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${MEM_PERC}% (${MEM_USED}MB / ${MEM_TOTAL}MB)"
-
-    # TEMPERATURA
-    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C')
-    if [ -z "$TEMP_VAL" ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-        TEMP_RAW=$(cat /sys/class/thermal/thermal_zone0/temp)
-        TEMP_VAL=$(( TEMP_RAW / 1000 ))
-    fi
-    if [ ! -z "$TEMP_VAL" ] && [ "$TEMP_VAL" != "0" ]; then
-        echo -e "  TEMP: ${AMARILLO}${TEMP_VAL}°C${RESET}"
-    else
-        echo -e "  TEMP: ${ROJO}No detectada${RESET}"
-    fi
-    
-    # DISCO
-    DISCO=$(df -h / | awk 'NR==2 {print $5}')
-    echo -e "  DISCO: ${CIAN}${DISCO} ocupado${RESET}"
 }
 
 mostrar_spinner() {
@@ -91,7 +47,8 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-for pkg in zip xdg-user-utils lm-sensors; do
+# Verificando dependencias en silencio
+for pkg in nmap zip xdg-user-utils; do
     if ! command -v $pkg &> /dev/null; then
         apt-get install -y $pkg > /dev/null 2>&1
     fi
@@ -108,7 +65,7 @@ while true; do
     pintar $AMARILLO "  ▌ 2) Instalar programa"
     pintar $AZUL_BRILLANTE "  ▌ 3) Gestión de usuarios"
     pintar $MAGENTA "  ▌ 4) Súper Limpieza"
-    pintar $CIAN "  ▌ 5) Rendimiento del Sistema"
+    pintar $CIAN "  ▌ 5) Escaneo de red local"
     pintar $VERDE "  ▌ 6) Copia de seguridad"
     pintar $ROJO_BRILLANTE "  ▌ 7) Salir"
     echo -e "${CIAN}  ▙━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━▟${RESET}"
@@ -123,6 +80,7 @@ while true; do
             apt-get update -qq > /dev/null 2>&1
             STATUS=$?
             kill $PID_SPINNER > /dev/null 2>&1
+            
             if [ $STATUS -eq 0 ]; then
                 printf "\r${VERDE_BRILLANTE}[✔] Repositorios listos!${RESET}               \n"
                 pintar $AMARILLO "Instalando actualizaciones..."
@@ -130,15 +88,29 @@ while true; do
                 apt-get upgrade -y -qq > /dev/null 2>&1
                 kill $PID_SPINNER > /dev/null 2>&1
                 printf "\r${VERDE_BRILLANTE}[✔] Actualizaciones completadas!${RESET}       \n"
+                
+                read -p "¿Deseas realizar limpieza de paquetes? (s/n): " confirmar
+                if [[ $confirmar =~ ^[sS] ]]; then
+                    apt-get autoremove -y > /dev/null
+                    pintar $VERDE "Limpieza realizada."
+                fi
+            else
+                pintar $ROJO "Error al conectar con los servidores."
             fi
-            read -p "Pulse Enter..."
+            read -p "Pulse Enter para continuar..."
             ;;
+        
         2)
             echo ""
             read -p "Nombre del programa: " programa
-            apt-get install -y $programa
+            read -p "¿Instalar $programa? (s/n): " confirmar
+            if [[ $confirmar =~ ^[sS] ]]; then
+                apt-get install -y $programa
+                [[ $? -eq 0 ]] && pintar $VERDE "Éxito" || pintar $ROJO "Error"
+            fi
             read -p "Pulse Enter..."
             ;;
+
         3)
             while true; do
                 clear
@@ -147,39 +119,51 @@ while true; do
                 echo "  1. Listar usuarios humanos"
                 echo "  2. Crear usuario"
                 echo "  3. Eliminar usuario"
-                echo "  4. Volver"
+                echo "  4. Volver al menú principal"
+                echo "  ─────────────────────────────────────"
                 read -p "  Opción: " sub_user
                 case $sub_user in
-                    1) echo ""; cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'; echo ""; read -p "  Enter..." ;;
-                    2) read -p "  Nombre: " nu; adduser $nu; read -p "Enter..." ;;
-                    3) read -p "  Nombre: " bu; deluser --remove-home $bu; read -p "Enter..." ;;
+                    1) echo ""; cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'; echo ""; read -p "  Presione Enter..." ;;
+                    2) read -p "  Nombre del nuevo usuario: " nu; adduser $nu; read -p "  Enter..." ;;
+                    3) read -p "  Nombre del usuario a borrar: " bu; deluser --remove-home $bu; read -p "  Enter..." ;;
                     4) break ;;
                 esac
             done
             ;;
+
         4)
             echo ""
             pintar $MAGENTA "Iniciando Súper Limpieza..."
+            # Guardamos espacio antes
             ANTES=$(df / | awk 'NR==2 {print $3}')
             apt-get install -f -y && apt-get autoremove -y && apt-get autoclean -y
             rm -rf /home/*/.local/share/Trash/*
+            # Espacio después
             DESPUES=$(df / | awk 'NR==2 {print $3}')
             LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
+            
             pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
             [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
             read -p "Pulse Enter..."
             ;;
+
         5)
-            while true; do
-                clear
-                mostrar_logo
-                obtener_rendimiento
-                echo ""
-                pintar $AMARILLO "  (Presione 'r' para refrescar o 'm' para volver al menú)"
-                read -n 1 -t 5 accion 
-                if [[ $accion == "m" ]]; then break; fi
-            done
+            echo ""
+            pintar $CIAN "Buscando dispositivos activos..."
+            MI_IP=$(hostname -I | awk '{print $1}' | cut -d. -f1-3)
+            if [ -z "$MI_IP" ]; then
+                pintar $ROJO "Error: Sin conexión de red."
+            else
+                mostrar_spinner & PID_SPINNER=$!
+                MAPA=$(nmap -sn $MI_IP.0/24 | grep "Nmap scan report")
+                kill $PID_SPINNER > /dev/null 2>&1
+                printf "\r${VERDE_BRILLANTE}[✔] Dispositivos encontrados:${RESET}          \n"
+                echo "$MAPA" | sed 's/Nmap scan report for /  → /'
+            fi
+            echo ""
+            read -p "Pulse Enter para continuar..."
             ;;
+
         6)
             echo ""
             pintar $AMARILLO_BRILLANTE "  --- COPIA DE SEGURIDAD ---"
@@ -188,18 +172,29 @@ while true; do
             DESTINO_BASE=$(sudo -u $USUARIO_REAL xdg-user-dir DESKTOP)
             CARPETA_BACKUP="$DESTINO_BASE/Backup"
             ARCHIVO="backup_$(date +%d-%m-%y).zip"
+
             mkdir -p "$CARPETA_BACKUP"
+            chown $USUARIO_REAL:$USUARIO_REAL "$CARPETA_BACKUP"
+
             if [ -d "$ORIGEN" ]; then
+                pintar $CIAN "Comprimiendo Documentos..."
                 (cd "$ORIGEN" && zip -rq "$CARPETA_BACKUP/$ARCHIVO" .)
                 chown $USUARIO_REAL:$USUARIO_REAL "$CARPETA_BACKUP/$ARCHIVO"
                 pintar $VERDE "Backup guardado en: $CARPETA_BACKUP/$ARCHIVO"
+            else
+                pintar $ROJO "No se encontró la carpeta Documentos en $ORIGEN"
             fi
             read -p "Pulse Enter..."
             ;;
-        7) echo ""
-         pintar $AZUL "Gracias por usar STK, hasta pronto!!"
-        exit 0 ;;
 
-        *) pintar $ROJO "Opción no válida"; sleep 1 ;;
+        7)
+            echo ""
+            pintar $VERDE_BRILLANTE "  ¡Gracias por usar System Tool Kit!"
+            exit 0
+            ;;
+        *)
+            pintar $ROJO "  Opción no válida"
+            sleep 1
+            ;;
     esac
 done

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-VERSION="1.2"
-DESCRIPCION="Herramienta integral de mantenimiento para Linux"
+VERSION="2.2"
+DESCRIPCION="Herramienta de mantenimiento integral para Parrot/Debian/Arch"
 AUTOR="DanSanMar"
 
 # --- CONFIGURACIÓN DE COLORES ---
@@ -29,7 +29,7 @@ mostrar_logo() {
     echo -e "${CIAN}  ██████  ████████ ██   ██"
     echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ "
     echo -e "${AZUL}  ██████     ██    █████  "
-    echo -e "${AZUL}       ██    ██    ██  ██ "
+    echo -e "${AZUL}         ██     ██    ██  ██ "
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██"
     echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT       v${VERSION} ${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -38,17 +38,14 @@ mostrar_logo() {
 obtener_rendimiento() {
     echo ""
     pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
-    
-    # CPU
-    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1)
+    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1 | head -n1)
     CPU_LOAD=$(( 100 - CPU_IDLE ))
     echo -ne "  CPU:  [ "
     for i in {1..20}; do
         if [ $CPU_LOAD -ge $((i*5)) ]; then echo -ne "${VERDE}#${RESET}"; else echo -ne "."; fi
     done
     echo -e " ] ${CPU_LOAD}%"
-
-    # RAM
+    
     MEM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
     MEM_USED=$(free -m | awk '/Mem:/ { print $3 }')
     MEM_PERC=$(( MEM_USED * 100 / MEM_TOTAL ))
@@ -58,8 +55,7 @@ obtener_rendimiento() {
     done
     echo -e " ] ${MEM_PERC}% (${MEM_USED}MB / ${MEM_TOTAL}MB)"
 
-    # TEMPERATURA
-    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C')
+    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C' | head -n1)
     if [ -z "$TEMP_VAL" ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
         TEMP_RAW=$(cat /sys/class/thermal/thermal_zone0/temp)
         TEMP_VAL=$(( TEMP_RAW / 1000 ))
@@ -69,8 +65,6 @@ obtener_rendimiento() {
     else
         echo -e "  TEMP: ${ROJO}No detectada${RESET}"
     fi
-    
-    # DISCO
     DISCO=$(df -h / | awk 'NR==2 {print $5}')
     echo -e "  DISCO: ${CIAN}${DISCO} ocupado${RESET}"
 }
@@ -85,6 +79,21 @@ mostrar_spinner() {
     done
 }
 
+# --- DETECCIÓN DE GESTOR DE PAQUETES ---
+if command -v apt &> /dev/null; then
+    PKG_MGR="apt"
+    INSTALL_CMD="apt install -y"
+    CLEAN_CMD="apt autoremove -y && apt autoclean"
+elif command -v dnf &> /dev/null; then
+    PKG_MGR="dnf"
+    INSTALL_CMD="dnf install -y"
+    CLEAN_CMD="dnf autoremove -y && dnf clean all"
+elif command -v pacman &> /dev/null; then
+    PKG_MGR="pacman"
+    INSTALL_CMD="pacman -S --noconfirm"
+    CLEAN_CMD="pacman -Sc --noconfirm"
+fi
+
 # --- VALIDACIONES INICIALES ---
 if [ "$EUID" -ne 0 ]; then 
   pintar $ROJO_BRILLANTE "Error: Este script debe ejecutarse con sudo."
@@ -93,7 +102,7 @@ fi
 
 for pkg in zip xdg-user-utils lm-sensors; do
     if ! command -v $pkg &> /dev/null; then
-        apt-get install -y $pkg > /dev/null 2>&1
+        $INSTALL_CMD $pkg > /dev/null 2>&1
     fi
 done
 
@@ -104,7 +113,7 @@ while true; do
     
     echo -e "${NEGRITA}  P A N E L  D E  C O N T R O L${RESET}"
     echo -e "${CIAN}  ▛━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━▜${RESET}"
-    pintar $VERDE_BRILLANTE "  ▌ 1) Actualizar sistema"
+    pintar $VERDE_BRILLANTE "  ▌ 1) Actualizar sistema inteligente"
     pintar $AMARILLO "  ▌ 2) Instalar programa"
     pintar $AZUL_BRILLANTE "  ▌ 3) Gestión de usuarios"
     pintar $MAGENTA "  ▌ 4) Súper Limpieza"
@@ -118,25 +127,54 @@ while true; do
     case $eleccion in 
         1)
             echo ""
-            pintar $NEGRITA "Actualizando repositorios..."
+            OS_ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+            if [ "$PKG_MGR" == "apt" ]; then
+                UP_CMD="apt update"
+                ACT_CMD="apt full-upgrade -y"
+            elif [ "$PKG_MGR" == "dnf" ]; then
+                UP_CMD="dnf check-update"
+                ACT_CMD="dnf upgrade -y"
+            elif [ "$PKG_MGR" == "pacman" ]; then
+                UP_CMD="pacman -Sy"
+                ACT_CMD="pacman -Syu --noconfirm"
+            fi
+
+            pintar $AZUL_BRILLANTE "Sistema detectado: ${NEGRITA}${OS_ID^^} (${PKG_MGR})"
+            pintar $NEGRITA "Sincronizando repositorios..."
             mostrar_spinner & PID_SPINNER=$!
-            apt-get update -qq > /dev/null 2>&1
-            STATUS=$?
+            $UP_CMD > /dev/null 2>&1
             kill $PID_SPINNER > /dev/null 2>&1
-            if [ $STATUS -eq 0 ]; then
-                printf "\r${VERDE_BRILLANTE}[✔] Repositorios listos!${RESET}               \n"
-                pintar $AMARILLO "Instalando actualizaciones..."
-                mostrar_spinner & PID_SPINNER=$!
-                apt-get upgrade -y -qq > /dev/null 2>&1
-                kill $PID_SPINNER > /dev/null 2>&1
-                printf "\r${VERDE_BRILLANTE}[✔] Actualizaciones completadas!${RESET}       \n"
+            
+            printf "\r${VERDE_BRILLANTE}[✔] Sincronización finalizada.${RESET}               \n"
+            echo ""
+            pintar $AMARILLO "Comando a ejecutar:"
+            pintar $CIAN "> $ACT_CMD"
+            echo ""
+            read -p "Confirmar actualización (s/n): " confirmar
+            if [[ $confirmar == "s" || $confirmar == "S" ]]; then
+                $ACT_CMD
+                pintar $VERDE_BRILLANTE "\n[✔] Actualización completada."
+                
+                echo ""
+                read -p "¿Desea realizar limpieza de paquetes (s/n)? " limpiar
+                if [[ $limpiar == "s" || $limpiar == "S" ]]; then
+                    pintar $MAGENTA "Limpiando con $PKG_MGR..."
+                    if [ "$PKG_MGR" == "apt" ]; then
+                        apt autoremove -y && apt autoclean
+                    elif [ "$PKG_MGR" == "dnf" ]; then
+                        dnf autoremove -y && dnf clean all
+                    elif [ "$PKG_MGR" == "pacman" ]; then
+                        pacman -Sc --noconfirm
+                    fi
+                    pintar $VERDE "¡Limpieza finalizada!"
+                fi
             fi
             read -p "Pulse Enter..."
             ;;
         2)
             echo ""
             read -p "Nombre del programa: " programa
-            apt-get install -y $programa
+            $INSTALL_CMD $programa
             read -p "Pulse Enter..."
             ;;
         3)
@@ -159,10 +197,18 @@ while true; do
             ;;
         4)
             echo ""
-            pintar $MAGENTA "Iniciando Súper Limpieza..."
+            pintar $MAGENTA "Iniciando Súper Limpieza en $OS_ID..."
             ANTES=$(df / | awk 'NR==2 {print $3}')
-            apt-get install -f -y && apt-get autoremove -y && apt-get autoclean -y
-            rm -rf /home/*/.local/share/Trash/*
+            
+            if [ "$PKG_MGR" == "apt" ]; then
+                apt-get install -f -y && apt autoremove -y && apt autoclean
+            elif [ "$PKG_MGR" == "dnf" ]; then
+                dnf autoremove -y && dnf clean all
+            elif [ "$PKG_MGR" == "pacman" ]; then
+                pacman -Sc --noconfirm
+            fi
+            
+            rm -rf /home/*/.local/share/Trash/* 2>/dev/null
             DESPUES=$(df / | awk 'NR==2 {print $3}')
             LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
             pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
@@ -197,9 +243,8 @@ while true; do
             read -p "Pulse Enter..."
             ;;
         7) echo ""
-         pintar $AZUL "Gracias por usar STK, hasta pronto!!"
+          pintar $AZUL "Gracias por usar STK, hasta pronto!!"
         exit 0 ;;
-
         *) pintar $ROJO "Opción no válida"; sleep 1 ;;
     esac
 done
