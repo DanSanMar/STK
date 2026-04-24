@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="2.9"
+V="3"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -197,7 +197,7 @@ salir() {
 }
 
 # --- DEFINICIÓN DE DEPENDENCIAS ---
-dependencies=(fzf zenity xsltproc host)
+dependencies=(fzf xsltproc host)
 
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
@@ -467,25 +467,28 @@ desinstalar_programa() {
     read -p "Presione Enter para volver..."
 }
 
+listar_usuarios() {
+    echo ""
+    pintar $AZUL_BRILLANTE "--- Usuarios Humanos (UID >= 1000) ---"
+    cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'
+    echo ""
+    read -p "Presione Enter para continuar..."
+}
+
+pedir_nombre() {
+    local nombre=""
+    while [ -z "$nombre" ]; do
+        read -p "Ingrese nombre de usuario: " nombre
+        if [ -z "$nombre" ]; then
+                # Usar >&2 para enviar el aviso a stderr y no contaminar la salida
+                echo -e "${AMARILLO}⚠️ El nombre no puede estar vacío. Inténtelo de nuevo.${RESET}" >&2
+        fi
+    done
+    echo "$nombre"  # ← Este echo SÍ es necesario
+}
+
 gestionar_usuarios() {
     
-    listar_usuarios() {
-        echo ""
-        pintar $AZUL_BRILLANTE "--- Usuarios Humanos (UID >= 1000) ---"
-        cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'
-        echo ""
-        read -p "Presione Enter para continuar..."
-    }
-
-    pedir_nombre() {
-        local nombre
-        nombre=$(zenity --entry --text="Ingrese nombre de usuario" --title="Gestión" 2>/dev/null)
-        if [ $? -ne 0 ] || [ -z "$nombre" ]; then
-            read -p "Nombre de usuario: " nombre
-        fi
-        echo "$nombre"
-    }
-
     while true; do
         clear
         mostrar_logo
@@ -512,10 +515,13 @@ gestionar_usuarios() {
                         sudo passwd "$user"
                     fi
                 fi
-                read -p "Proceso finalizado. Presione Enter..." ;;
+                read -p "Proceso finalizado. Presione Enter para continuar..." ;;
             3) 
                 user=$(pedir_nombre)
                 if [ -n "$user" ]; then
+                    echo ""
+                    read -p $ROJO "➤ Está seguro que desea elminiar el usuario $user... pulse cualquier tecla para continuar, control C para detener el proceso${RESET}"
+                    echo ""
                     pintar $ROJO "➤ Eliminando usuario $user..."
                     if [[ "$Package" == "apt" ]]; then
                         sudo deluser --remove-home "$user"
@@ -524,6 +530,7 @@ gestionar_usuarios() {
                         sudo userdel -r "$user"
                     fi
                 fi
+                echo ""
                 read -p "Proceso finalizado. Presione Enter..." ;;
             4) break ;;
             5) salir ;;
@@ -541,6 +548,50 @@ fzf_menu_users() {
         --prompt="➤ Seleccione acción: " \
         --header="--- GESTIÓN DE USUARIOS ---" \
         --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+}
+
+super_limpieza() {
+    echo ""
+    pintar $MAGENTA "Iniciando Súper Limpieza..."
+    ANTES=$(df / | awk 'NR==2 {print $3}')
+    
+    case "$Package" in
+        apt)
+            apt-get install -f -y > /dev/null 2>&1
+            apt-get autoremove -y > /dev/null 2>&1
+            apt-get autoclean -y > /dev/null 2>&1
+            apt-get clean > /dev/null 2>&1
+            ;;
+        dnf)
+            dnf clean all > /dev/null 2>&1
+            dnf autoremove -y > /dev/null 2>&1
+            ;;
+        pacman)
+            pacman -Sc --noconfirm > /dev/null 2>&1
+            ;;
+        zypper)
+            zypper clean --all > /dev/null 2>&1
+            zypper clean --packages > /dev/null 2>&1
+            ;;
+        *)
+            pintar $ROJO "❌ Limpieza automática no soportada para $Package"
+            return 1
+            ;;
+    esac
+    
+    # Limpieza de papelera (común a todos)
+    find /home -maxdepth 2 -path "*/.local/share/Trash/*" -delete 2>/dev/null
+    
+    DESPUES=$(df / | awk 'NR==2 {print $3}')
+    
+    if [ "$ANTES" -gt "$DESPUES" ] 2>/dev/null; then
+        LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
+        pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
+        [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
+    else
+        pintar $VERDE "Limpieza completada (sin cambios significativos de espacio)."
+    fi
+    read -p "Pulse Enter..."
 }
 
 obtener_rendimiento() {
@@ -591,21 +642,6 @@ mostrar_spinner() {
             sleep 0.1
         done
     done
-}
-
-super_limpieza() {
-    echo ""
-    pintar $MAGENTA "Iniciando Súper Limpieza..."
-    ANTES=$(df / | awk 'NR==2 {print $3}')
-    apt-get install -f -y > /dev/null 2>&1
-    apt-get autoremove -y > /dev/null 2>&1
-    apt-get autoclean -y > /dev/null 2>&1
-    rm -rf /home/*/.local/share/Trash/*
-    DESPUES=$(df / | awk 'NR==2 {print $3}')
-    LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
-    pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
-    [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
-    read -p "Pulse Enter..."
 }
 
 mostrar_rendimiento() {
