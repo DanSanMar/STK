@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="2"
+V="2.5"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -65,11 +65,13 @@ pintar() {
 trap salir SIGINT SIGTERM
 
 salir() {
+    
+    echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
-    # Limpiamos la pantalla para una salida impecable
-    clear
     pintar $AZUL "Saliendo de forma segura..."
     pintar $VERDE "¡Gracias por usar STK, hasta pronto!"
+    echo ""
+    echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     exit 0
 }
 
@@ -88,7 +90,8 @@ mostrar_logo() {
     echo -e "${AMARILLO}➤ Gestor de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"echo ""
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
 }
 
 # LÓGICA FZF
@@ -113,7 +116,11 @@ menu() {
         mostrar_logo
         # Llamamos a fzf_menu y guardamos el resultado
         seleccion=$(fzf_menu)
-        
+        # --- ESTA ES LA LÓGICA QUE DETIENE EL BUCLE ---
+        # Si fzf devuelve un error (130 es Ctrl+C) o la selección está vacía
+        if [ $? -ne 0 ] || [ -z "$seleccion" ]; then
+            salir
+        fi
         # Extraemos el primer carácter (el número) de la selección de fzf
         case ${seleccion:0:1} in
             1) Actualizar_sistema ;;
@@ -274,6 +281,83 @@ desinstalar_programa() {
     fi
     read -p "Presione Enter para volver..."
 }
+
+gestionar_usuarios() {
+    
+    listar_usuarios() {
+        echo ""
+        pintar $AZUL_BRILLANTE "--- Usuarios Humanos (UID >= 1000) ---"
+        cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'
+        echo ""
+        read -p "Presione Enter para continuar..."
+    }
+
+    pedir_nombre() {
+        local nombre
+        nombre=$(zenity --entry --text="Ingrese nombre de usuario" --title="Gestión" 2>/dev/null)
+        if [ $? -ne 0 ] || [ -z "$nombre" ]; then
+            read -p "Nombre de usuario: " nombre
+        fi
+        echo "$nombre"
+    }
+
+    while true; do
+        clear
+        mostrar_logo
+        seleccion_users=$(fzf_menu_users)
+        
+        # Capturamos escape o Ctrl+C para volver al menú principal
+        if [ $? -ne 0 ] || [ -z "$seleccion_users" ]; then
+            break
+        fi
+
+        case ${seleccion_users:0:1} in
+            1) listar_usuarios ;;
+            2) 
+                user=$(pedir_nombre)
+                if [ -n "$user" ]; then
+                    pintar $AMARILLO "➤ Creando usuario $user..."
+                    # Lógica según el gestor detectado
+                    if [[ "$Package" == "apt" ]]; then
+                        sudo adduser "$user"
+                    else
+                        # Para Fedora, Arch, etc., usamos useradd (estándar universal)
+                        sudo useradd -m -s /bin/bash "$user"
+                        pintar $AMARILLO "Establezca la contraseña para $user:"
+                        sudo passwd "$user"
+                    fi
+                fi
+                read -p "Proceso finalizado. Presione Enter..." ;;
+            3) 
+                user=$(pedir_nombre)
+                if [ -n "$user" ]; then
+                    pintar $ROJO "➤ Eliminando usuario $user..."
+                    if [[ "$Package" == "apt" ]]; then
+                        sudo deluser --remove-home "$user"
+                    else
+                        # userdel -r es el equivalente universal
+                        sudo userdel -r "$user"
+                    fi
+                fi
+                read -p "Proceso finalizado. Presione Enter..." ;;
+            4) break ;;
+            5) salir ;;
+        esac
+    done
+}
+
+fzf_menu_users() {
+    local opciones="1. Listar usuarios humanos\n2. Crear usuario\n3. Eliminar usuario\n4. Volver al menú principal\n5. Salir"
+    
+    echo -e "$opciones" | fzf --ansi \
+        --height=15 \
+        --reverse \
+        --border=rounded \
+        --prompt="➤ Seleccione acción: " \
+        --header="--- GESTIÓN DE USUARIOS ---" \
+        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+}
+
 obtener_rendimiento() {
     echo ""
     pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
@@ -321,28 +405,6 @@ mostrar_spinner() {
             printf "\r${AZUL_BRILLANTE}[%c]${RESET} Procesando..." "${caracteres:$i:1}"
             sleep 0.1
         done
-    done
-}
-
-gestionar_usuarios() {
-    while true; do
-        clear
-        mostrar_logo
-        pintar $AZUL_BRILLANTE "  --- GESTIÓN DE USUARIOS ---"
-        echo "  1. Listar usuarios humanos"
-        echo "  2. Crear usuario"
-        echo "  3. Eliminar usuario"
-        echo "  4. Volver"
-
-        read -s -n1 input
-        case $input in
-            1) cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'; read -p "Enter..." ;;
-            2) nombre_usuario=$(zenity --entry --text="Nombre de usuario" 2>/dev/null || read -p "Nombre: " n; echo $n)
-               adduser $nombre_usuario; read -p "Pulse Enter..." ;;
-            3) nombre_usuario=$(zenity --entry --text="Nombre de usuario" 2>/dev/null || read -p "Nombre: " n; echo $n)
-               deluser --remove-home $nombre_usuario; read -p "Pulse Enter..." ;;
-            4) break ;;
-        esac
     done
 }
 
