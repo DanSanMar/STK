@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="2.5"
+V="2.9"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -17,6 +17,7 @@ CIAN='\e[36m'
 MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
+BLANCO='\e[97m'
 
 # --- COMPROBACIÓN DE SUDO ---
 # Corregido: Usaba variables RED/NC que no existían
@@ -26,7 +27,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-    # 1. Identificación del gestor de paquetes, usamos variable Package vacia
+    # 1. Identificación del Package de paquetes, usamos variable Package vacia
 Package=""
 
 if [ -f /etc/os-release ]; then
@@ -56,6 +57,125 @@ fi
             ;;
     esac
 # --- FUNCIONES AUXILIARES ---
+install_tools() {
+    local tools_to_install=("$@")
+    
+    echo -e "\n${AZUL}🔄 Actualizando repositorios ($Package)...${RESET}"
+    case "$Package" in
+        "apt") sudo apt update -y ;;
+        "dnf") sudo dnf makecache ;;
+        "pacman") sudo pacman -Sy ;;
+        "zypper") sudo zypper refresh ;;
+    esac
+
+    for tool in "${tools_to_install[@]}"; do
+        pkg=$(get_package_name "$tool")
+
+        if [[ "$pkg" == "GEM_REQUIRED" ]]; then
+            echo -e "\n${AZUL}💎 Instalando $tool y dependencias de compilación para $Package...${RESET}"
+            
+            case "$Package" in
+                "apt")
+                    sudo apt update -y
+                    sudo apt install -y ruby-full build-essential zlib1g-dev libcurl4-openssl-dev libcurl4
+                    ;;
+                "dnf")
+                    # Equivalentes exactos para Fedora
+                    sudo dnf install -y ruby ruby-devel gcc gcc-c++ make zlib-devel libcurl-devel openssl-devel
+                    ;;
+                *)
+                    echo -e "${ROJO}⚠️ $Package no soportado para dependencias Ruby. Intenta instalarlas manualmente.${RESET}"
+                    ;;
+            esac
+    
+            sudo ldconfig 2>/dev/null
+            echo -e "${AZUL}⚙️ Instalando gema WPScan...${RESET}"
+            sudo gem install wpscan
+            continue
+        fi
+
+        if [[ "$pkg" == "SNAP_REQUIRED" ]]; then
+
+            if ! command -v snap &> /dev/null; then
+                echo -e "\n${AMARILLO}⚠️ $tool requiere Snap, pero no está instalado.${RESET}"
+                echo -ne "${AMARILLO}¿Desea instalar snapd ahora? (s/n): ${RESET}"
+                read -r snap_pref
+                if [[ "$snap_pref" == "s" ]]; then
+                    echo -e "\n${AZUL}📦 Instalando motor de Snap...${RESET}"
+                    case "$Package" in
+                        "apt") 
+                            sudo apt install -y snapd
+                            sudo systemctl enable --now snapd.socket
+                            # Enlace simbólico vital en Debian para rutas estándar
+                            sudo ln -s /var/lib/snapd/snap /snap 2>/dev/null 
+                            ;;
+                        "dnf") sudo dnf install -y snapd && sudo systemctl enable --now snapd.socket ;;
+                    esac
+                    export PATH="$PATH:/snap/bin:/var/lib/snapd/snap/bin"
+                    
+                else
+                    echo -e "${ROJO}❌ No se puede instalar $tool por falta de Snap.${RESET}"
+                    continue
+                fi
+            fi
+
+
+            echo -e "${AZUL}📦 Instalando $tool vía Snap...${RESET}"
+            local classic=""
+            [[ "$tool" == "feroxbuster" || "$tool" == "fzf" ]] && classic="--classic"
+            sudo snap install "$tool" $classic
+            export PATH=$PATH:/var/lib/snapd/snap/bin
+            
+        else
+            echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
+            case "$Package" in
+                "apt") sudo apt install -y "$pkg" ;;
+                "dnf") sudo dnf install -y "$pkg" ;;
+                "pacman") sudo pacman -S --noconfirm "$pkg" ;;
+                "zypper") sudo zypper install -y "$pkg" ;;
+            esac
+        fi
+    done
+}
+
+mostrar_instrucciones() {
+    clear
+    echo -e "\n${AZUL}══════════════════════════════════════════════════${RESET}"
+    echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${Package^^})${RESET}"
+    echo -e "${AZUL}══════════════════════════════════════════════════${RESET}\n"
+
+    for tool in "${missing_tools[@]}"; do
+        echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
+        case "$tool" in
+            "fzf"|"zenity"|"xsltproc"|"host")
+                pkg=$(get_package_name "$tool")
+                echo -e "   ${VERDE}✔ Estándar:${RESET} sudo $Package install -y $pkg"
+                ;;
+            "feroxbuster")
+                echo -e "   ${VERDE}✔ Snap:${RESET}      sudo snap install feroxbuster"
+                echo -e "   ${VERDE}✔ Manual:${RESET}    curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash"
+                ;;
+            "wpscan")
+                echo -e "   ${VERDE}✔ RubyGem:${RESET}   sudo gem install wpscan"
+                echo -e "   ${VERDE}✔ Snap:${RESET}      sudo snap install wpscan"
+                ;;
+        esac
+        echo -e "${AZUL}--------------------------------------------------${RESET}"
+    done
+    
+}
+get_package_name() {
+    local tool=$1
+    case "$tool" in
+        "xsltproc") echo "xsltproc" ;;
+        "host") [[ "$Package" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
+        "feroxbuster") echo "SNAP_REQUIRED" ;;
+        "wpscan") echo "GEM_REQUIRED" ;; # Cambiamos Snap por Ruby Gems
+        "fzf") echo "fzf" ;; # No forzar SNAP_REQUIRED
+        *) echo "$tool" ;;
+    esac
+}
+
 pintar() { 
     local COLOR="$1" 
     local MENSAJE="$2" 
@@ -69,11 +189,76 @@ salir() {
     echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
     pintar $AZUL "Saliendo de forma segura..."
+    echo ""
     pintar $VERDE "¡Gracias por usar STK, hasta pronto!"
     echo ""
     echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     exit 0
 }
+
+# --- DEFINICIÓN DE DEPENDENCIAS ---
+dependencies=(fzf zenity xsltproc host)
+
+# --- LÓGICA DE RE-VERIFICACIÓN ---
+check_dependencies() {
+    missing_tools=()
+    for tool in "${dependencies[@]}"; do
+        # Intenta encontrarlo de forma normal, y si no, busca en la ruta de Snap
+        if ! command -v "$tool" &> /dev/null && [ ! -f "/snap/bin/$tool" ] && [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
+            missing_tools+=("$tool")
+        fi
+    done
+}
+# --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
+check_dependencies
+
+# --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
+check_dependencies
+
+if [ ${#missing_tools[@]} -gt 0 ]; then
+    echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
+    echo -e "${CIAN}¿Qué deseas hacer?${RESET}"
+    echo -e "   ${BLANCO}s) Intento de instalación automática (Sudo)${RESET}"
+    echo -e "   ${BLANCO}i) Mostrar instrucciones de instalación manual${RESET}"
+    echo -e "   ${BLANCO}n) Continuar de todos modos (Puede fallar)${RESET}"
+    echo -ne "\n${AMARILLO}Selecciona una opción: ${RESET}"
+    read -r confirm
+
+    if [[ "$confirm" == "s" ]]; then
+        # 1. Intentar instalar
+        install_tools "${missing_tools[@]}"
+        
+        # 2. Verificación crítica: ¿Realmente se instaló fzf?
+        if ! command -v fzf &> /dev/null; then
+            echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
+            echo -e "${AMARILLO}Por favor, instálalo manualmente y reinicia.${RESET}"
+            exit 1
+        fi
+        
+        # 3. Re-verificar si quedan otras herramientas pendientes
+        check_dependencies
+        if [ ${#missing_tools[@]} -gt 0 ]; then
+            echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
+            read -p "Presiona Enter para continuar de todos modos..."
+        fi
+
+    elif [[ "$confirm" == "i" ]]; then
+        mostrar_instrucciones
+        echo -e "\n${CIAN}Una vez instaladas, vuelve a ejecutar el script.${RESET}"
+        exit 0
+
+    elif [[ "$confirm" == "n" ]]; then
+        echo -e "${AMARILLO}Continuando sin las dependencias... (Puede fallar)${RESET}"
+        # No hacemos nada, el script sigue su curso
+
+    else
+        echo -e "${ROJO}❌ Opción no válida. Abortando.${RESET}"
+        exit 1
+    fi
+fi
+
+
+
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
@@ -87,7 +272,7 @@ mostrar_logo() {
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     #OS_ID:-"Desconocido" Forma sencilla de decir: si no tiene valor imprime: "Desconocido"
     echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Gestor de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
+    echo -e "${AMARILLO}➤ Package de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -141,7 +326,7 @@ Actualizar_sistema() {
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
     echo ""
 
-    # 2. Ejecución de comandos según el gestor
+    # 2. Ejecución de comandos según el Package
     case "$Package" in
         apt)
             pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
@@ -160,7 +345,7 @@ Actualizar_sistema() {
             zypper refresh && zypper update -y
             ;;
         *)
-            pintar $ROJO "❌ Error: No se pudo identificar un gestor compatible."
+            pintar $ROJO "❌ Error: No se pudo identificar un Package compatible."
             read -p "Presione Enter para volver..."
             return 1
             ;;
@@ -193,7 +378,7 @@ instalar_programa() {
     fi
   
     echo ""
-    echo -e "${AMARILLO}➤ Gestor de paquetes para la instalación:${RESET} ${AZUL}$Package${RESET}"
+    echo -e "${AMARILLO}➤ Package de paquetes para la instalación:${RESET} ${AZUL}$Package${RESET}"
     echo ""
 
     # 2. Ejecución de comandos (CORREGIDOS)
@@ -217,7 +402,7 @@ instalar_programa() {
             zypper install -y "$programa"
             ;;
         *)
-            pintar $ROJO "❌ Error: No se pudo identificar un gestor compatible."
+            pintar $ROJO "❌ Error: No se pudo identificar un Package compatible."
             read -p "Presione Enter para volver..."
             return 1
             ;;
@@ -269,7 +454,7 @@ desinstalar_programa() {
             zypper remove -y "$programa"
             ;;
         *)
-            pintar $ROJO "❌ Gestor no compatible."
+            pintar $ROJO "❌ Package no compatible."
             return 1
             ;;
     esac
@@ -317,7 +502,7 @@ gestionar_usuarios() {
                 user=$(pedir_nombre)
                 if [ -n "$user" ]; then
                     pintar $AMARILLO "➤ Creando usuario $user..."
-                    # Lógica según el gestor detectado
+                    # Lógica según el Package detectado
                     if [[ "$Package" == "apt" ]]; then
                         sudo adduser "$user"
                     else
