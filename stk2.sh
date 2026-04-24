@@ -25,6 +25,7 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${AMARILLO}Prueba con: sudo $0${RESET}"
     exit 1
 fi
+
     # 1. Identificación del gestor de paquetes, usamos variable Package vacia
 Package=""
 
@@ -60,8 +61,17 @@ pintar() {
     local MENSAJE="$2" 
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
+# --- CAPTURA DE SEÑALES (Salida limpia con Ctrl+C) ---
+trap salir SIGINT SIGTERM
 
-
+salir() {
+    echo ""
+    # Limpiamos la pantalla para una salida impecable
+    clear
+    pintar $AZUL "Saliendo de forma segura..."
+    pintar $VERDE "¡Gracias por usar STK, hasta pronto!"
+    exit 0
+}
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
@@ -84,7 +94,7 @@ mostrar_logo() {
 # LÓGICA FZF
 fzf_menu() {
     # Definimos las opciones que verá FZF
-    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Salir"
+    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Salir (Control C)"
     
     # Ejecutamos fzf capturando la salida
     # --reverse lo pone arriba, --height para no tapar el logo, --border para la "ventana"
@@ -314,12 +324,6 @@ mostrar_spinner() {
     done
 }
 
-
-
-
-
-
-
 gestionar_usuarios() {
     while true; do
         clear
@@ -386,13 +390,6 @@ hacer_backup() {
     pintar $VERDE "Backup guardado en: $CARPETA_BACKUP/$ARCHIVO"
     read -p "Pulse Enter..."
 }
-
-salir() {
-    echo ""
-    pintar $AZUL "Gracias por usar STK, hasta pronto!!"
-    exit 0
-}
-
 
 
 # --- EJECUCIÓN ---
