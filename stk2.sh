@@ -81,71 +81,41 @@ mostrar_logo() {
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"echo ""
 }
 
-
-obtener_rendimiento() {
-    echo ""
-    pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
-    
-    # CPU
-    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1)
-    CPU_LOAD=$(( 100 - CPU_IDLE ))
-    echo -ne "  CPU:  [ "
-    for i in {1..20}; do
-        if [ $CPU_LOAD -ge $((i*5)) ]; then echo -ne "${VERDE}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${CPU_LOAD}%"
-
-    # RAM
-    MEM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
-    MEM_USED=$(free -m | awk '/Mem:/ { print $3 }')
-    MEM_PERC=$(( MEM_USED * 100 / MEM_TOTAL ))
-    echo -ne "  RAM:  [ "
-    for i in {1..20}; do
-        if [ $MEM_PERC -ge $((i*5)) ]; then echo -ne "${AZUL}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${MEM_PERC}% (${MEM_USED}MB / ${MEM_TOTAL}MB)"
-
-    # TEMPERATURA
-    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C')
-    if [ -z "$TEMP_VAL" ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-        TEMP_RAW=$(cat /sys/class/thermal/thermal_zone0/temp)
-        TEMP_VAL=$(( TEMP_RAW / 1000 ))
-    fi
-    if [ ! -z "$TEMP_VAL" ] && [ "$TEMP_VAL" != "0" ]; then
-        echo -e "  TEMP: ${AMARILLO}${TEMP_VAL}°C${RESET}"
-    else
-        echo -e "  TEMP: ${ROJO}No detectada${RESET}"
-    fi
-    
-    # DISCO
-    DISCO=$(df -h / | awk 'NR==2 {print $5}')
-    echo -e "  DISCO: ${CIAN}${DISCO} ocupado${RESET}"
-}
-
-mostrar_spinner() {
-    local caracteres="/-\|"
-    while true; do
-        for (( i=0; i<${#caracteres}; i++ )); do
-            printf "\r${AZUL_BRILLANTE}[%c]${RESET} Procesando..." "${caracteres:$i:1}"
-            sleep 0.1
-        done
-    done
-}
-
 # LÓGICA FZF
 fzf_menu() {
     # Definimos las opciones que verá FZF
-    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Gestión de usuarios\n4. Súper Limpieza\n5. Rendimiento del Sistema\n6. Copia de seguridad\n7. Salir"
+    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Salir"
     
     # Ejecutamos fzf capturando la salida
     # --reverse lo pone arriba, --height para no tapar el logo, --border para la "ventana"
     echo -e "$opciones" | fzf --ansi \
-        --height=12 \
+        --height=15 \
         --reverse \
         --border=rounded \
         --prompt="➤ Seleccione acción: " \
         --header="P A N E L   D E   C O N T R O L" \
         --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+}
+
+menu() {
+    while true; do
+        clear
+        mostrar_logo
+        # Llamamos a fzf_menu y guardamos el resultado
+        seleccion=$(fzf_menu)
+        
+        # Extraemos el primer carácter (el número) de la selección de fzf
+        case ${seleccion:0:1} in
+            1) Actualizar_sistema ;;
+            2) instalar_programa ;;
+            3) desinstalar_programa ;; 
+            4) gestionar_usuarios ;;
+            5) super_limpieza ;;
+            6) mostrar_rendimiento ;;
+            7) hacer_backup ;;
+            8) salir ;;
+        esac
+    done
 }
 
 Actualizar_sistema() {
@@ -191,7 +161,6 @@ Actualizar_sistema() {
     echo ""
     read -p "Presione Enter para volver al menú..."
 }
-
 
 instalar_programa() {
     clear
@@ -249,6 +218,107 @@ instalar_programa() {
     echo ""
     read -p "Presione Enter para volver al menú..."
 }
+
+desinstalar_programa() {
+    clear
+    mostrar_logo 
+    echo ""
+    read -p "Escriba el nombre del programa que desea desinstalar: " programa
+    
+    if [[ -z "$programa" ]]; then
+        pintar $ROJO "⚠️ No escribió ningún nombre."
+        sleep 2
+        return 1
+    fi
+  
+    echo -e "${ROJO}➤ Preparando para eliminar:${RESET} ${AZUL}$programa${RESET}"
+    echo ""
+
+    case "$Package" in
+        apt)
+            pintar $VERDE "Eliminando y limpiando configuraciones (APT)..."
+            apt purge "$programa" -y && apt autoremove -y
+            ;;
+        dnf)
+            pintar $VERDE "Eliminando paquete (DNF)..."
+            dnf remove "$programa" -y
+            ;;
+        pacman)
+            pintar $VERDE "Eliminando paquete y dependencias no usadas (PACMAN)..."
+            pacman -Rs --noconfirm "$programa"
+            ;;
+        zypper)
+            pintar $VERDE "Eliminando paquete (ZYPPER)..."
+            zypper remove -y "$programa"
+            ;;
+        *)
+            pintar $ROJO "❌ Gestor no compatible."
+            return 1
+            ;;
+    esac
+
+    if [ $? -eq 0 ]; then
+        pintar $VERDE_BRILLANTE "✔ ¡$programa ha sido eliminado correctamente!"
+    else
+        pintar $ROJO "✘ Error al intentar desinstalar $programa."
+    fi
+    read -p "Presione Enter para volver..."
+}
+obtener_rendimiento() {
+    echo ""
+    pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
+    
+    # CPU
+    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1)
+    CPU_LOAD=$(( 100 - CPU_IDLE ))
+    echo -ne "  CPU:  [ "
+    for i in {1..20}; do
+        if [ $CPU_LOAD -ge $((i*5)) ]; then echo -ne "${VERDE}#${RESET}"; else echo -ne "."; fi
+    done
+    echo -e " ] ${CPU_LOAD}%"
+
+    # RAM
+    MEM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
+    MEM_USED=$(free -m | awk '/Mem:/ { print $3 }')
+    MEM_PERC=$(( MEM_USED * 100 / MEM_TOTAL ))
+    echo -ne "  RAM:  [ "
+    for i in {1..20}; do
+        if [ $MEM_PERC -ge $((i*5)) ]; then echo -ne "${AZUL}#${RESET}"; else echo -ne "."; fi
+    done
+    echo -e " ] ${MEM_PERC}% (${MEM_USED}MB / ${MEM_TOTAL}MB)"
+
+    # TEMPERATURA
+    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C')
+    if [ -z "$TEMP_VAL" ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+        TEMP_RAW=$(cat /sys/class/thermal/thermal_zone0/temp)
+        TEMP_VAL=$(( TEMP_RAW / 1000 ))
+    fi
+    if [ ! -z "$TEMP_VAL" ] && [ "$TEMP_VAL" != "0" ]; then
+        echo -e "  TEMP: ${AMARILLO}${TEMP_VAL}°C${RESET}"
+    else
+        echo -e "  TEMP: ${ROJO}No detectada${RESET}"
+    fi
+    
+    # DISCO
+    DISCO=$(df -h / | awk 'NR==2 {print $5}')
+    echo -e "  DISCO: ${CIAN}${DISCO} ocupado${RESET}"
+}
+
+mostrar_spinner() {
+    local caracteres="/-\|"
+    while true; do
+        for (( i=0; i<${#caracteres}; i++ )); do
+            printf "\r${AZUL_BRILLANTE}[%c]${RESET} Procesando..." "${caracteres:$i:1}"
+            sleep 0.1
+        done
+    done
+}
+
+
+
+
+
+
 
 gestionar_usuarios() {
     while true; do
@@ -323,25 +393,7 @@ salir() {
     exit 0
 }
 
-menu() {
-    while true; do
-        clear
-        mostrar_logo
-        # Llamamos a fzf_menu y guardamos el resultado
-        seleccion=$(fzf_menu)
-        
-        # Extraemos el primer carácter (el número) de la selección de fzf
-        case ${seleccion:0:1} in
-            1) Actualizar_sistema ;;
-            2) instalar_programa ;;
-            3) gestionar_usuarios ;;
-            4) super_limpieza ;;
-            5) mostrar_rendimiento ;;
-            6) hacer_backup ;;
-            7) salir ;;
-        esac
-    done
-}
+
 
 # --- EJECUCIÓN ---
 menu

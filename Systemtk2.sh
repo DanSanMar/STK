@@ -2,7 +2,7 @@
 
 # --- INFORMACIÓN DEL PROYECTO ---
 VERSION="2.2"
-DESCRIPCION="Herramienta de mantenimiento integral para Parrot/Debian/Arch"
+DESCRIPCION="Herramienta de mantenimiento integral para Linux"
 AUTOR="DanSanMar"
 
 # --- CONFIGURACIÓN DE COLORES ---
