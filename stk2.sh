@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-VERSION="2"
+V="2"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -25,13 +25,43 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${AMARILLO}Prueba con: sudo $0${RESET}"
     exit 1
 fi
+    # 1. Identificación del gestor de paquetes, usamos variable Package vacia
+Package=""
 
+if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID=$ID
+        OS_LIKE=$ID_LIKE
+        VERSION=$VERSION
+        URL=$HOME_URL
+fi
+
+        # Lógica de detección 
+    case "$OS_ID" in
+        debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
+        fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
+        arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
+        opensuse*|suse)                            Package="zypper" ;;
+        *)
+            if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
+            elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
+            elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
+            elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
+            elif command -v apt &>/dev/null;    then Package="apt"
+            elif command -v dnf &>/dev/null;    then Package="dnf"
+            elif command -v pacman &>/dev/null; then Package="pacman"
+            elif command -v zypper &>/dev/null; then Package="zypper"
+            else Package="unknown"; fi
+            ;;
+    esac
 # --- FUNCIONES AUXILIARES ---
 pintar() { 
     local COLOR="$1" 
     local MENSAJE="$2" 
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
+
+
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
@@ -40,9 +70,15 @@ mostrar_logo() {
     echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
     echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT       v${VERSION}${RESET}"
-    echo -e "${AMARILLO}  By: ${AUTOR}${RESET}"
+    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT-ALL4ME    v${V}${RESET}"
+    echo -e "${AZUL}  By: ${AUTOR}${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    #OS_ID:-"Desconocido" Forma sencilla de decir: si no tiene valor imprime: "Desconocido"
+    echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
+    echo -e "${AMARILLO}➤ Gestor de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
+    echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
+    echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"echo ""
 }
 
 
@@ -96,7 +132,7 @@ mostrar_spinner() {
     done
 }
 
-# --- NUEVA LÓGICA FZF (Sin romper el estilo) ---
+# LÓGICA FZF
 fzf_menu() {
     # Definimos las opciones que verá FZF
     local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Gestión de usuarios\n4. Súper Limpieza\n5. Rendimiento del Sistema\n6. Copia de seguridad\n7. Salir"
@@ -115,38 +151,7 @@ fzf_menu() {
 Actualizar_sistema() {
     clear
     mostrar_logo
-    pintar $AZUL_BRILLANTE "➤ Iniciando actualización universal del sistema..."
-    echo ""
-
-    # 1. Identificación del gestor de paquetes
-    local Package=""
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID=$ID
-        OS_LIKE=$ID_LIKE
-    fi
-
-    # Lógica de detección (extraída y mejorada)
-    case "$OS_ID" in
-        debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
-        fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
-        arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
-        opensuse*|suse)                            Package="zypper" ;;
-        *)
-            if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
-            elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
-            elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
-            elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
-            elif command -v apt &>/dev/null;    then Package="apt"
-            elif command -v dnf &>/dev/null;    then Package="dnf"
-            elif command -v pacman &>/dev/null; then Package="pacman"
-            elif command -v zypper &>/dev/null; then Package="zypper"
-            else Package="unknown"; fi
-            ;;
-    esac
-
-    echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Gestor de paquetes:${RESET} ${AZUL}$Package${RESET}"
+    pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
     echo ""
 
     # 2. Ejecución de comandos según el gestor
@@ -200,58 +205,29 @@ instalar_programa() {
         sleep 2
         return 1
     fi
-
-    pintar $AZUL_BRILLANTE "➤ Iniciando reconocimiento del sistema..."
+  
     echo ""
-
-    # 1. Identificación del gestor de paquetes
-    local Package=""
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID=$ID
-        OS_LIKE=$ID_LIKE
-    fi
-
-    case "$OS_ID" in
-        debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
-        fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
-        arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
-        opensuse*|suse)                            Package="zypper" ;;
-        *)
-            if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
-            elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
-            elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
-            elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
-            elif command -v apt &>/dev/null;    then Package="apt"
-            elif command -v dnf &>/dev/null;    then Package="dnf"
-            elif command -v pacman &>/dev/null; then Package="pacman"
-            elif command -v zypper &>/dev/null; then Package="zypper"
-            else Package="unknown"; fi
-            ;;
-    esac
-
-    echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Gestor de paquetes:${RESET} ${AZUL}$Package${RESET}"
+    echo -e "${AMARILLO}➤ Gestor de paquetes para la instalación:${RESET} ${AZUL}$Package${RESET}"
     echo ""
 
     # 2. Ejecución de comandos (CORREGIDOS)
     case "$Package" in
         apt)
-            pintar $VERDE "Actualizando índices e instalando/actualizando con APT..."
+            pintar $VERDE "Actualizando índices e instalando/actualizando $programa..."
             apt update
             apt install "$programa" -y  # Corregido "insall" por "install"
             ;;
         dnf)
-            pintar $VERDE "Instalando/actualizando con DNF..."
+            pintar $VERDE "Instalando/actualizando $programa..."
             dnf install "$programa" -y
             ;;
         pacman)
-            pintar $VERDE "Instalando/actualizando con PACMAN..."
+            pintar $VERDE "Instalando/actualizando $programa..."
             # CORRECCIÓN: pacman no usa "install", usa "-S"
             pacman -S --noconfirm "$programa" 
             ;;
         zypper)
-            pintar $VERDE "Instalando/actualizando con ZYPPER..."
+            pintar $VERDE "Instalando/actualizando $programa..."
             zypper install -y "$programa"
             ;;
         *)
