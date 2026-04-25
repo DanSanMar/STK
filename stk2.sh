@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="3"
+V="3.5"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -209,12 +209,13 @@ check_dependencies() {
         fi
     done
 }
-# --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
-check_dependencies
 
 # --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
+if ! ping -c 1 8.8.8.8 &>/dev/null; then
+    pintar $ROJO "❌ No hay conexión a internet. Algunas funciones fallarán."
+fi
 check_dependencies
-
+#Herramientas no instaladas
 if [ ${#missing_tools[@]} -gt 0 ]; then
     echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
     echo -e "${CIAN}¿Qué deseas hacer?${RESET}"
@@ -256,9 +257,6 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
         exit 1
     fi
 fi
-
-
-
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
@@ -313,7 +311,7 @@ menu() {
             3) desinstalar_programa ;; 
             4) gestionar_usuarios ;;
             5) super_limpieza ;;
-            6) mostrar_rendimiento ;;
+            6) monitor_rendimiento ;;
             7) hacer_backup ;;
             8) salir ;;
         esac
@@ -520,7 +518,8 @@ gestionar_usuarios() {
                 user=$(pedir_nombre)
                 if [ -n "$user" ]; then
                     echo ""
-                    read -p $ROJO "➤ Está seguro que desea elminiar el usuario $user... pulse cualquier tecla para continuar, control C para detener el proceso${RESET}"
+                    echo -ne "${ROJO}➤ ¿Está seguro que desea eliminar el usuario $user? ${RESET}"
+                    read
                     echo ""
                     pintar $ROJO "➤ Eliminando usuario $user..."
                     if [[ "$Package" == "apt" ]]; then
@@ -593,45 +592,106 @@ super_limpieza() {
     fi
     read -p "Pulse Enter..."
 }
-
-obtener_rendimiento() {
-    echo ""
-    pintar $AZUL_BRILLANTE "  ESTADO DEL HARDWARE:"
+mostrar_logo_monitor() {
+    # Definimos el logo con limpieza de línea \e[K al principio de cada fila
+    echo -e "\e[K${CIAN}  _____ _______ _  __  __  __                _ _             "
+    echo -e "\e[K / ____|__   __| |/ / |  \/  |              (_) |            "
+    echo -e "\e[K| (___    | |  | ' /  | \  / | ___  _ __  _ _| |_ ___  _ __  "
+    echo -e "\e[K \___ \   | |  |  <   | |\/| |/ _ \| '_ \| | | __/ _ \| '__| "
+    echo -e "\e[K ____) |  | |  | . \  | |  | | (_) | | | | | | |_ (_) | |    "
+    echo -e "\e[K|_____/   |_|  |_|\_\ |_|  |_|\___/|_| |_|_|_|\__\___/|_|    ${RESET}"
+    echo -e "\e[K${AZUL}------------------------------------------------------${RESET}"
+}
+monitor_rendimiento() {
     
-    # CPU
-    CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d. -f1 | cut -d, -f1)
-    CPU_LOAD=$(( 100 - CPU_IDLE ))
-    echo -ne "  CPU:  [ "
-    for i in {1..20}; do
-        if [ $CPU_LOAD -ge $((i*5)) ]; then echo -ne "${VERDE}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${CPU_LOAD}%"
+    dibujar_barra() {
+        local porcentaje=$1
+        local color=$VERDE
+        local total_bloques=20
+        local rellenos=$(( porcentaje * total_bloques / 100 ))
+        if [ "$porcentaje" -gt 85 ]; then color=$ROJO
+        elif [ "$porcentaje" -gt 60 ]; then color=$AMARILLO
+        fi
+        printf "${color}["
+        for ((i=0; i<rellenos; i++)); do printf "■"; done
+        for ((i=rellenos; i<total_bloques; i++)); do printf " "; done
+        printf "] %3d%%${RESET}" "$porcentaje"
+    }
 
-    # RAM
-    MEM_TOTAL=$(free -m | awk '/Mem:/ { print $2 }')
-    MEM_USED=$(free -m | awk '/Mem:/ { print $3 }')
-    MEM_PERC=$(( MEM_USED * 100 / MEM_TOTAL ))
-    echo -ne "  RAM:  [ "
-    for i in {1..20}; do
-        if [ $MEM_PERC -ge $((i*5)) ]; then echo -ne "${AZUL}#${RESET}"; else echo -ne "."; fi
-    done
-    echo -e " ] ${MEM_PERC}% (${MEM_USED}MB / ${MEM_TOTAL}MB)"
+    interpretar() {
+        local val=$1
+        local tipo=$2
+        if [ "$val" -gt 85 ]; then
+            case "$tipo" in
+                "cpu")   echo -e "${ROJO_BRILLANTE}CRÍTICO (Sobrecarga)${RESET}" ;;
+                "ram")   echo -e "${ROJO_BRILLANTE}CRÍTICO (Sin memoria)${RESET}" ;;
+                "disco") echo -e "${ROJO_BRILLANTE}CRÍTICO (Disco lleno)${RESET}" ;;
+            esac
+        elif [ "$val" -gt 65 ]; then echo -e "${AMARILLO}ALTO (Carga)${RESET}"
+        else echo -e "${VERDE}ÓPTIMO${RESET}"; fi
+    }
 
-    # TEMPERATURA
-    TEMP_VAL=$(sensors 2>/dev/null | grep -m 1 "temp1\|Core 0\|Package id 0" | awk '{print $2}' | tr -d '+°C')
-    if [ -z "$TEMP_VAL" ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-        TEMP_RAW=$(cat /sys/class/thermal/thermal_zone0/temp)
-        TEMP_VAL=$(( TEMP_RAW / 1000 ))
-    fi
-    if [ ! -z "$TEMP_VAL" ] && [ "$TEMP_VAL" != "0" ]; then
-        echo -e "  TEMP: ${AMARILLO}${TEMP_VAL}°C${RESET}"
-    else
-        echo -e "  TEMP: ${ROJO}No detectada${RESET}"
-    fi
-    
-    # DISCO
-    DISCO=$(df -h / | awk 'NR==2 {print $5}')
-    echo -e "  DISCO: ${CIAN}${DISCO} ocupado${RESET}"
+# Configuración inicial
+    trap "tput cnorm; clear; return" SIGINT
+    tput civis 
+    clear # Limpia la pantalla solo UNA vez al empezar
+
+    while true; do
+        # Retornar cursor a la esquina superior izquierda sin borrar
+        echo -ne "\e[H"
+        
+        mostrar_logo_monitor
+       
+        echo -e "\e[K${NEGRITA}-------- MONITOR DE SISTEMA (Ctrl+C para volver) --------${RESET}"
+        echo -e "\e[K${CIAN}Tasa Auto-refresco: 5s | Pulsa ENTER para actualizar antes${RESET}\n"
+
+        # --- OBTENCIÓN DE DATOS ---
+        CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
+        CPU_CORES=$(nproc)
+        CPU_MHZ=$(grep -m1 "cpu MHz" /proc/cpuinfo | awk '{print int($4)}')
+        CPU_GHZ=$(awk "BEGIN {printf \"%.2f\", $CPU_MHZ/1000}")
+
+        # Cálculo CPU
+        CPU_STATS=$(grep 'cpu ' /proc/stat)
+        IDLE_1=$(echo $CPU_STATS | awk '{print $5}')
+        TOTAL_1=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
+        sleep 0.1
+        CPU_STATS=$(grep 'cpu ' /proc/stat)
+        IDLE_2=$(echo $CPU_STATS | awk '{print $5}')
+        TOTAL_2=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
+        CPU_PERC=$((100 * ((TOTAL_2-TOTAL_1)-(IDLE_2-IDLE_1)) / (TOTAL_2-TOTAL_1) ))
+        CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "Usuario: %.1f%% | System: %.1f%%", $2, $4}')
+
+        # RAM y DISCO
+        RAM_INFO=$(free -m | grep "Mem:")
+        RAM_TOTAL_MB=$(echo $RAM_INFO | awk '{print $2}')
+        RAM_USED_MB=$(echo $RAM_INFO | awk '{print $3}')
+        RAM_DISP_MB=$(echo $RAM_INFO | awk '{print $7}')
+        RAM_PERC=$(( RAM_USED_MB * 100 / RAM_TOTAL_MB ))
+        G_TOTAL=$(awk "BEGIN {printf \"%.1f\", $RAM_TOTAL_MB/1024}"); G_USED=$(awk "BEGIN {printf \"%.1f\", $RAM_USED_MB/1024}"); G_DISP=$(awk "BEGIN {printf \"%.1f\", $RAM_DISP_MB/1024}")
+
+        DISCO_DATA=$(df -h / | awk 'NR==2 {print $2, $3, $4, $5}')
+        D_TOTAL=$(echo $DISCO_DATA | awk '{print $1}'); D_USADO=$(echo $DISCO_DATA | awk '{print $2}'); D_LIBRE=$(echo $DISCO_DATA | awk '{print $3}'); D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
+
+        # --- RENDERIZADO 
+        echo -e "\e[K${AMARILLO}PROCESADOR:${RESET} ${BLANCO}${CPU_MODEL}${RESET}"
+        echo -e "\e[K${AMARILLO}NÚCLEOS:${RESET}    ${BLANCO}${CPU_CORES} hilos${RESET} | ${AMARILLO}FREQ:${RESET} ${BLANCO}${CPU_GHZ} GHz${RESET}\n"
+
+        echo -ne "\e[K${VERDE}CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
+        echo -ne "\e[K${AZUL}USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC; echo -e " -> $(interpretar $RAM_PERC 'ram')"
+        echo -ne "\e[K${CIAN}USO DISCO: ${RESET}"; dibujar_barra $D_PERC; echo -e " -> $(interpretar $D_PERC 'disco')"
+
+        echo -e "\e[K\n${CIAN}------------- INFO MÁS DETALLADA -----------${RESET}"
+        echo -e "\e[K   ${BLANCO}CPU:${RESET}   ${CPU_DETAIL} | ${BLANCO}Hilos:${RESET} ${CPU_CORES}"
+        echo -e "\e[K   ${BLANCO}RAM:${RESET}   ${G_USED}GB usados / ${G_TOTAL}GB total (Disp: ${G_DISP}GB)"
+        echo -e "\e[K   ${BLANCO}DISCO:${RESET} ${D_USADO} usados / ${D_TOTAL} total (Libre: ${D_LIBRE})"
+        echo -e "\e[K${CIAN}--------------------------------------------${RESET}"
+        echo -e "\e[K\n${BLANCO}Presione Ctrl+C para volver al menú principal${RESET}"
+        echo -ne "\e[K" # Línea extra de seguridad
+        # Rellenar con líneas vacías limpias para evitar que texto viejo suba
+        for i in {1..2}; do echo -e "\e[K"; done
+        read -t 5 -n 1 -s key
+    done
 }
 
 mostrar_spinner() {
@@ -644,21 +704,7 @@ mostrar_spinner() {
     done
 }
 
-mostrar_rendimiento() {
-    while true; do
-        clear
-        mostrar_logo
-        obtener_rendimiento
-        # Usamos zenity si está disponible, si no, un read simple para no romper el bucle
-        if command -v zenity &>/dev/null; then
-            seleccion=$(zenity --list --title="Rendimiento" --column="Opciones" "Refrescar" "Volver al menú" 2>/dev/null)
-        else
-            read -p "1. Refrescar / 2. Volver: " res
-            [[ $res == "2" ]] && seleccion="Volver al menú" || seleccion="Refrescar"
-        fi
-        [[ "$seleccion" == "Volver al menú" ]] && break
-    done
-}
+
 
 hacer_backup() {
     USUARIO_REAL=${SUDO_USER:-$USER}
