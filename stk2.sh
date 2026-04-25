@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="3.5"
+V="4"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -18,15 +18,37 @@ MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
-
+# --- CONFIGURACIÓN DE LOGS ---
+LOG_FILE="/var/log/stk_mantenimiento.log"
+registrar_log() {
+    local MENSAJE="$1"
+    # Añade fecha, hora y el mensaje al archivo
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $MENSAJE" >> "$LOG_FILE"
+}
+ver_logs() {
+    clear
+    mostrar_logo
+    if [ -f "$LOG_FILE" ]; then
+        pintar $CIAN "--- Últimas 20 entradas de la bitácora ---"
+        tail -n 20 "$LOG_FILE"
+    else
+        pintar $ROJO "Aún no hay registros en la bitácora."
+    fi
+    echo ""
+    read -p "Presione Enter para volver..."
+}
 # --- COMPROBACIÓN DE SUDO ---
-# Corregido: Usaba variables RED/NC que no existían
 if [ "$EUID" -ne 0 ]; then
     echo -e "${ROJO_BRILLANTE}⚠️ Error: Este script requiere privilegios de root.${RESET}"
     echo -e "${AMARILLO}Prueba con: sudo $0${RESET}"
     exit 1
 fi
-
+# Inicio y comprobación de resgristo de logs
+if [ ! -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE"
+    chmod 640 "$LOG_FILE" # Solo root y el grupo pueden leerlo
+    registrar_log "Bitácora inicializada - STK v$V"
+fi
     # 1. Identificación del Package de paquetes, usamos variable Package vacia
 Package=""
 
@@ -286,7 +308,7 @@ mostrar_logo() {
 # LÓGICA FZF
 fzf_menu() {
     # Definimos las opciones que verá FZF
-    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Salir (Control C)"
+    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Ver Bitácora (Logs)\n9. Salir (Control C)"
     
     # Ejecutamos fzf capturando la salida
     # --reverse lo pone arriba, --height para no tapar el logo, --border para la "ventana"
@@ -319,7 +341,8 @@ menu() {
             5) super_limpieza ;;
             6) monitor_rendimiento ;;
             7) hacer_backup ;;
-            8) salir ;;
+            8) ver_logs ;;
+            9) salir ;;
         esac
     done
 }
@@ -329,8 +352,7 @@ Actualizar_sistema() {
     mostrar_logo
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
     echo ""
-
-    # 2. Ejecución de comandos según el Package
+        # 2. Ejecución de comandos según el Package
     case "$Package" in
         apt)
             pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
@@ -361,6 +383,7 @@ Actualizar_sistema() {
         pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
     else
         echo ""
+        registrar_log "ERROR: Fallo en la actualización del sistema"
         pintar $ROJO "✘ Hubo un error durante la actualización."
     fi
 
@@ -464,6 +487,7 @@ desinstalar_programa() {
     esac
 
     if [ $? -eq 0 ]; then
+        registrar_log "PROGRAMA ELIMINADO: $programa"
         pintar $VERDE_BRILLANTE "✔ ¡$programa ha sido eliminado correctamente!"
     else
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
@@ -593,6 +617,7 @@ super_limpieza() {
         LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
         pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
         [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
+        registrar_log "LIMPIEZA: Se liberaron aprox. ${LIBERADO:-0} MB"
     else
         pintar $VERDE "Limpieza completada (sin cambios significativos de espacio)."
     fi
@@ -615,7 +640,7 @@ monitor_rendimiento() {
     else
         tput civis
     fi
-    
+
     dibujar_barra() {
         local porcentaje=$1
         local color=$VERDE
