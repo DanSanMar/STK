@@ -20,19 +20,43 @@ ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 # --- CONFIGURACIÓN DE LOGS ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
+# niveles de severidad
+LOG_INFO="INFO"
+LOG_WARN="WARN"
+LOG_ERR="ERROR"
+
 registrar_log() {
-    local MENSAJE="$1"
-    # Añade fecha, hora y el mensaje al archivo
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $MENSAJE" >> "$LOG_FILE"
+    local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
+    local MENSAJE="${2}"
+    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Formato: [FECHA] [NIVEL] [USUARIO] - MENSAJE
+    echo "[$FECHA] [$NIVEL] [$USER] - $MENSAJE" >> "$LOG_FILE"
+}
+rotar_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        local SIZE=$(du -m "$LOG_FILE" | cut -f1)
+        if [ "$SIZE" -ge 1 ]; then
+            mv "$LOG_FILE" "${LOG_FILE}.old"
+            touch "$LOG_FILE"
+            chmod 640 "$LOG_FILE"
+            registrar_log "$LOG_INFO" "Archivo rotado por alcanzar el límite de tamaño."
+        fi
+    fi
 }
 ver_logs() {
     clear
     mostrar_logo
     if [ -f "$LOG_FILE" ]; then
         pintar $CIAN "--- Últimas 20 entradas de la bitácora ---"
-        tail -n 20 "$LOG_FILE"
+        # Colorear INFO en verde, WARN en amarillo y ERROR en rojo al mostrar
+        tail -n 20 "$LOG_FILE" | awk '
+            /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
+            /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
+            /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
+        '
     else
-        pintar $ROJO "Aún no hay registros en la bitácora."
+        pintar $ROJO "Aún no hay registros."
     fi
     echo ""
     read -p "Presione Enter para volver..."
@@ -47,7 +71,7 @@ fi
 if [ ! -f "$LOG_FILE" ]; then
     touch "$LOG_FILE"
     chmod 640 "$LOG_FILE" # Solo root y el grupo pueden leerlo
-    registrar_log "Bitácora inicializada - STK v$V"
+    registrar_log "$LOG_INFO" "Bitácora inicializada - STK v$V"
 fi
     # 1. Identificación del Package de paquetes, usamos variable Package vacia
 Package=""
@@ -261,9 +285,10 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
         if ! command -v fzf &> /dev/null; then
             echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
             echo -e "${AMARILLO}Por favor, instálalo manualmente y reinicia.${RESET}"
+            registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
-        
+        registrar_log "$LOG_INFO" "Dependencias instaladas automáticamente con éxito."
         # 3. Re-verificar si quedan otras herramientas pendientes
         check_dependencies
         if [ ${#missing_tools[@]} -gt 0 ]; then
@@ -381,10 +406,11 @@ Actualizar_sistema() {
     if [ $? -eq 0 ]; then
         echo ""
         pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
+        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."
     else
         echo ""
-        registrar_log "ERROR: Fallo en la actualización del sistema"
         pintar $ROJO "✘ Hubo un error durante la actualización."
+        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."
     fi
 
     echo ""
@@ -437,11 +463,11 @@ instalar_programa() {
 
     # 3. Resultado final
     if [ $? -eq 0 ]; then
-        echo ""
         pintar $VERDE_BRILLANTE "✔ ¡$programa se ha instalado/actualizado correctamente!"
+        registrar_log "$LOG_INFO" "Programa instalado: $programa"
     else
-        echo ""
-        pintar $ROJO "✘ Hubo un error durante el proceso de instalación/actualización de $programa."
+        pintar $ROJO "✘ Hubo un error..."
+        registrar_log "$LOG_ERR" "Error al intentar instalar: $programa"
     fi
 
     echo ""
@@ -487,7 +513,7 @@ desinstalar_programa() {
     esac
 
     if [ $? -eq 0 ]; then
-        registrar_log "PROGRAMA ELIMINADO: $programa"
+        registrar_log "$LOG_WARN" "Programa eliminado: $programa"
         pintar $VERDE_BRILLANTE "✔ ¡$programa ha sido eliminado correctamente!"
     else
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
@@ -535,12 +561,13 @@ gestionar_usuarios() {
                     pintar $AMARILLO "➤ Creando usuario $user..."
                     # Lógica según el Package detectado
                     if [[ "$Package" == "apt" ]]; then
-                        sudo adduser "$user"
+                        sudo adduser "$user" && registrar_log "$LOG_INFO" "Usuario creado: $user"
                     else
                         # Para Fedora, Arch, etc., usamos useradd (estándar universal)
                         sudo useradd -m -s /bin/bash "$user"
                         pintar $AMARILLO "Establezca la contraseña para $user:"
                         sudo passwd "$user"
+                        registrar_log "$LOG_INFO" "Usuario creado (useradd): $user"
                     fi
                 fi
                 read -p "Proceso finalizado. Presione Enter para continuar..." ;;
@@ -553,10 +580,10 @@ gestionar_usuarios() {
                     echo ""
                     pintar $ROJO "➤ Eliminando usuario $user..."
                     if [[ "$Package" == "apt" ]]; then
-                        sudo deluser --remove-home "$user"
+                        sudo deluser --remove-home "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                     else
                         # userdel -r es el equivalente universal
-                        sudo userdel -r "$user"
+                        sudo userdel -r "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                     fi
                 fi
                 echo ""
@@ -617,7 +644,7 @@ super_limpieza() {
         LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
         pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
         [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
-        registrar_log "LIMPIEZA: Se liberaron aprox. ${LIBERADO:-0} MB"
+        registrar_log "$LOG_INFO" "LIMPIEZA: Se liberaron aprox. ${LIBERADO:-0} MB"
     else
         pintar $VERDE "Limpieza completada (sin cambios significativos de espacio)."
     fi
@@ -744,19 +771,38 @@ mostrar_spinner() {
 
 
 hacer_backup() {
+    clear
+    mostrar_logo
     USUARIO_REAL=${SUDO_USER:-$USER}
     ORIGEN=$(sudo -u $USUARIO_REAL xdg-user-dir DOCUMENTS 2>/dev/null || echo "/home/$USUARIO_REAL/Documents")
     DESTINO_BASE=$(sudo -u $USUARIO_REAL xdg-user-dir DESKTOP 2>/dev/null || echo "/home/$USUARIO_REAL/Desktop")
     CARPETA_BACKUP="$DESTINO_BASE/Backup"
-    ARCHIVO="backup_$(date +%d-%m-%y).zip"
+    ARCHIVO="backup_$(date +%d-%m-%y_%H%M).zip" # Añadido hora para evitar sobrescritura
+
+    if [ ! -d "$ORIGEN" ]; then
+        registrar_log "$LOG_ERR" "Backup fallido: No existe la carpeta $ORIGEN"
+        pintar $ROJO "Error: No se encontró la carpeta de Documentos."
+        read -p "Pulse Enter..."
+        return
+    fi
 
     mkdir -p "$CARPETA_BACKUP"
-    cd "$ORIGEN" && zip -rq "$CARPETA_BACKUP/$ARCHIVO" . > /dev/null 2>&1
-    chown "$USUARIO_REAL:$USUARIO_REAL" "$CARPETA_BACKUP/$ARCHIVO"
-    pintar $VERDE "Backup guardado en: $CARPETA_BACKUP/$ARCHIVO"
+    pintar $AZUL "Creando copia de seguridad de Documentos..."
+    
+    if cd "$ORIGEN" && zip -rq "$CARPETA_BACKUP/$ARCHIVO" . > /dev/null 2>&1; then
+        chown "$USUARIO_REAL:$USUARIO_REAL" "$CARPETA_BACKUP/$ARCHIVO"
+        registrar_log "$LOG_INFO" "Backup exitoso: $ARCHIVO creado en $CARPETA_BACKUP"
+        pintar $VERDE_BRILLANTE "✔ Backup guardado en: $CARPETA_BACKUP/$ARCHIVO"
+    else
+        registrar_log "$LOG_ERR" "Fallo al ejecutar el comando zip en $ORIGEN"
+        pintar $ROJO "✘ Error al crear el backup."
+    fi
+    
     read -p "Pulse Enter..."
 }
 
 
 # --- EJECUCIÓN ---
+rotar_logs
 menu
+ 
