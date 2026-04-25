@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="4.1"
+V="4.2"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -294,7 +294,7 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
             registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
-        registrar_log "$LOG_INFO" "Dependencias instaladas automáticamente con éxito."
+        registrar_log "$LOG_INFO" "Dependencias instaladas con exito: ${missing_tools[*]}"
         # 3. Re-verificar si quedan otras herramientas pendientes
         check_dependencies
         if [ ${#missing_tools[@]} -gt 0 ]; then
