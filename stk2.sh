@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="4"
+V="4.1"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -34,13 +34,19 @@ registrar_log() {
     echo "[$FECHA] [$NIVEL] [$USER] - $MENSAJE" >> "$LOG_FILE"
 }
 rotar_logs() {
+    # Definimos el límite en Kilobytes (ejemplo: 500 KB)
+    local MAX_SIZE=500
+    
     if [ -f "$LOG_FILE" ]; then
-        local SIZE=$(du -m "$LOG_FILE" | cut -f1)
-        if [ "$SIZE" -ge 1 ]; then
-            mv "$LOG_FILE" "${LOG_FILE}.old"
-            touch "$LOG_FILE"
+        # Obtenemos el tamaño actual en KB
+        local SIZE=$(du -k "$LOG_FILE" | cut -f1)
+        
+        if [ "$SIZE" -ge "$MAX_SIZE" ]; then
+            # El comando > vacía el archivo instantáneamente sin cambiar el nombre
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Log reiniciado por alcanzar el límite de $MAX_SIZE KB." > "$LOG_FILE"
+            
+            # Aseguramos que los permisos sigan siendo correctos
             chmod 640 "$LOG_FILE"
-            registrar_log "$LOG_INFO" "Archivo rotado por alcanzar el límite de tamaño."
         fi
     fi
 }
