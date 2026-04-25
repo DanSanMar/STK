@@ -1,57 +1,37 @@
-# --- DEFINICIÓN DE DEPENDENCIAS ---
-dependencies=(fzf zenity xsltproc host)
+Package=""
 
-get_package_name() {
-    local tool=$1
-    case "$tool" in
-        "xsltproc") echo "xsltproc" ;;
-        "host") [[ "$GESTOR" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
-        "feroxbuster") echo "SNAP_REQUIRED" ;;
-        "wpscan") echo "GEM_REQUIRED" ;; # Cambiamos Snap por Ruby Gems
-        *) echo "$tool" ;;
-    esac
-}
-# --- LÓGICA DE RE-VERIFICACIÓN ---
-check_dependencies() {
-    missing_tools=()
-    for tool in "${dependencies[@]}"; do
-        # Intenta encontrarlo de forma normal, y si no, busca en la ruta de Snap
-        if ! command -v "$tool" &> /dev/null && [ ! -f "/snap/bin/$tool" ] && [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
-            missing_tools+=("$tool")
-        fi
-    done
-}
-# --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
-check_dependencies
-
-if [ ${#missing_tools[@]} -gt 0 ]; then
-    echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
-    echo -e "${CYAN}¿Qué deseas hacer?${RESET}"
-    echo -e "   ${BLANCO}s) Intento de instalación automática (Sudo)${RESET}"
-    echo -e "   ${BLANCO}i) Mostrar instrucciones de instalación manual${RESET}"
-    echo -e "   ${BLANCO}n) Continuar de todos modos (Puede fallar)${RESET}"
-    echo -ne "\n${AMARILLO}Selecciona una opción: ${RESET}"
-    read -r confirm
-
-    if [[ "$confirm" == "s" ]]; then
-        install_tools "${missing_tools[@]}"
-        check_dependencies
-       
-    elif [[ "$confirm" == "i" ]]; then
-        mostrar_instrucciones
-        echo -e "\n${CYAN}Una vez instaladas, vuelve a ejecutar el script.${RESET}"
-        exit 0
-    elif [[ "$confirm" != "n" ]]; then
-        echo -e "${ROJO}❌ Abortando.${RESET}"
-        exit 1
-    fi
+if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID=$ID
+        OS_LIKE=$ID_LIKE
+        VERSION=$VERSION
+        URL=$HOME_URL
 fi
 
+        # Lógica de detección 
+    case "$OS_ID" in
+        debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
+        fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
+        arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
+        opensuse*|suse)                            Package="zypper" ;;
+        *)
+            if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
+            elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
+            elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
+            elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
+            elif command -v apt &>/dev/null;    then Package="apt"
+            elif command -v dnf &>/dev/null;    then Package="dnf"
+            elif command -v pacman &>/dev/null; then Package="pacman"
+            elif command -v zypper &>/dev/null; then Package="zypper"
+            else Package="unknown"; fi
+            ;;
+    esac
+# --- FUNCIONES AUXILIARES ---
 install_tools() {
     local tools_to_install=("$@")
     
-    echo -e "\n${AZUL}🔄 Actualizando repositorios ($GESTOR)...${RESET}"
-    case "$GESTOR" in
+    echo -e "\n${AZUL}🔄 Actualizando repositorios ($Package)...${RESET}"
+    case "$Package" in
         "apt") sudo apt update -y ;;
         "dnf") sudo dnf makecache ;;
         "pacman") sudo pacman -Sy ;;
@@ -62,9 +42,9 @@ install_tools() {
         pkg=$(get_package_name "$tool")
 
         if [[ "$pkg" == "GEM_REQUIRED" ]]; then
-            echo -e "\n${AZUL}💎 Instalando $tool y dependencias de compilación para $GESTOR...${RESET}"
+            echo -e "\n${AZUL}💎 Instalando $tool y dependencias de compilación para $Package...${RESET}"
             
-            case "$GESTOR" in
+            case "$Package" in
                 "apt")
                     sudo apt update -y
                     sudo apt install -y ruby-full build-essential zlib1g-dev libcurl4-openssl-dev libcurl4
@@ -74,7 +54,7 @@ install_tools() {
                     sudo dnf install -y ruby ruby-devel gcc gcc-c++ make zlib-devel libcurl-devel openssl-devel
                     ;;
                 *)
-                    echo -e "${ROJO}⚠️ Gestor no soportado para dependencias Ruby. Intenta instalarlas manualmente.${RESET}"
+                    echo -e "${ROJO}⚠️ $Package no soportado para dependencias Ruby. Intenta instalarlas manualmente.${RESET}"
                     ;;
             esac
     
@@ -92,7 +72,7 @@ install_tools() {
                 read -r snap_pref
                 if [[ "$snap_pref" == "s" ]]; then
                     echo -e "\n${AZUL}📦 Instalando motor de Snap...${RESET}"
-                    case "$GESTOR" in
+                    case "$Package" in
                         "apt") 
                             sudo apt install -y snapd
                             sudo systemctl enable --now snapd.socket
@@ -118,7 +98,7 @@ install_tools() {
             
         else
             echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
-            case "$GESTOR" in
+            case "$Package" in
                 "apt") sudo apt install -y "$pkg" ;;
                 "dnf") sudo dnf install -y "$pkg" ;;
                 "pacman") sudo pacman -S --noconfirm "$pkg" ;;
@@ -131,15 +111,15 @@ install_tools() {
 mostrar_instrucciones() {
     clear
     echo -e "\n${AZUL}══════════════════════════════════════════════════${RESET}"
-    echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${GESTOR^^})${RESET}"
+    echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${Package^^})${RESET}"
     echo -e "${AZUL}══════════════════════════════════════════════════${RESET}\n"
 
     for tool in "${missing_tools[@]}"; do
         echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
         case "$tool" in
-            "fzf"|"nmap"|"whatweb"|"xsltproc"|"host")
+            "fzf"|"zenity"|"xsltproc"|"host")
                 pkg=$(get_package_name "$tool")
-                echo -e "   ${VERDE}✔ Estándar:${RESET} sudo $GESTOR install -y $pkg"
+                echo -e "   ${VERDE}✔ Estándar:${RESET} sudo $Package install -y $pkg"
                 ;;
             "feroxbuster")
                 echo -e "   ${VERDE}✔ Snap:${RESET}      sudo snap install feroxbuster"
@@ -153,10 +133,74 @@ mostrar_instrucciones() {
         echo -e "${AZUL}--------------------------------------------------${RESET}"
     done
     
-    if [ ! -f "$wordlist_standard" ] && [ ! -f "$wordlist_snap" ]; then
-        echo -e "${AMARILLO}📚 Diccionario: SecLists${RESET}"
-        echo -e "   ${VERDE}✔ Git (Recomendado):${RESET} sudo git clone --depth 1 https://github.com/danielmiessler/SecLists /usr/share/seclists"
-        echo -e "   ${VERDE}✔ APT (Kali/Debian):${RESET} sudo apt install seclists"
-        echo -e "${AZUL}--------------------------------------------------${RESET}"
-    fi
 }
+get_package_name() {
+    local tool=$1
+    case "$tool" in
+        "xsltproc") echo "xsltproc" ;;
+        "host") [[ "$Package" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
+        "feroxbuster") echo "SNAP_REQUIRED" ;;
+        "wpscan") echo "GEM_REQUIRED" ;; # Cambiamos Snap por Ruby Gems
+        "fzf") echo "fzf" ;; # No forzar SNAP_REQUIRED
+        *) echo "$tool" ;;
+    esac
+}
+
+# --- DEFINICIÓN DE DEPENDENCIAS ---
+dependencies=(fzf xsltproc host)
+
+# --- LÓGICA DE RE-VERIFICACIÓN ---
+check_dependencies() {
+    missing_tools=()
+    for tool in "${dependencies[@]}"; do
+        # Intenta encontrarlo de forma normal, y si no, busca en la ruta de Snap
+        if ! command -v "$tool" &> /dev/null && [ ! -f "/snap/bin/$tool" ] && [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
+            missing_tools+=("$tool")
+        fi
+    done
+}
+
+# --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
+check_dependencies
+
+if [ ${#missing_tools[@]} -gt 0 ]; then
+    echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
+    echo -e "${CIAN}¿Qué deseas hacer?${RESET}"
+    echo -e "   ${BLANCO}s) Intento de instalación automática (Sudo)${RESET}"
+    echo -e "   ${BLANCO}i) Mostrar instrucciones de instalación manual${RESET}"
+    echo -e "   ${BLANCO}n) Continuar de todos modos (Puede fallar)${RESET}"
+    echo -ne "\n${AMARILLO}Selecciona una opción: ${RESET}"
+    read -r confirm
+
+    if [[ "$confirm" == "s" ]]; then
+        # 1. Intentar instalar
+        install_tools "${missing_tools[@]}"
+        
+        # 2. Verificación crítica: ¿Realmente se instaló fzf?
+        if ! command -v fzf &> /dev/null; then
+            echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
+            echo -e "${AMARILLO}Por favor, instálalo manualmente y reinicia.${RESET}"
+            exit 1
+        fi
+        
+        # 3. Re-verificar si quedan otras herramientas pendientes
+        check_dependencies
+        if [ ${#missing_tools[@]} -gt 0 ]; then
+            echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
+            read -p "Presiona Enter para continuar de todos modos..."
+        fi
+
+    elif [[ "$confirm" == "i" ]]; then
+        mostrar_instrucciones
+        echo -e "\n${CIAN}Una vez instaladas, vuelve a ejecutar el script.${RESET}"
+        exit 0
+
+    elif [[ "$confirm" == "n" ]]; then
+        echo -e "${AMARILLO}Continuando sin las dependencias... (Puede fallar)${RESET}"
+        # No hacemos nada, el script sigue su curso
+
+    else
+        echo -e "${ROJO}❌ Opción no válida. Abortando.${RESET}"
+        exit 1
+    fi
+fi

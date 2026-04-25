@@ -164,14 +164,17 @@ mostrar_instrucciones() {
     done
     
 }
+#opciones especificas para instalación automática
 get_package_name() {
     local tool=$1
     case "$tool" in
         "xsltproc") echo "xsltproc" ;;
         "host") [[ "$Package" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
+        "tput") [[ "$Package" == "apt" ]] && echo "ncurses-bin" || echo "ncurses" ;;
+        "free") echo "procps" ;;
         "feroxbuster") echo "SNAP_REQUIRED" ;;
-        "wpscan") echo "GEM_REQUIRED" ;; # Cambiamos Snap por Ruby Gems
-        "fzf") echo "fzf" ;; # No forzar SNAP_REQUIRED
+        "wpscan") echo "GEM_REQUIRED" ;; 
+        "fzf") echo "fzf" ;;
         *) echo "$tool" ;;
     esac
 }
@@ -197,8 +200,11 @@ salir() {
 }
 
 # --- DEFINICIÓN DE DEPENDENCIAS ---
-dependencies=(fzf xsltproc host)
-
+# fzf: Menú interactivo
+# xsltproc/host: Herramientas de red/procesamiento
+# ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
+# procps: Para comandos de sistema como 'free' o 'top'
+dependencies=(fzf xsltproc host tput free)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -603,6 +609,12 @@ mostrar_logo_monitor() {
     echo -e "\e[K${AZUL}------------------------------------------------------${RESET}"
 }
 monitor_rendimiento() {
+    # Verificar si tput está disponible antes de usarlo
+    if ! command -v tput &> /dev/null; then
+        pintar $AMARILLO "⚠️ tput no encontrado. La interfaz podría verse desordenada."
+    else
+        tput civis
+    fi
     
     dibujar_barra() {
         local porcentaje=$1
