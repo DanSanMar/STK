@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.1 Gestión de servicios y Red"
+V="5.2 Gestión de servicios y Red"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -75,6 +75,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 # Inicio y comprobación de resgristo de logs
 if [ ! -f "$LOG_FILE" ]; then
+    umask 027
     touch "$LOG_FILE"
     chmod 640 "$LOG_FILE" # Solo root y el grupo pueden leerlo
     registrar_log "$LOG_INFO" "Bitácora inicializada - STK v$V"
@@ -84,10 +85,10 @@ Package=""
 
 if [ -f /etc/os-release ]; then
         . /etc/os-release
-        OS_ID=$ID
-        OS_LIKE=$ID_LIKE
-        VERSION=$VERSION
-        URL=$HOME_URL
+        OS_ID="${ID:-unknown}"
+        OS_LIKE="${ID_LIKE:-unknown}"
+        VERSION="${VERSION:-unknown}"
+        URL="${HOME_URL:-unknown}"
 fi
 
         # Lógica de detección 
@@ -115,10 +116,10 @@ install_tools() {
     
     echo -e "\n${AZUL}🔄 Actualizando repositorios ($Package)...${RESET}"
     case "$Package" in
-        "apt") sudo apt update -y ;;
-        "dnf") sudo dnf makecache ;;
-        "pacman") sudo pacman -Sy ;;
-        "zypper") sudo zypper refresh ;;
+        "apt") apt update -y ;;
+        "dnf") dnf makecache ;;
+        "pacman") pacman -Sy ;;
+        "zypper") zypper refresh ;;
     esac
 
     for tool in "${tools_to_install[@]}"; do
@@ -129,21 +130,21 @@ install_tools() {
             
             case "$Package" in
                 "apt")
-                    sudo apt update -y
-                    sudo apt install -y ruby-full build-essential zlib1g-dev libcurl4-openssl-dev libcurl4
+                    apt update -y
+                    apt install -y ruby-full build-essential zlib1g-dev libcurl4-openssl-dev libcurl4
                     ;;
                 "dnf")
                     # Equivalentes exactos para Fedora
-                    sudo dnf install -y ruby ruby-devel gcc gcc-c++ make zlib-devel libcurl-devel openssl-devel
+                    dnf install -y ruby ruby-devel gcc gcc-c++ make zlib-devel libcurl-devel openssl-devel
                     ;;
                 *)
                     echo -e "${ROJO}⚠️ $Package no soportado para dependencias Ruby. Intenta instalarlas manualmente.${RESET}"
                     ;;
             esac
     
-            sudo ldconfig 2>/dev/null
+            ldconfig 2>/dev/null
             echo -e "${AZUL}⚙️ Instalando gema WPScan...${RESET}"
-            sudo gem install wpscan
+            gem install wpscan
             continue
         fi
 
@@ -157,12 +158,12 @@ install_tools() {
                     echo -e "\n${AZUL}📦 Instalando motor de Snap...${RESET}"
                     case "$Package" in
                         "apt") 
-                            sudo apt install -y snapd
-                            sudo systemctl enable --now snapd.socket
+                            apt install -y snapd
+                            systemctl enable --now snapd.socket
                             # Enlace simbólico vital en Debian para rutas estándar
-                            sudo ln -s /var/lib/snapd/snap /snap 2>/dev/null 
+                            ln -s /var/lib/snapd/snap /snap 2>/dev/null 
                             ;;
-                        "dnf") sudo dnf install -y snapd && sudo systemctl enable --now snapd.socket ;;
+                        "dnf") dnf install -y snapd && systemctl enable --now snapd.socket ;;
                     esac
                     export PATH="$PATH:/snap/bin:/var/lib/snapd/snap/bin"
                     
@@ -176,16 +177,16 @@ install_tools() {
             echo -e "${AZUL}📦 Instalando $tool vía Snap...${RESET}"
             local classic=""
             [[ "$tool" == "feroxbuster" || "$tool" == "fzf" ]] && classic="--classic"
-            sudo snap install "$tool" $classic
+            snap install "$tool" $classic
             export PATH=$PATH:/var/lib/snapd/snap/bin
             
         else
             echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
             case "$Package" in
-                "apt") sudo apt install -y "$pkg" ;;
-                "dnf") sudo dnf install -y "$pkg" ;;
-                "pacman") sudo pacman -S --noconfirm "$pkg" ;;
-                "zypper") sudo zypper install -y "$pkg" ;;
+                "apt") apt install -y "$pkg" ;;
+                "dnf") dnf install -y "$pkg" ;;
+                "pacman") pacman -S --noconfirm "$pkg" ;;
+                "zypper") zypper install -y "$pkg" ;;
             esac
         fi
     done
@@ -257,7 +258,7 @@ salir() {
 # xsltproc/host: Herramientas de red/procesamiento
 # ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
 # procps: Para comandos de sistema como 'free' o 'top'
-dependencies=(fzf xsltproc host tput free curl wget)
+dependencies=(fzf xsltproc host tput free curl wget zip)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -273,6 +274,7 @@ check_dependencies() {
 if ! ping -c 1 8.8.8.8 &>/dev/null; then
     pintar $ROJO "❌ No hay conexión a internet. Algunas funciones fallarán."
 fi
+#llamada para comprobar los programas necesarios
 check_dependencies
 #Herramientas no instaladas
 if [ ${#missing_tools[@]} -gt 0 ]; then
@@ -337,46 +339,97 @@ mostrar_logo() {
     echo ""
 }
 
-# LÓGICA FZF
-fzf_menu() {
-    # Definimos las opciones que verá FZF
-    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Información de Red\n8. Gestión de Servicios\n9. Copia de seguridad\n10. Ver Bitácora (Logs)\n11. Salir"
-    
-    # Ejecutamos fzf capturando la salida
-    # --reverse lo pone arriba, --height para no tapar el logo, --border para la "ventana"
-    echo -e "$opciones" | fzf --ansi \
+# LÓGICA FZF menú principal
+fzf_estilo() {
+    local prompt_text="$1"
+    local header_text="$2"
+    fzf --ansi \
         --height=15 \
         --reverse \
         --border=rounded \
-        --prompt="➤ Seleccione acción: " \
-        --header="P A N E L   D E   C O N T R O L" \
+        --prompt="➤ $prompt_text: " \
+        --header="--- $header_text ---" \
         --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
 }
-
+#función del menú principal
 menu() {
     while true; do
         clear
         mostrar_logo
-        # Llamamos a fzf_menu y guardamos el resultado
-        seleccion=$(fzf_menu)
-        # --- ESTA ES LA LÓGICA QUE DETIENE EL BUCLE ---
-        # Si fzf devuelve un error (130 es Ctrl+C) o la selección está vacía
-        if [ $? -ne 0 ] || [ -z "$seleccion" ]; then
-            salir
-        fi
-        # Extraemos el primer carácter (el número) de la selección de fzf
-        case ${seleccion%%.*} in # se amplia la selección del número antes del punto
-            1) Actualizar_sistema ;;
-            2) instalar_programa ;;
-            3) desinstalar_programa ;; 
-            4) gestionar_usuarios ;;
-            5) super_limpieza ;;
-            6) monitor_rendimiento ;;
-            7) mostrar_info_red ;;      
-            8) gestionar_servicios ;;   
-            9) hacer_backup ;;
-            10) ver_logs ;;
-            11) salir ;;
+        
+        local opciones="1. 📦 Gestión de Software\n2. ⚙️ Mantenimiento y Sistema\n3. 📊 Monitorización y Red\n4. 📜 Administración de STK\n5. ✘ Salir"
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione menú" "P A N E L   D E   C O N T R O L")
+
+        # Salida si se cancela con ESC o Ctrl+C
+        if [ $? -ne 0 ] || [ -z "$seleccion" ]; then salir; fi
+
+        case ${seleccion%%.*} in
+            1) # --- SUBMENÚ GESTIÓN DE SOFTWARE ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | fzf_estilo "Software" "G E S T I Ó N  DE  S O F T W A R E")
+                    
+                    # Si pulsa ESC o elige Volver, rompe este bucle y regresa al principal
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
+                    
+                    case ${accion%%.*} in
+                        1) Actualizar_sistema ;;
+                        2) instalar_programa ;;
+                        3) desinstalar_programa ;;
+                    esac
+                done
+                ;;
+
+            2) # --- SUBMENÚ MANTENIMIENTO ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Súper Limpieza\n2. Copia de Seguridad\n3. Gestión de Usuarios\n4. ↩ Volver" | fzf_estilo "Mantenimiento" "M A N T E N I M I E N T O")
+                    
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
+                    
+                    case ${accion%%.*} in
+                        1) super_limpieza ;;
+                        2) hacer_backup ;;
+                        3) gestionar_usuarios ;;
+                    esac
+                done
+                ;;
+
+            3) # --- SUBMENÚ MONITORIZACIÓN ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Gestión de Servicios\n4. ↩ Volver" | fzf_estilo "Monitor" "M O N I T O R I Z A C I Ó N")
+                    
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
+                    
+                    case ${accion%%.*} in
+                        1) monitor_rendimiento ;;
+                        2) mostrar_info_red ;;
+                        3) gestionar_servicios ;;
+                    esac
+                done
+                ;;
+
+            4) # --- SUBMENÚ ADMIN ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Ver Bitácora (Logs)\n2. Limpiar archivos de log\n3. ↩ Volver" | fzf_estilo "STK" "A D M I N I S T R A C I Ó N")
+                    
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
+                    
+                    case ${accion%%.*} in
+                        1) ver_logs ;;
+                        2) rotar_logs ;;
+                        
+                    esac                   
+                done
+                ;;
+
+            5) salir ;;
         esac
     done
 }
@@ -438,6 +491,11 @@ instalar_programa() {
         sleep 2
         return 1
     fi
+    if [[ ! "$programa" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+            pintar $ROJO "⚠️ El nombre contiene caracteres no válidos."
+            sleep 2
+            return 1
+    fi
   
     echo ""
     echo -e "${AMARILLO}➤ Package de paquetes para la instalación:${RESET} ${AZUL}$Package${RESET}"
@@ -494,6 +552,11 @@ desinstalar_programa() {
         sleep 2
         return 1
     fi
+    if [[ ! "$programa" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+        pintar $ROJO "⚠️ El nombre contiene caracteres no válidos."
+        sleep 2
+        return 1
+    fi
   
     echo -e "${ROJO}➤ Preparando para eliminar:${RESET} ${AZUL}$programa${RESET}"
     echo ""
@@ -533,7 +596,7 @@ desinstalar_programa() {
 listar_usuarios() {
     echo ""
     pintar $AZUL_BRILLANTE "--- Usuarios Humanos (UID >= 1000) ---"
-    cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 {print "  • " $1}'
+    cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 < 60000 {print "  • " $1}'
     echo ""
     read -p "Presione Enter para continuar..."
 }
@@ -542,24 +605,33 @@ pedir_nombre() {
     local nombre=""
     while [ -z "$nombre" ]; do
         read -p "Ingrese nombre de usuario: " nombre
+        
         if [ -z "$nombre" ]; then
-                # Usar >&2 para enviar el aviso a stderr y no contaminar la salida
-                echo -e "${AMARILLO}⚠️ El nombre no puede estar vacío. Inténtelo de nuevo.${RESET}" >&2
+            echo -e "${AMARILLO}⚠️ El nombre no puede estar vacío. Inténtelo de nuevo.${RESET}" >&2
+            continue
+        fi
+        
+        
+        if [[ ! "$nombre" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+            echo -e "${ROJO}⚠️ El nombre contiene caracteres no válidos.${RESET}" >&2
+            sleep 2
+            nombre="" # Vaciamos para que el bucle vuelva a pedirlo
         fi
     done
-    echo "$nombre"  # ← Este echo SÍ es necesario
+    echo "$nombre"  
 }
 
 gestionar_usuarios() {
-    
     while true; do
         clear
         mostrar_logo
-        seleccion_users=$(fzf_menu_users)
+        # Usamos fzf_estilo 
+        local opciones="1. Listar usuarios humanos\n2. Crear usuario\n3. Eliminar usuario\n4. ↩ Volver"
+        seleccion_users=$(echo -e "$opciones" | fzf_estilo "Acción" "G E S T I Ó N  DE  U S U A R I O S")
         
-        # Capturamos escape o Ctrl+C para volver al menú principal
-        if [ $? -ne 0 ] || [ -z "$seleccion_users" ]; then
-            break
+       
+        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* ]]; then 
+            break 
         fi
 
         case ${seleccion_users:0:1} in
@@ -570,12 +642,12 @@ gestionar_usuarios() {
                     pintar $AMARILLO "➤ Creando usuario $user..."
                     # Lógica según el Package detectado
                     if [[ "$Package" == "apt" ]]; then
-                        sudo adduser "$user" && registrar_log "$LOG_INFO" "Usuario creado: $user"
+                        adduser "$user" && registrar_log "$LOG_INFO" "Usuario creado: $user"
                     else
                         # Para Fedora, Arch, etc., usamos useradd (estándar universal)
-                        sudo useradd -m -s /bin/bash "$user"
+                        useradd -m -s /bin/bash "$user"
                         pintar $AMARILLO "Establezca la contraseña para $user:"
-                        sudo passwd "$user"
+                        passwd "$user"
                         registrar_log "$LOG_INFO" "Usuario creado (useradd): $user"
                     fi
                 fi
@@ -589,32 +661,18 @@ gestionar_usuarios() {
                     echo ""
                     pintar $ROJO "➤ Eliminando usuario $user..."
                     if [[ "$Package" == "apt" ]]; then
-                        sudo deluser --remove-home "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
+                        deluser --remove-home "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                     else
                         # userdel -r es el equivalente universal
-                        sudo userdel -r "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
+                        userdel -r "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                     fi
                 fi
                 echo ""
                 read -p "Proceso finalizado. Presione Enter..." ;;
-            4) break ;;
-            5) salir ;;
+                      
         esac
     done
 }
-
-fzf_menu_users() {
-    local opciones="1. Listar usuarios humanos\n2. Crear usuario\n3. Eliminar usuario\n4. Volver al menú principal\n5. Salir"
-    
-    echo -e "$opciones" | fzf --ansi \
-        --height=15 \
-        --reverse \
-        --border=rounded \
-        --prompt="➤ Seleccione acción: " \
-        --header="--- GESTIÓN DE USUARIOS ---" \
-        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
-}
-
 super_limpieza() {
     echo ""
     pintar $MAGENTA "Iniciando Súper Limpieza..."
@@ -733,7 +791,7 @@ monitor_rendimiento() {
         IDLE_2=$(echo $CPU_STATS | awk '{print $5}')
         TOTAL_2=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
         CPU_PERC=$((100 * ((TOTAL_2-TOTAL_1)-(IDLE_2-IDLE_1)) / (TOTAL_2-TOTAL_1) ))
-        CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "Usuario: %.1f%% | System: %.1f%%", $2, $4}')
+        CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "User: %.1f%% | System: %.1f%%", $2, $4}')
 
         # RAM y DISCO
         RAM_INFO=$(free -m | grep "Mem:")
@@ -775,8 +833,8 @@ gestionar_servicios() {
         echo -e "${BLANCO}Seleccione un estado para filtrar servicios:${RESET}"
         
         # Menú de filtro usando fzf
-        local filtro=$(echo -e "1. Ver servicios FALLIDOS (Error)\n2. Ver todos los servicios ACTIVOS\n3. Buscar un servicio específico\n4. Volver al menú principal" | fzf --height=10 --reverse --border --prompt="Filtrar por: ")
-
+        local filtro=$(echo -e "1. Ver servicios FALLIDOS (Error)\n2. Ver todos los servicios ACTIVOS\n3. Buscar un servicio específico\n4. ↩ Volver" | fzf_estilo "Filtrar por" "F I L T R O  D E  S E R V I C I O S")
+        
         case ${filtro:0:1} in
             1) listado=$(systemctl list-units --state=failed --no-legend --plain | awk '{print $1}') ;;
             2) listado=$(systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}') ;;
@@ -791,7 +849,7 @@ gestionar_servicios() {
         fi
 
         # Selección del servicio específico para operar
-        local svc_seleccionado=$(echo "$listado" | fzf --height=15 --reverse --header="Seleccione un servicio para gestionar" --prompt="Servicio: ")
+        local svc_seleccionado=$(echo "$listado" | fzf_estilo "Servicio" "S E L E C C I O N E  S E R V I C I O")
 
         if [ -n "$svc_seleccionado" ]; then
             menu_operaciones_servicio "$svc_seleccionado"
@@ -809,7 +867,7 @@ menu_operaciones_servicio() {
         systemctl status "$svc" --no-pager | grep -E "Active:|Main PID:|Tasks:"
         echo "------------------------------------------------"
         
-        local accion=$(echo -e "1. Reiniciar (Restart)\n2. Detener (Stop)\n3. Ver Logs (Journalctl -u)\n4. Ver Estado Completo (Status)\n5. Habilitar/Deshabilitar (Enable/Disable)\n6. Volver" | fzf --height=12 --reverse --prompt="Acción sobre $svc: ")
+        local accion=$(echo -e "1. Reiniciar (Restart)\n2. Detener (Stop)\n3. Ver Logs (Journalctl -u)\n4. Ver Estado Completo (Status)\n5. Habilitar/Deshabilitar (Enable/Disable)\n6. Volver" | fzf_estilo "Acción" "O P E R A C I O N E S :  $svc")
 
         case ${accion:0:1} in
             1) 
@@ -878,18 +936,26 @@ mostrar_info_red() {
     fi
 
     # 2. Obtener IP Pública (Con manejo de errores y alternativa)
-    # Primero comprobamos si curl existe; si no, intentamos con wget
     pintar $AMARILLO "Obteniendo IP pública (espere...)"
-    if command -v curl &>/dev/null; then
-        IP_PUBLICA=$(curl -s --max-time 3 ifconfig.me || echo "Error de conexión")
-    elif command -v wget &>/dev/null; then
-        IP_PUBLICA=$(wget -qO- --timeout=3 ifconfig.me || echo "Error de conexión")
+    
+    # --- NUEVA MEJORA DE DIAGNÓSTICO ---
+    # Comprobamos primero si el sistema puede resolver nombres (DNS)
+    if ! host ifconfig.me &>/dev/null; then
+        IP_PUBLICA="Error DNS (Revisa /etc/resolv.conf)"
     else
-        IP_PUBLICA="Falta curl/wget para consultar"
+        # Si el DNS funciona, procedemos con curl o wget
+        if command -v curl &>/dev/null; then
+            # Usamos -L por si hay redirecciones y un timeout de conexión corto
+            IP_PUBLICA=$(curl -sL --connect-timeout 3 --max-time 5 ifconfig.me || echo "Error de conexión")
+        elif command -v wget &>/dev/null; then
+            IP_PUBLICA=$(wget -qO- --timeout=3 --tries=1 ifconfig.me || echo "Error de conexión")
+        else
+            IP_PUBLICA="Falta curl/wget para consultar"
+        fi
     fi
 
-    # Limpiamos la línea de espera y mostramos resultados
-    echo -e "\r\033[K" # Borra la línea de "espera"
+    # Limpiamos la línea de "Obteniendo..." y mostramos resultados
+    echo -e "\r\033[K" 
     echo -e "${AMARILLO}➤ IP Local:${RESET}    ${BLANCO}${IP_LOCAL:-"No detectada"}${RESET}"
     echo -e "${AMARILLO}➤ IP Pública:${RESET}  ${BLANCO}${IP_PUBLICA}${RESET}"
     echo -e "${AMARILLO}➤ Interfaz:${RESET}    ${BLANCO}$(ip route | grep default | awk '{print $5}')${RESET}"
@@ -900,7 +966,7 @@ mostrar_info_red() {
     ip -brief addr show | grep -v "127.0.0.1"
     
     echo ""
-    registrar_log "$LOG_INFO" "Consulta de red: Local=$IP_LOCAL, Pública=$IP_PUBLICA"
+    registrar_log "$LOG_INFO" "Consulta de red realizada (Local: $IP_LOCAL | Pública: $IP_PUBLICA)"
     read -p "Presione Enter para volver..."
 }
 mostrar_spinner() {
