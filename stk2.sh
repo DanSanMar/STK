@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="4.2"
+V="5 Gestión de servicios y Red"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -109,6 +109,7 @@ fi
             ;;
     esac
 # --- FUNCIONES AUXILIARES ---
+
 install_tools() {
     local tools_to_install=("$@")
     
@@ -256,7 +257,7 @@ salir() {
 # xsltproc/host: Herramientas de red/procesamiento
 # ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
 # procps: Para comandos de sistema como 'free' o 'top'
-dependencies=(fzf xsltproc host tput free)
+dependencies=(fzf xsltproc host tput free curl wget)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -339,7 +340,7 @@ mostrar_logo() {
 # LÓGICA FZF
 fzf_menu() {
     # Definimos las opciones que verá FZF
-    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Copia de seguridad\n8. Ver Bitácora (Logs)\n9. Salir (Control C)"
+    local opciones="1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. Gestión de usuarios\n5. Súper Limpieza\n6. Rendimiento del Sistema\n7. Información de Red\n8. Gestión de Servicios\n9. Copia de seguridad\n10. Ver Bitácora (Logs)\n11. Salir"
     
     # Ejecutamos fzf capturando la salida
     # --reverse lo pone arriba, --height para no tapar el logo, --border para la "ventana"
@@ -364,16 +365,18 @@ menu() {
             salir
         fi
         # Extraemos el primer carácter (el número) de la selección de fzf
-        case ${seleccion:0:1} in
+        case ${seleccion%%.*} in # se amplia la selección del número antes del punto
             1) Actualizar_sistema ;;
             2) instalar_programa ;;
             3) desinstalar_programa ;; 
             4) gestionar_usuarios ;;
             5) super_limpieza ;;
             6) monitor_rendimiento ;;
-            7) hacer_backup ;;
-            8) ver_logs ;;
-            9) salir ;;
+            7) mostrar_info_red ;;      
+            8) gestionar_servicios ;;   
+            9) hacer_backup ;;
+            10) ver_logs ;;
+            11) salir ;;
         esac
     done
 }
@@ -701,7 +704,7 @@ monitor_rendimiento() {
         else echo -e "${VERDE}ÓPTIMO${RESET}"; fi
     }
 
-# Configuración inicial
+    # Configuración inicial
     trap "tput cnorm; clear; return" SIGINT
     tput civis 
     clear # Limpia la pantalla solo UNA vez al empezar
@@ -763,7 +766,74 @@ monitor_rendimiento() {
         read -t 5 -n 1 -s key
     done
 }
+#Gestión de servicios   
+gestionar_servicios() {
+    clear
+    mostrar_logo
+    pintar $MAGENTA "--- ESTADO DE SERVICIOS (SYSTEMD) ---"
+    
+    # Buscar servicios fallidos
+    FAILED_SERVICES=$(systemctl list-units --state=failed --no-legend --plain | awk '{print $1}')
 
+    if [ -z "$FAILED_SERVICES" ]; then
+        pintar $VERDE "✔ No hay servicios fallidos actualmente."
+    else
+        pintar $ROJO "⚠️ Servicios con errores encontrados:"
+        echo "$FAILED_SERVICES" | awk '{print "  [✘] " $1}'
+        echo ""
+        read -p "¿Desea intentar reiniciar los servicios fallidos? (s/n): " responder
+        if [[ "$responder" == "s" ]]; then
+            for svc in $FAILED_SERVICES; do
+                pintar $AZUL "Reiniciando $svc..."
+                systemctl restart "$svc"
+            done
+            registrar_log "$LOG_WARN" "Se intentó reiniciar servicios fallidos: $FAILED_SERVICES"
+        fi
+    fi
+    echo ""
+    read -p "Presione Enter para volver..."
+}
+#Info de REd
+mostrar_info_red() {
+    clear
+    mostrar_logo
+    pintar $CIAN "--- INFORMACIÓN DE RED ---"
+
+    # 1. Obtener IP Local (Método universal usando la ruta por defecto)
+    # Buscamos la interfaz que tiene la ruta de salida (default) y extraemos su IP
+    IP_LOCAL=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+    
+    # Si el método anterior falla, probamos filtrando loopback
+    if [ -z "$IP_LOCAL" ]; then
+        IP_LOCAL=$(hostname -I | awk '{print $1}')
+    fi
+
+    # 2. Obtener IP Pública (Con manejo de errores y alternativa)
+    # Primero comprobamos si curl existe; si no, intentamos con wget
+    pintar $AMARILLO "Obteniendo IP pública (espere...)"
+    if command -v curl &>/dev/null; then
+        IP_PUBLICA=$(curl -s --max-time 3 ifconfig.me || echo "Error de conexión")
+    elif command -v wget &>/dev/null; then
+        IP_PUBLICA=$(wget -qO- --timeout=3 ifconfig.me || echo "Error de conexión")
+    else
+        IP_PUBLICA="Falta curl/wget para consultar"
+    fi
+
+    # Limpiamos la línea de espera y mostramos resultados
+    echo -e "\r\033[K" # Borra la línea de "espera"
+    echo -e "${AMARILLO}➤ IP Local:${RESET}    ${BLANCO}${IP_LOCAL:-"No detectada"}${RESET}"
+    echo -e "${AMARILLO}➤ IP Pública:${RESET}  ${BLANCO}${IP_PUBLICA}${RESET}"
+    echo -e "${AMARILLO}➤ Interfaz:${RESET}    ${BLANCO}$(ip route | grep default | awk '{print $5}')${RESET}"
+    echo -e "${AMARILLO}➤ Puerta Enlace:${RESET} ${BLANCO}$(ip route | grep default | awk '{print $3}')${RESET}"
+    echo ""
+    
+    pintar $AZUL "Estado de interfaces:"
+    ip -brief addr show | grep -v "127.0.0.1"
+    
+    echo ""
+    registrar_log "$LOG_INFO" "Consulta de red: Local=$IP_LOCAL, Pública=$IP_PUBLICA"
+    read -p "Presione Enter para volver..."
+}
 mostrar_spinner() {
     local caracteres="/-\|"
     while true; do
