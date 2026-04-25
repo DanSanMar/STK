@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.1 Gestión de servicios y Red"
+V="5.2 Gestión de servicios y Red"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -878,18 +878,26 @@ mostrar_info_red() {
     fi
 
     # 2. Obtener IP Pública (Con manejo de errores y alternativa)
-    # Primero comprobamos si curl existe; si no, intentamos con wget
     pintar $AMARILLO "Obteniendo IP pública (espere...)"
-    if command -v curl &>/dev/null; then
-        IP_PUBLICA=$(curl -s --max-time 3 ifconfig.me || echo "Error de conexión")
-    elif command -v wget &>/dev/null; then
-        IP_PUBLICA=$(wget -qO- --timeout=3 ifconfig.me || echo "Error de conexión")
+    
+    # --- NUEVA MEJORA DE DIAGNÓSTICO ---
+    # Comprobamos primero si el sistema puede resolver nombres (DNS)
+    if ! host ifconfig.me &>/dev/null; then
+        IP_PUBLICA="Error DNS (Revisa /etc/resolv.conf)"
     else
-        IP_PUBLICA="Falta curl/wget para consultar"
+        # Si el DNS funciona, procedemos con curl o wget
+        if command -v curl &>/dev/null; then
+            # Usamos -L por si hay redirecciones y un timeout de conexión corto
+            IP_PUBLICA=$(curl -sL --connect-timeout 3 --max-time 5 ifconfig.me || echo "Error de conexión")
+        elif command -v wget &>/dev/null; then
+            IP_PUBLICA=$(wget -qO- --timeout=3 --tries=1 ifconfig.me || echo "Error de conexión")
+        else
+            IP_PUBLICA="Falta curl/wget para consultar"
+        fi
     fi
 
-    # Limpiamos la línea de espera y mostramos resultados
-    echo -e "\r\033[K" # Borra la línea de "espera"
+    # Limpiamos la línea de "Obteniendo..." y mostramos resultados
+    echo -e "\r\033[K" 
     echo -e "${AMARILLO}➤ IP Local:${RESET}    ${BLANCO}${IP_LOCAL:-"No detectada"}${RESET}"
     echo -e "${AMARILLO}➤ IP Pública:${RESET}  ${BLANCO}${IP_PUBLICA}${RESET}"
     echo -e "${AMARILLO}➤ Interfaz:${RESET}    ${BLANCO}$(ip route | grep default | awk '{print $5}')${RESET}"
@@ -900,7 +908,7 @@ mostrar_info_red() {
     ip -brief addr show | grep -v "127.0.0.1"
     
     echo ""
-    registrar_log "$LOG_INFO" "Consulta de red: Local=$IP_LOCAL, Pública=$IP_PUBLICA"
+    registrar_log "$LOG_INFO" "Consulta de red realizada (Local: $IP_LOCAL | Pública: $IP_PUBLICA)"
     read -p "Presione Enter para volver..."
 }
 mostrar_spinner() {
