@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5 Gestión de servicios y Red"
+V="5.1 Gestión de servicios y Red"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -768,30 +768,99 @@ monitor_rendimiento() {
 }
 #Gestión de servicios   
 gestionar_servicios() {
-    clear
-    mostrar_logo
-    pintar $MAGENTA "--- ESTADO DE SERVICIOS (SYSTEMD) ---"
-    
-    # Buscar servicios fallidos
-    FAILED_SERVICES=$(systemctl list-units --state=failed --no-legend --plain | awk '{print $1}')
+    while true; do
+        clear
+        mostrar_logo
+        pintar $MAGENTA "--- PANEL DE CONTROL DE SERVICIOS (Systemd) ---"
+        echo -e "${BLANCO}Seleccione un estado para filtrar servicios:${RESET}"
+        
+        # Menú de filtro usando fzf
+        local filtro=$(echo -e "1. Ver servicios FALLIDOS (Error)\n2. Ver todos los servicios ACTIVOS\n3. Buscar un servicio específico\n4. Volver al menú principal" | fzf --height=10 --reverse --border --prompt="Filtrar por: ")
 
-    if [ -z "$FAILED_SERVICES" ]; then
-        pintar $VERDE "✔ No hay servicios fallidos actualmente."
-    else
-        pintar $ROJO "⚠️ Servicios con errores encontrados:"
-        echo "$FAILED_SERVICES" | awk '{print "  [✘] " $1}'
-        echo ""
-        read -p "¿Desea intentar reiniciar los servicios fallidos? (s/n): " responder
-        if [[ "$responder" == "s" ]]; then
-            for svc in $FAILED_SERVICES; do
-                pintar $AZUL "Reiniciando $svc..."
-                systemctl restart "$svc"
-            done
-            registrar_log "$LOG_WARN" "Se intentó reiniciar servicios fallidos: $FAILED_SERVICES"
+        case ${filtro:0:1} in
+            1) listado=$(systemctl list-units --state=failed --no-legend --plain | awk '{print $1}') ;;
+            2) listado=$(systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}') ;;
+            3) listado=$(systemctl list-unit-files --type=service --no-legend | awk '{print $1}') ;;
+            *) break ;;
+        esac
+
+        if [ -z "$listado" ]; then
+            pintar $VERDE "✔ No se encontraron servicios en este estado."
+            read -p "Presione Enter..."
+            continue
         fi
-    fi
-    echo ""
-    read -p "Presione Enter para volver..."
+
+        # Selección del servicio específico para operar
+        local svc_seleccionado=$(echo "$listado" | fzf --height=15 --reverse --header="Seleccione un servicio para gestionar" --prompt="Servicio: ")
+
+        if [ -n "$svc_seleccionado" ]; then
+            menu_operaciones_servicio "$svc_seleccionado"
+        fi
+    done
+}
+
+menu_operaciones_servicio() {
+    local svc=$1
+    while true; do
+        clear
+        pintar $CIAN "⚙️ Gestionando: $svc"
+        echo "------------------------------------------------"
+        # Mostramos el estado actual muy brevemente para tener contexto
+        systemctl status "$svc" --no-pager | grep -E "Active:|Main PID:|Tasks:"
+        echo "------------------------------------------------"
+        
+        local accion=$(echo -e "1. Reiniciar (Restart)\n2. Detener (Stop)\n3. Ver Logs (Journalctl -u)\n4. Ver Estado Completo (Status)\n5. Habilitar/Deshabilitar (Enable/Disable)\n6. Volver" | fzf --height=12 --reverse --prompt="Acción sobre $svc: ")
+
+        case ${accion:0:1} in
+            1) 
+                echo -ne "${AMARILLO}🔄 Reiniciando $svc...${RESET}"
+                if systemctl restart "$svc"; then
+                    registrar_log "$LOG_WARN" "Servicio REINICIADO: $svc"
+                    echo -e " ${VERDE_BRILLANTE}[OK]${RESET}"
+                    sleep 1.5 # Tiempo para que el usuario vea el [OK]
+                else
+                    pintar $ROJO " [ERROR]"
+                    registrar_log "$LOG_ERR" "Fallo al reiniciar: $svc"
+                    sleep 2
+                fi
+                ;;
+            2) 
+                echo -ne "${ROJO}🛑 Deteniendo $svc...${RESET}"
+                if systemctl stop "$svc"; then
+                    registrar_log "$LOG_WARN" "Servicio DETENIDO: $svc"
+                    echo -e " ${VERDE_BRILLANTE}[OK]${RESET}"
+                    sleep 1.5
+                else
+                    pintar $ROJO " [ERROR]"
+                    sleep 2
+                fi
+                ;;
+            3) 
+                pintar $AZUL "📄 Mostrando últimas 50 líneas de log (Journal)..."
+                echo "------------------------------------------------"
+                journalctl -u "$svc" -n 50 --no-pager
+                echo "------------------------------------------------"
+                read -p "Presione Enter para volver a la gestión de $svc..."
+                ;;
+            4) 
+                pintar $AZUL "📋 Estado completo de $svc:"
+                echo "------------------------------------------------"
+                # Forzamos --no-pager para que no se bloquee y no necesite Ctrl+C
+                systemctl status "$svc" --no-pager
+                echo "------------------------------------------------"
+                read -p "Presione Enter para volver a la gestión de $svc..."
+                ;;
+            5)
+                if systemctl is-enabled "$svc" &>/dev/null; then
+                    systemctl disable "$svc" && pintar $ROJO "✔ Deshabilitado en el arranque."
+                else
+                    systemctl enable "$svc" && pintar $VERDE "✔ Habilitado en el arranque."
+                fi
+                sleep 2
+                ;;
+            *) break ;;
+        esac
+    done
 }
 #Info de REd
 mostrar_info_red() {
