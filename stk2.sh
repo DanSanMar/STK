@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.2 Gestión de servicios y Red"
+V="5.6 Backup y Menú Actualizados"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -24,6 +24,8 @@ LOG_FILE="/var/log/stk_mantenimiento.log"
 LOG_INFO="INFO"
 LOG_WARN="WARN"
 LOG_ERR="ERROR"
+
+DATE=$(date +"%d/%m/%Y")
 
 registrar_log() {
     local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
@@ -258,7 +260,7 @@ salir() {
 # xsltproc/host: Herramientas de red/procesamiento
 # ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
 # procps: Para comandos de sistema como 'free' o 'top'
-dependencies=(fzf xsltproc host tput free curl wget zip)
+dependencies=(fzf xsltproc host tput free curl wget tar hostname)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -327,7 +329,7 @@ mostrar_logo() {
     echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
     echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT-ALL4ME    v${V}${RESET}"
+    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT-ALL4ME    ${RESET}\n${AZUL_BRILLANTE}  v${V}${RESET}"
     echo -e "${AZUL}  By: ${AUTOR}${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     #OS_ID:-"Desconocido" Forma sencilla de decir: si no tiene valor imprime: "Desconocido"
@@ -338,8 +340,7 @@ mostrar_logo() {
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
 }
-
-# LÓGICA FZF menú principal
+#Lógica fzf de estilo
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
@@ -348,8 +349,23 @@ fzf_estilo() {
         --reverse \
         --border=rounded \
         --prompt="➤ $prompt_text: " \
-        --header="--- $header_text ---" \
+        --header="$header_text" \
         --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+}
+
+# LÓGICA FZF menú principal
+fzf_menu_principal() {
+    fzf --ansi \
+        --height=15 \
+        --layout=reverse \
+        --border=rounded \
+        --prompt=" Selecione Menú-❯ " \
+        --header="--- P A N E L  D E  C O N T R O L ---" \
+        --header-lines=1 \
+        --color="border:#5fafd7,header:#af87ff,prompt:#5fb2ff,pointer:#afff00" \
+        --preview-window="up:25%:border-bottom" \
+        --preview="echo -e '
+\033[1;36mINFORMACIÓN\033[0m | \033[1;33m Fecha:\033[0m $DATE | \033[1;33m Host:\033[0m $(hostname) | \033[1;33m Kernel:\033[0m $(uname -r | cut -d- -f1)'"
 }
 #función del menú principal
 menu() {
@@ -357,22 +373,41 @@ menu() {
         clear
         mostrar_logo
         
-        local opciones="1. 📦 Gestión de Software\n2. ⚙️ Mantenimiento y Sistema\n3. 📊 Monitorización y Red\n4. 📜 Administración de STK\n5. ✘ Salir"
-        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione menú" "P A N E L   D E   C O N T R O L")
+        # El encabezado es la primera línea que fzf ignorará gracias a --header-lines=1
+opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
+1. 📊 | MONITORIZACIÓN  | Estado de red y rendimiento
+2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
+3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
+4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
+5. ❌ | SALIR           | Control+C"
 
-        # Salida si se cancela con ESC o Ctrl+C
+        # Capturamos la selección
+        seleccion=$(echo -e "$opciones" | fzf_menu_principal)
+
+        # Salida si se cancela con ESC o si está vacío
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then salir; fi
 
+        # Extraemos solo el número antes del punto para el case
         case ${seleccion%%.*} in
-            1) # --- SUBMENÚ GESTIÓN DE SOFTWARE ---
+            1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Actualizar sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | fzf_estilo "Software" "G E S T I Ó N  DE  S O F T W A R E")
-                    
-                    # Si pulsa ESC o elige Volver, rompe este bucle y regresa al principal
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
-                    
+                    case ${accion%%.*} in
+                        1) monitor_rendimiento ;;
+                        2) mostrar_info_red ;;
+                    esac
+                done
+                ;;
+
+            2) # --- SUBMENÚ SOFTWARE ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | fzf_estilo "Seleccione" "SOFTWARE")
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) Actualizar_sistema ;;
                         2) instalar_programa ;;
@@ -381,50 +416,30 @@ menu() {
                 done
                 ;;
 
-            2) # --- SUBMENÚ MANTENIMIENTO ---
+            3) # --- SUBMENÚ ADMINISTRACIÓN ---
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Súper Limpieza\n2. Copia de Seguridad\n3. Gestión de Usuarios\n4. ↩ Volver" | fzf_estilo "Mantenimiento" "M A N T E N I M I E N T O")
-                    
+                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
-                    
+                    case ${accion%%.*} in
+                        1) gestionar_usuarios ;;
+                        2) gestionar_servicios ;;
+                        3) hacer_backup;;                     
+                    esac
+                done
+                ;;
+
+            4) # --- SUBMENÚ MANTENIMIENTO ---
+                while true; do
+                    clear
+                    mostrar_logo
+                    accion=$(echo -e "1. Limpieza de Archivos\n2. Ver Bitácora (Logs)\n3. Limpiar archivos de log\n4. ↩ Volver" | fzf_estilo "Seleccione" "MANTENIMIENTO")
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) super_limpieza ;;
-                        2) hacer_backup ;;
-                        3) gestionar_usuarios ;;
-                    esac
-                done
-                ;;
-
-            3) # --- SUBMENÚ MONITORIZACIÓN ---
-                while true; do
-                    clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Gestión de Servicios\n4. ↩ Volver" | fzf_estilo "Monitor" "M O N I T O R I Z A C I Ó N")
-                    
-                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
-                    
-                    case ${accion%%.*} in
-                        1) monitor_rendimiento ;;
-                        2) mostrar_info_red ;;
-                        3) gestionar_servicios ;;
-                    esac
-                done
-                ;;
-
-            4) # --- SUBMENÚ ADMIN ---
-                while true; do
-                    clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Ver Bitácora (Logs)\n2. Limpiar archivos de log\n3. ↩ Volver" | fzf_estilo "STK" "A D M I N I S T R A C I Ó N")
-                    
-                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
-                    
-                    case ${accion%%.*} in
-                        1) ver_logs ;;
-                        2) rotar_logs ;;
-                        
+                        2) ver_logs ;;
+                        3) rotar_logs ;;
                     esac                   
                 done
                 ;;
@@ -435,6 +450,7 @@ menu() {
 }
 
 Actualizar_sistema() {
+    trap "clear; return" SIGINT
     clear
     mostrar_logo
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
@@ -480,6 +496,7 @@ Actualizar_sistema() {
 }
 
 instalar_programa() {
+    trap "clear; return" SIGINT
     clear
     mostrar_logo 
     echo ""
@@ -542,6 +559,7 @@ instalar_programa() {
 }
 
 desinstalar_programa() {
+    trap "clear; return" SIGINT
     clear
     mostrar_logo 
     echo ""
@@ -602,6 +620,7 @@ listar_usuarios() {
 }
 
 pedir_nombre() {
+    
     local nombre=""
     while [ -z "$nombre" ]; do
         read -p "Ingrese nombre de usuario: " nombre
@@ -622,7 +641,9 @@ pedir_nombre() {
 }
 
 gestionar_usuarios() {
+    trap "clear; return" SIGINT
     while true; do
+        
         clear
         mostrar_logo
         # Usamos fzf_estilo 
@@ -826,7 +847,9 @@ monitor_rendimiento() {
 }
 #Gestión de servicios   
 gestionar_servicios() {
+    trap "clear; return" SIGINT
     while true; do
+        
         clear
         mostrar_logo
         pintar $MAGENTA "--- PANEL DE CONTROL DE SERVICIOS (Systemd) ---"
@@ -859,7 +882,9 @@ gestionar_servicios() {
 
 menu_operaciones_servicio() {
     local svc=$1
+    trap "clear; return" SIGINT
     while true; do
+        
         clear
         pintar $CIAN "⚙️ Gestionando: $svc"
         echo "------------------------------------------------"
@@ -978,40 +1003,130 @@ mostrar_spinner() {
         done
     done
 }
-
-
-
-hacer_backup() {
-    clear
-    mostrar_logo
-    USUARIO_REAL=${SUDO_USER:-$USER}
-    ORIGEN=$(sudo -u $USUARIO_REAL xdg-user-dir DOCUMENTS 2>/dev/null || echo "/home/$USUARIO_REAL/Documents")
-    DESTINO_BASE=$(sudo -u $USUARIO_REAL xdg-user-dir DESKTOP 2>/dev/null || echo "/home/$USUARIO_REAL/Desktop")
-    CARPETA_BACKUP="$DESTINO_BASE/Backup"
-    ARCHIVO="backup_$(date +%d-%m-%y_%H%M).zip" # Añadido hora para evitar sobrescritura
-
-    if [ ! -d "$ORIGEN" ]; then
-        registrar_log "$LOG_ERR" "Backup fallido: No existe la carpeta $ORIGEN"
-        pintar $ROJO "Error: No se encontró la carpeta de Documentos."
-        read -p "Pulse Enter..."
-        return
-    fi
-
-    mkdir -p "$CARPETA_BACKUP"
-    pintar $AZUL "Creando copia de seguridad de Documentos..."
+#Funciones auxiliares para backups
+verificar_espacio() {
+    local ORIGEN="$1"
+    local DESTINO="$2"
     
-    if cd "$ORIGEN" && zip -rq "$CARPETA_BACKUP/$ARCHIVO" . > /dev/null 2>&1; then
-        chown "$USUARIO_REAL:$USUARIO_REAL" "$CARPETA_BACKUP/$ARCHIVO"
-        registrar_log "$LOG_INFO" "Backup exitoso: $ARCHIVO creado en $CARPETA_BACKUP"
-        pintar $VERDE_BRILLANTE "✔ Backup guardado en: $CARPETA_BACKUP/$ARCHIVO"
-    else
-        registrar_log "$LOG_ERR" "Fallo al ejecutar el comando zip en $ORIGEN"
-        pintar $ROJO "✘ Error al crear el backup."
-    fi
+    # Tamaño estimado del origen en KB
+    local TAM_ORIGEN=$(du -s "$ORIGEN" | awk '{print $1}')
+    # Espacio disponible en destino en KB
+    local ESPACIO_DISP=$(df -Pk "$DESTINO" | tail -1 | awk '{print $4}')
     
-    read -p "Pulse Enter..."
+    # Margen de seguridad: El backup comprimido suele ser menor, 
+    # pero necesitamos espacio para maniobrar.
+    if [ "$ESPACIO_DISP" -lt "$TAM_ORIGEN" ]; then
+        return 1 # No hay espacio suficiente
+    fi
+    return 0
+}
+rotar_backups() {
+    local DESTINO="$1"
+    local DIAS_RETENCION=15 # Valor para ajustar según preferencia
+    
+    # Comprobar si hay archivos más antiguos que los días definidos y eliminarlos
+    local ELIMINADOS=$(find "$DESTINO" -name "backup_*.tar.gz" -type f -mtime +$DIAS_RETENCION -print -delete)
+    
+    if [ -n "$ELIMINADOS" ]; then
+        local CANTIDAD=$(echo "$ELIMINADOS" | wc -l)
+        pintar $AMARILLO "♻️ Se han eliminado $CANTIDAD copias antiguas (más de $DIAS_RETENCION días)."
+        registrar_log "$LOG_INFO" "Rotación automática: $CANTIDAD backups antiguos eliminados en $DESTINO"
+    fi
 }
 
+hacer_backup() {
+    trap "clear; return" SIGINT
+    while true; do
+        clear
+        mostrar_logo
+        pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
+        
+        # Opciones usando el estilo fzf estandarizado del script
+        local opciones="1. 📁 Respaldar Configuración del Sistema (/etc)\n2. 👤 Respaldar Directorio de Usuario Actual\n3. 🌐 Respaldar Servidor Web (/var/www)\n4. ✍️ Respaldar Ruta Personalizada\n5. ↩ Volver"
+        local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione origen" "C O P I A  D E  S E G U R I D A D")
+
+        if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
+
+        local ORIGEN=""
+        local USUARIO_REAL=${SUDO_USER:-$USER}
+
+        case ${seleccion:0:1} in
+            1) ORIGEN="/etc" ;;
+            2) ORIGEN="/home/$USUARIO_REAL" ;;
+            3) ORIGEN="/var/www" ;;
+            4) 
+                echo ""
+                read -p "➤ Introduzca la ruta absoluta a respaldar (ej. /opt/mi_app): " ORIGEN
+                ;;
+        esac
+
+        # Validar origen
+        if [ ! -d "$ORIGEN" ] && [ ! -f "$ORIGEN" ]; then
+            pintar $ROJO "❌ Error: La ruta '$ORIGEN' no existe o no es accesible."
+            registrar_log "$LOG_WARN" "Intento de backup fallido. Ruta no encontrada: $ORIGEN"
+            sleep 2
+            continue
+        fi
+
+        # Configurar destino predeterminado para Sysadmins
+        local DESTINO_DEF="/var/backups/stk_backups"
+        echo ""
+        pintar $AMARILLO "➤ Ruta origen: $BLANCO$ORIGEN"
+        read -p "➤ Introduzca ruta destino [Por defecto: $DESTINO_DEF]: " DESTINO_BASE
+        DESTINO_BASE=${DESTINO_BASE:-$DESTINO_DEF}
+
+
+        # Crear carpeta destino si no existe
+        if ! mkdir -p "$DESTINO_BASE" 2>/dev/null; then
+            pintar $ROJO "❌ Error: No se pudo crear el directorio de destino $DESTINO_BASE. Compruebe los permisos."
+            registrar_log "$LOG_ERR" "Fallo al crear directorio de destino para backup: $DESTINO_BASE"
+            sleep 2
+            continue
+        fi
+
+        # Generar nombre del archivo
+        local FECHA=$(date +%Y%m%d_%H%M%S)
+        local NOMBRE_BASE=$(basename "$ORIGEN")
+        local ARCHIVO="$DESTINO_BASE/backup_${NOMBRE_BASE}_${FECHA}.tar.gz"
+
+        # --- VERIFICACIÓN DE ESPACIO ---
+        if ! verificar_espacio "$ORIGEN" "$DESTINO_BASE"; then
+            pintar $ROJO "❌ Error: Espacio insuficiente en $DESTINO_BASE"
+            registrar_log "$LOG_WARN" "Backup cancelado: Espacio insuficiente para $ORIGEN"
+            read -p "Presione Enter..."
+            continue
+        else
+            pintar $VERDE "✔ Espacio libre suficiente para backup..."
+        fi
+
+        echo ""
+        pintar $AZUL "Empaquetando y comprimiendo (conservando permisos)..."
+        pintar $AMARILLO "Esto puede tardar dependiendo del volumen de datos. Espere por favor..."
+        
+        # Ejecución de tar (c: crear, z: comprimir gzip, p: preservar permisos, f: archivo)
+        # Usamos dirname y basename para evitar empaquetar toda la ruta absoluta dentro del tar
+        if tar -czpf "$ARCHIVO" -C "$(dirname "$ORIGEN")" "$(basename "$ORIGEN")" > /dev/null 2>&1; then
+            
+            # Asegurar permisos seguros para la copia (solo root o el creador deberían leerla)
+            chmod 600 "$ARCHIVO"
+            rotar_backups "$DESTINO_BASE"
+            # Calcular tamaño final
+            local TAMANO=$(du -h "$ARCHIVO" | cut -f1)
+            
+            pintar $VERDE_BRILLANTE "\n✔ ¡Copia de seguridad completada con éxito!"
+            echo -e "${CIAN}➤ Archivo generado:${RESET} ${BLANCO}$ARCHIVO${RESET}"
+            echo -e "${CIAN}➤ Tamaño del backup:${RESET} ${BLANCO}$TAMANO${RESET}"
+            
+            registrar_log "$LOG_INFO" "Backup OK ($TAMANO): $ORIGEN -> $ARCHIVO"
+        else
+            pintar $ROJO "\n✘ Error crítico durante la creación de la copia de seguridad."
+            registrar_log "$LOG_ERR" "Fallo al ejecutar 'tar' sobre $ORIGEN"
+        fi
+        
+        echo ""
+        read -p "Presione Enter para continuar..."
+    done
+}
 
 # --- EJECUCIÓN ---
 rotar_logs
