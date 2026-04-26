@@ -65,6 +65,8 @@ A diferencia de scripts básicos, STK:
 * **Super Limpieza:** Purga de cachés de paquetes, huérfanos y limpieza de la papelera del sistema.
 * **Backups:** Soporta rutas predefinidas (`/etc`, `/var/www`, `/home`) y rutas manuales. Incluye un explorador de backups existentes y función de **borrado seguro**.
 
+<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/c6d49f8c-6827-4d8f-b43b-417d2200395e" />
+
 ---
 
 ## 🛠️ Instalación y Uso
