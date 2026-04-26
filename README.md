@@ -1,9 +1,8 @@
-﻿# 🛠️ STK - System Tool Kit (v5.7) <img width="350" height="200" alt="image" src="https://github.com/user-attachments/assets/3e5bde56-aa01-45b0-b722-b413ab39968a" />
+﻿<img width="350" height="200" alt="image" src="https://github.com/user-attachments/assets/3e5bde56-aa01-45b0-b722-b413ab39968a" />
+
+# 🛠️ STK - System Tool Kit (v5.7)
 
 **System Tool Kit** es una potente herramienta de mantenimiento para sistemas basados en Linux (probada en Debian/Ubuntu/Kali/Fedora y las mismas distros en WSL2). Proporciona una interfaz visual intuitiva gracias a los menús creados con FZF para gestionar el mantenimiento/actualización, monitorización y administración del sistema.
-
-<img width="350" height="200" alt="image" src="https://github.com/user-attachments/assets/3e5bde56-aa01-45b0-b722-b413ab39968a" />
-
 
 ## 🚀 Características Principales
 
