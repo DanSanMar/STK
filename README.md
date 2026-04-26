@@ -56,7 +56,7 @@ A diferencia de scripts básicos, STK:
 * **Diagnóstico de red:** Obtención de IP local, IP pública (vía API con fallback de DNS) e información de interfaces.
 
 <div align="center">
-<img width="665" height="352" alt="image" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
+<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
 </div>
 
 ### 📦 Gestión de Software
