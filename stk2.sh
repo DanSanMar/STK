@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.6 Backup y Menú Actualizados"
+V="5.7 Backup nueva función borrado y Menús Actualizados"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -338,7 +338,6 @@ mostrar_logo() {
     echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo ""
 }
 #Lógica fzf de estilo
 fzf_estilo() {
@@ -947,6 +946,7 @@ menu_operaciones_servicio() {
 }
 #Info de REd
 mostrar_info_red() {
+    trap "clear; return" SIGINT
     clear
     mostrar_logo
     pintar $CIAN "--- INFORMACIÓN DE RED ---"
@@ -961,7 +961,7 @@ mostrar_info_red() {
     fi
 
     # 2. Obtener IP Pública (Con manejo de errores y alternativa)
-    pintar $AMARILLO "Obteniendo IP pública (espere...)"
+    echo -ne "${AMARILLO}Obteniendo IP pública (espere un momento...)${RESET}"
     
     # --- NUEVA MEJORA DE DIAGNÓSTICO ---
     # Comprobamos primero si el sistema puede resolver nombres (DNS)
@@ -1004,6 +1004,59 @@ mostrar_spinner() {
     done
 }
 #Funciones auxiliares para backups
+eliminar_backups() {
+    local DESTINO_DEF="/var/backups/stk_backups"
+    clear
+    mostrar_logo
+    pintar $CIAN "--- ELIMINAR COPIAS DE SEGURIDAD ---"
+
+    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz")" ]; then
+        pintar $ROJO "No hay backups para eliminar."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    # Listamos los archivos para que fzf permita seleccionar
+    # Usamos find para obtener rutas completas pero mostramos solo el nombre en la lista
+    local seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para BORRAR" "B O R R A D O  D E  A R C H I V O S")
+
+    if [ -n "$seleccion" ]; then
+        echo -e "\n${ROJO_BRILLANTE}⚠️ ADVERTENCIA: Vas a eliminar permanentemente:${RESET}"
+        pintar $BLANCO "$(basename "$seleccion")"
+        echo -ne "\n${AMARILLO}¿Estás seguro? (s/N): ${RESET}"
+        read -r confirmar
+
+        if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
+            if rm "$seleccion"; then
+                pintar $VERDE "✔ Archivo eliminado correctamente."
+                registrar_log "$LOG_WARN" "Backup eliminado manualmente: $seleccion"
+            else
+                pintar $ROJO "❌ Error al intentar eliminar el archivo."
+            fi
+        else
+            pintar $AZUL "Operación cancelada."
+        fi
+        sleep 1.5
+    fi
+}
+ver_backups_existentes() {
+    local DESTINO_DEF="/var/backups/stk_backups"
+    clear
+    mostrar_logo
+    pintar $CIAN "--- EXPLORADOR DE COPIAS DE SEGURIDAD ---"
+    echo -e "${AMARILLO}Directorio: ${BLANCO}$DESTINO_DEF${RESET}\n"
+
+    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(ls -A "$DESTINO_DEF")" ]; then
+        pintar $ROJO "No se encontraron copias de seguridad en la ruta predeterminada."
+    else
+        # Listado detallado: Tamaño, Fecha de modificación y Nombre
+        printf "${AZUL}%-12s %-20s %-s${RESET}\n" "TAMAÑO" "FECHA" "ARCHIVO"
+        echo "--------------------------------------------------------------------------"
+        find "$DESTINO_DEF" -type f -name "*.tar.gz" -printf "%-12s %TY-%Tm-%Td %TH:%TM:%TS %p\n" | sed "s|$DESTINO_DEF/||g" | sort -r
+    fi
+    echo ""
+    read -p "Presione Enter para volver..."
+}
 verificar_espacio() {
     local ORIGEN="$1"
     local DESTINO="$2"
@@ -1036,17 +1089,23 @@ rotar_backups() {
 
 hacer_backup() {
     trap "clear; return" SIGINT
+    local DESTINO_DEF="/var/backups/stk_backups"
+
     while true; do
         clear
         mostrar_logo
         pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
         
-        # Opciones usando el estilo fzf estandarizado del script
-        local opciones="1. 📁 Respaldar Configuración del Sistema (/etc)\n2. 👤 Respaldar Directorio de Usuario Actual\n3. 🌐 Respaldar Servidor Web (/var/www)\n4. ✍️ Respaldar Ruta Personalizada\n5. ↩ Volver"
-        local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione origen" "C O P I A  D E  S E G U R I D A D")
+        # Añadimos la opción 6 para eliminar y movemos Volver al 7
+        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. ↩ Volver"
+        local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione acción" "C O P I A  D E  S E G U R I D A D")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
-
+        
+        # Lógica de saltos según selección
+        if [[ "${seleccion:0:1}" == "5" ]]; then ver_backups_existentes; continue; fi
+        if [[ "${seleccion:0:1}" == "6" ]]; then eliminar_backups; continue; fi
+        if [[ "${seleccion:0:1}" == "7" ]]; then break; fi
         local ORIGEN=""
         local USUARIO_REAL=${SUDO_USER:-$USER}
 
@@ -1055,75 +1114,80 @@ hacer_backup() {
             2) ORIGEN="/home/$USUARIO_REAL" ;;
             3) ORIGEN="/var/www" ;;
             4) 
-                echo ""
-                read -p "➤ Introduzca la ruta absoluta a respaldar (ej. /opt/mi_app): " ORIGEN
+                echo -ne "\n${AMARILLO}➤ Ingrese ruta absoluta: ${RESET}"
+                read ORIGEN
                 ;;
         esac
 
-        # Validar origen
-        if [ ! -d "$ORIGEN" ] && [ ! -f "$ORIGEN" ]; then
-            pintar $ROJO "❌ Error: La ruta '$ORIGEN' no existe o no es accesible."
-            registrar_log "$LOG_WARN" "Intento de backup fallido. Ruta no encontrada: $ORIGEN"
-            sleep 2
-            continue
+        # 1. Validación de Origen
+        if [ ! -e "$ORIGEN" ]; then
+            pintar $ROJO "❌ Error: La ruta '$ORIGEN' no existe."
+            sleep 2; continue
         fi
 
-        # Configurar destino predeterminado para Sysadmins
-        local DESTINO_DEF="/var/backups/stk_backups"
-        echo ""
-        pintar $AMARILLO "➤ Ruta origen: $BLANCO$ORIGEN"
-        read -p "➤ Introduzca ruta destino [Por defecto: $DESTINO_DEF]: " DESTINO_BASE
-        DESTINO_BASE=${DESTINO_BASE:-$DESTINO_DEF}
+        # 2. Organización: Nombre de subcarpeta específica
+        echo -ne "${CIAN}➤ Nombre para la subcarpeta de este backup (Enter para omitir): ${RESET}"
+        read SUBDIR
+        local RUTA_FINAL="$DESTINO_DEF/${SUBDIR:-"general"}"
 
-
-        # Crear carpeta destino si no existe
-        if ! mkdir -p "$DESTINO_BASE" 2>/dev/null; then
-            pintar $ROJO "❌ Error: No se pudo crear el directorio de destino $DESTINO_BASE. Compruebe los permisos."
-            registrar_log "$LOG_ERR" "Fallo al crear directorio de destino para backup: $DESTINO_BASE"
-            sleep 2
-            continue
+        # 3. Creación segura de directorio
+        if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
+            pintar $ROJO "❌ Error crítico: No se puede escribir en $RUTA_FINAL"
+            sleep 2; continue
         fi
+        chmod 700 "$DESTINO_DEF"
 
-        # Generar nombre del archivo
+        # 4. Preparación del archivo
         local FECHA=$(date +%Y%m%d_%H%M%S)
-        local NOMBRE_BASE=$(basename "$ORIGEN")
-        local ARCHIVO="$DESTINO_BASE/backup_${NOMBRE_BASE}_${FECHA}.tar.gz"
+        local NOMBRE_ARCH="backup_$(basename "$ORIGEN")_${FECHA}.tar.gz"
+        local DESTINO_COMPLETO="$RUTA_FINAL/$NOMBRE_ARCH"
 
-        # --- VERIFICACIÓN DE ESPACIO ---
-        if ! verificar_espacio "$ORIGEN" "$DESTINO_BASE"; then
-            pintar $ROJO "❌ Error: Espacio insuficiente en $DESTINO_BASE"
-            registrar_log "$LOG_WARN" "Backup cancelado: Espacio insuficiente para $ORIGEN"
-            read -p "Presione Enter..."
-            continue
-        else
-            pintar $VERDE "✔ Espacio libre suficiente para backup..."
+        # 5. Verificación de espacio
+        if ! verificar_espacio "$ORIGEN" "$RUTA_FINAL"; then
+            pintar $ROJO "❌ Espacio insuficiente en destino."
+            read -p "Enter..."; continue
         fi
 
-        echo ""
-        pintar $AZUL "Empaquetando y comprimiendo (conservando permisos)..."
-        pintar $AMARILLO "Esto puede tardar dependiendo del volumen de datos. Espere por favor..."
+        # 6. Ejecución con Spinner y Seguridad
+        echo -e "\n${AZUL}🔄 Iniciando respaldo...${RESET}"
         
-        # Ejecución de tar (c: crear, z: comprimir gzip, p: preservar permisos, f: archivo)
-        # Usamos dirname y basename para evitar empaquetar toda la ruta absoluta dentro del tar
-        if tar -czpf "$ARCHIVO" -C "$(dirname "$ORIGEN")" "$(basename "$ORIGEN")" > /dev/null 2>&1; then
+        # --- LANZAR SPINNER ---
+        mostrar_spinner & 
+        SPINNER_PID=$!
+
+        # --- EJECUTAR TAR ---
+        tar -czpf "$DESTINO_COMPLETO" \
+            --exclude='*.log' --exclude='*.tmp' --exclude='*/.cache/*' \
+            -C "$(dirname "$ORIGEN")" "$(basename "$ORIGEN")" > /tmp/stk_backup_err 2>&1
+        TAR_EXIT_CODE=$?
+
+        # --- DETENER SPINNER ---
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null
+        printf "\r\e[K" # Borra la línea del spinner
+
+        if [ $TAR_EXIT_CODE -eq 0 ]; then
+            # 7. Integridad y Reporte Final
+            chmod 600 "$DESTINO_COMPLETO"
+            local SIZE=$(du -h "$DESTINO_COMPLETO" | cut -f1)
+            local HASH=$(sha256sum "$DESTINO_COMPLETO" | awk '{print $1}' | cut -c1-16)
+
+            echo -e "${VERDE_BRILLANTE}✅ BACKUP COMPLETADO CON ÉXITO${RESET}"
+            echo -e "${BLANCO}------------------------------------------------${RESET}"
+            echo -e "${AMARILLO}Archivo:   ${BLANCO}$NOMBRE_ARCH${RESET}"
+            echo -e "${AMARILLO}Ruta:      ${BLANCO}$RUTA_FINAL${RESET}"
+            echo -e "${AMARILLO}Tamaño:    ${BLANCO}$SIZE${RESET}"
+            echo -e "${AMARILLO}SHA256:    ${BLANCO}$HASH... (verificado)${RESET}"
+            echo -e "${BLANCO}------------------------------------------------${RESET}"
             
-            # Asegurar permisos seguros para la copia (solo root o el creador deberían leerla)
-            chmod 600 "$ARCHIVO"
-            rotar_backups "$DESTINO_BASE"
-            # Calcular tamaño final
-            local TAMANO=$(du -h "$ARCHIVO" | cut -f1)
-            
-            pintar $VERDE_BRILLANTE "\n✔ ¡Copia de seguridad completada con éxito!"
-            echo -e "${CIAN}➤ Archivo generado:${RESET} ${BLANCO}$ARCHIVO${RESET}"
-            echo -e "${CIAN}➤ Tamaño del backup:${RESET} ${BLANCO}$TAMANO${RESET}"
-            
-            registrar_log "$LOG_INFO" "Backup OK ($TAMANO): $ORIGEN -> $ARCHIVO"
+            registrar_log "$LOG_INFO" "Backup exitoso: $NOMBRE_ARCH en $RUTA_FINAL (Hash: $HASH)"
+            rotar_backups "$RUTA_FINAL"
         else
-            pintar $ROJO "\n✘ Error crítico durante la creación de la copia de seguridad."
-            registrar_log "$LOG_ERR" "Fallo al ejecutar 'tar' sobre $ORIGEN"
+            pintar $ROJO "❌ Error durante la compresión:"
+            cat /tmp/stk_backup_err
+            registrar_log "$LOG_ERR" "Error en tar al respaldar $ORIGEN"
         fi
         
-        echo ""
         read -p "Presione Enter para continuar..."
     done
 }
