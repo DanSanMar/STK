@@ -1,6 +1,8 @@
-﻿<img width="350" height="200" alt="image" src="https://github.com/user-attachments/assets/3e5bde56-aa01-45b0-b722-b413ab39968a" />
+﻿<div align="center">
+ <img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/3e5bde56-aa01-45b0-b722-b413ab39968a" />
+ </div>
 
-# 🛠️ STK - System Tool Kit (v5.7)
+# 🛠️ STK - System Tool Kit (v5.7) Estamos probando y afinando para sacar la V.6
 
 **System Tool Kit** es una potente herramienta de mantenimiento para sistemas basados en Linux (probada en Debian/Ubuntu/Kali/Fedora y las mismas distros en WSL2). Proporciona una interfaz visual intuitiva gracias a los menús creados con FZF para gestionar el mantenimiento/actualización, monitorización y administración del sistema.
 
@@ -53,6 +55,10 @@ A diferencia de scripts básicos, STK:
 * Visualización de carga de sistema mediante **barras de colores dinámicas**.
 * **Diagnóstico de red:** Obtención de IP local, IP pública (vía API con fallback de DNS) e información de interfaces.
 
+<div align="center">
+<img width="665" height="352" alt="image" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
+</div>
+
 ### 📦 Gestión de Software
 * Actualización integral del sistema con un solo comando.
 * Instalación/Desinstalación de programas validando caracteres especiales para prevenir **inyecciones de comandos**.
@@ -61,11 +67,17 @@ A diferencia de scripts básicos, STK:
 * **Usuarios:** Creación y eliminación de usuarios "humanos" (UID >= 1000) con gestión de directorios home.
 * **Servicios (Systemd):** Panel de control para filtrar servicios activos, fallidos o buscar específicos. Permite reiniciar, detener y auditar logs con `journalctl`.
 
+<div align="center">
+  <img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/c6d49f8c-6827-4d8f-b43b-417d2200395e" />
+</div>
+
 ### 🧹 Mantenimiento y Backups
 * **Super Limpieza:** Purga de cachés de paquetes, huérfanos y limpieza de la papelera del sistema.
 * **Backups:** Soporta rutas predefinidas (`/etc`, `/var/www`, `/home`) y rutas manuales. Incluye un explorador de backups existentes y función de **borrado seguro**.
 
-<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/c6d49f8c-6827-4d8f-b43b-417d2200395e" />
+<div align="center">
+   <img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/723ff72c-16ce-4cc6-8bf8-7ffa3b35522c" />
+   </div>
 
 ---
 
