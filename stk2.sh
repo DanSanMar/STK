@@ -1195,7 +1195,7 @@ hacer_backup() {
         pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
         
         # Añadimos la opción 6 para eliminar y movemos Volver al 7
-        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. RESTAURAR BACKUPS\n8. ↩ Volver"
+        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. 🔄 RESTAURAR BACKUPS\n8. ↩ Volver"
         local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione acción" "C O P I A  D E  S E G U R I D A D")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
