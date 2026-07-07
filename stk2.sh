@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.7 Backup nueva función borrado y Menús Actualizados"
+V="5.8 Restaurar Backups"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -321,6 +321,60 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
         exit 1
     fi
 fi
+restaurar_backup() {
+    local DESTINO_DEF="/var/backups/stk_backups"
+    clear
+    mostrar_logo
+    pintar $CIAN "--- RESTAURAR COPIA DE SEGURIDAD ---"
+
+    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz")" ]; then
+        pintar $ROJO "No hay backups disponibles para restaurar."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    local seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para RESTAURAR" "R E S T A U R A C I Ó N")
+
+    if [ -n "$seleccion" ]; then
+        echo -e "\n${AMARILLO}¿Dónde desea restaurar el backup?${RESET}"
+        echo -e "1. En su ruta original (¡Peligro: Puede sobrescribir archivos!)"
+        echo -e "2. En una ruta temporal (/tmp/stk_restaurado)"
+        echo -ne "\nSeleccione una opción (1/2): "
+        read -r opt_restaurar
+
+        local ruta_extraccion="/"
+        if [[ "$opt_restaurar" == "2" ]]; then
+            ruta_extraccion="/tmp/stk_restaurado"
+            mkdir -p "$ruta_extraccion"
+        fi
+
+        echo -ne "\n${ROJO_BRILLANTE}⚠️ ¿Confirmar restauración de $(basename "$seleccion")? (s/N): ${RESET}"
+        read -r confirmar
+
+        if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
+            echo -e "\n${AZUL}🔄 Extrayendo archivos...${RESET}"
+            mostrar_spinner & SPINNER_PID=$!
+            
+            tar -xzpf "$seleccion" -C "$ruta_extraccion" > /tmp/stk_restore_err 2>&1
+            local EXIT_CODE=$?
+
+            kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+            printf "\r\e[K"
+
+            if [ $EXIT_CODE -eq 0 ]; then
+                pintar $VERDE_BRILLANTE "✔ Backup restaurado con éxito en: $ruta_extraccion"
+                registrar_log "$LOG_INFO" "Backup restaurado: $seleccion en $ruta_extraccion"
+            else
+                pintar $ROJO "❌ Error al restaurar:"
+                cat /tmp/stk_restore_err
+                registrar_log "$LOG_ERR" "Error al restaurar backup: $seleccion"
+            fi
+        else
+            pintar $AZUL "Operación cancelada."
+        fi
+        read -p "Presione Enter..."
+    fi
+}
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
@@ -424,7 +478,8 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                     case ${accion%%.*} in
                         1) gestionar_usuarios ;;
                         2) gestionar_servicios ;;
-                        3) hacer_backup;;                     
+                        3) hacer_backup;;  
+                        4) restaurar_backup ;;                   
                     esac
                 done
                 ;;
