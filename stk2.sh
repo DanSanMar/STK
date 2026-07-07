@@ -474,13 +474,13 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. Restaurar Backup\n5. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
+                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) gestionar_usuarios ;;
                         2) gestionar_servicios ;;
                         3) hacer_backup;;  
-                        4) restaurar_backup ;;                   
+                                        
                     esac
                 done
                 ;;
@@ -1195,7 +1195,7 @@ hacer_backup() {
         pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
         
         # Añadimos la opción 6 para eliminar y movemos Volver al 7
-        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. ↩ Volver"
+        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. RESTAURAR BACKUPS\n8. ↩ Volver"
         local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione acción" "C O P I A  D E  S E G U R I D A D")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
@@ -1203,7 +1203,8 @@ hacer_backup() {
         # Lógica de saltos según selección
         if [[ "${seleccion:0:1}" == "5" ]]; then ver_backups_existentes; continue; fi
         if [[ "${seleccion:0:1}" == "6" ]]; then eliminar_backups; continue; fi
-        if [[ "${seleccion:0:1}" == "7" ]]; then break; fi
+        if [[ "${seleccion:0:1}" == "7" ]]; then restaurar_backup; continue; fi
+        if [[ "${seleccion:0:1}" == "8" ]]; then break; fi
         local ORIGEN=""
         local USUARIO_REAL=${SUDO_USER:-$USER}
 
