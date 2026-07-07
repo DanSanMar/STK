@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.8 Restaurar Backups"
+V="5.8.1 Restaurar Backups y Auditoría de Seguridad"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -446,11 +446,12 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) monitor_rendimiento ;;
                         2) mostrar_info_red ;;
+                        3) auditoria_seguridad ;;
                     esac
                 done
                 ;;
@@ -473,7 +474,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
+                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. Restaurar Backup\n5. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) gestionar_usuarios ;;
@@ -501,6 +502,48 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
             5) salir ;;
         esac
     done
+}
+
+auditoria_seguridad() {
+    trap "clear; return" SIGINT
+    clear
+    mostrar_logo
+    pintar $MAGENTA "--- AUDITORÍA RÁPIDA DE SEGURIDAD ---"
+    echo ""
+
+    # 1. Buscar usuarios con UID 0 extra (aparte de root)
+    pintar $AMARILLO "🔍 Verificando privilegios de superusuario (UID 0):"
+    local uid_zero=$(awk -F: '$3 == 0 {print "  • " $1}' /etc/passwd)
+    echo "$uid_zero"
+    if [ $(echo "$uid_zero" | wc -l) -gt 1 ]; then
+        pintar $ROJO_BRILLANTE "  ⚠️ ¡Alerta! Hay más de un usuario con UID 0."
+    else
+        pintar $VERDE "  ✔ Solo la cuenta root estándar tiene UID 0."
+    fi
+    echo ""
+
+    # 2. Puertos abiertos escuchando conexiones externas
+    pintar $AMARILLO "🔍 Puertos en escucha activa (Sockets):"
+    if command -v ss &>/dev/null; then
+        ss -tulpn | grep LISTEN | awk '{print "  • Puerto: " $4 " -> Proceso: " $7}' | sed 's/users:(("//g;s/"))//g'
+    else
+        pintar $ROJO "  (Comando 'ss' no disponible)"
+    fi
+    echo ""
+
+    # 3. Intentos fallidos de SSH recientes
+    pintar $AMARILLO "🔍 Últimos 5 accesos fallidos detectados (SSH/Auth):"
+    if [ -f /var/log/auth.log ]; then
+        grep "Failed password" /var/log/auth.log | tail -n 5 | awk '{print "  • " $0}'
+    elif journalctl -u ssh 2>&1 | grep -q "Failed"; then
+        journalctl -u ssh -n 20 --no-pager | grep "Failed" | tail -n 5 | awk '{print "  • " $0}'
+    else
+        pintar $VERDE "  ✔ Sin registros recientes de ataques/fallos SSH."
+    fi
+
+    echo ""
+    registrar_log "$LOG_INFO" "Auditoría de seguridad rápida ejecutada."
+    read -p "Presione Enter para volver..."
 }
 
 Actualizar_sistema() {
