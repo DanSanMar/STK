@@ -412,7 +412,7 @@ menu() {
         
         # El encabezado es la primera línea que fzf ignorará gracias a --header-lines=1
 opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
-1. 📊 | MONITORIZACIÓN  | Estado de red y rendimiento
+1. 📊 | MONITORIZACIÓN  | Analisis de rendimiento, red y seguridad
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
@@ -492,19 +492,25 @@ auditoria_seguridad() {
     trap "clear; return" SIGINT
     clear
     mostrar_logo
-    pintar $MAGENTA "--- AUDITORÍA AVANZADA Y RECOMENDACIONES DE SEGURIDAD ---"
+    pintar $MAGENTA "--- AUDITORÍA Y RECOMENDACIONES DE SEGURIDAD ---"
     echo ""
 
     local sugerencias=()
     local alertas_count=0
+    local total_checks=0
+    local checks_passed=0
 
     # ==========================================
-    # 1. COMPROBACIONES GENERALES (UNIVERSALES)
+    # 1. AUDITORÍA DE USUARIOS Y PRIVILEGIOS
     # ==========================================
+    pintar $MAGENTA "--- 1. USUARIOS, PRIVILEGIOS Y CUENTAS ---"
+    echo ""
 
     # A. Cuentas con UID 0
-    pintar $AMARILLO "🔍 [General] Verificando cuentas con privilegio UID 0:"
-    local uid_zero=$(awk -F: '$3 == 0 {print "  • " $1}' /etc/passwd)
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Verificando cuentas con privilegio UID 0:"
+    local uid_zero
+    uid_zero=$(awk -F: '$3 == 0 {print "  • " $1}' /etc/passwd)
     echo "$uid_zero"
     if [ $(echo "$uid_zero" | wc -l) -gt 1 ]; then
         pintar $ROJO_BRILLANTE "  ⚠️ ¡Alerta! Hay cuentas de superusuario adicionales a root."
@@ -513,122 +519,91 @@ auditoria_seguridad() {
         ((alertas_count++))
     else
         pintar $VERDE "  ✔ Solo la cuenta 'root' tiene UID 0."
+        ((checks_passed++))
     fi
     echo ""
 
-    # B. Puertos en escucha
-    pintar $AMARILLO "🔍 [General] Sockets y puertos en escucha activa:"
+    # B. Cuentas sin contraseña activa
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Verificando existencia de cuentas sin contraseña:"
+    local nopass_users
+    nopass_users=$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)
+    if [ -n "$nopass_users" ]; then
+        pintar $ROJO_BRILLANTE "  ⚠️ Cuentas detectadas sin contraseña configurada:"
+        echo "$nopass_users" | awk '{print "  • " $0}'
+        sugerencias+=("🔑 Contraseñas: Asigna contraseña o bloquea las cuentas sin clave en /etc/shadow.")
+        registrar_log "$LOG_WARN" "SEGURIDAD: Cuentas sin contraseña detectadas"
+        ((alertas_count++))
+    else
+        pintar $VERDE "  ✔ Todas las cuentas del sistema poseen credenciales o están bloqueadas."
+        ((checks_passed++))
+    fi
+    echo ""
+
+    # ==========================================
+    # 2. AUDITORÍA DE RED Y SERVICIOS
+    # ==========================================
+    pintar $MAGENTA "--- 2. RED Y PUERTOS EN ESCUCHA ---"
+    echo ""
+
+    # A. Sockets Abiertos
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Sockets y servicios escuchando públicamente (0.0.0.0 / ::):"
     if command -v ss &>/dev/null; then
-        ss -tulpn | grep LISTEN | awk '{
-            split($7, proc, "\"");
-            pname = (proc[2] != "") ? proc[2] : "Desconocido";
-            print "  • " $4 " -> Proceso: " pname
-        }'
-        
-        # Evaluar si SSH o servicios comunes escuchan de forma pública
-        if ss -tulpn | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
-            sugerencias+=("🌐 SSH Expuesto: Cambia el puerto por defecto (22) o restringe accesos en /etc/ssh/sshd_config.")
+        local listening_ports
+        listening_ports=$(ss -tulpn 2>/dev/null | grep LISTEN)
+        if [ -n "$listening_ports" ]; then
+            echo "$listening_ports" | awk '{
+                split($7, proc, "\"");
+                pname = (proc[2] != "") ? proc[2] : "Desconocido";
+                print "  • Local: " $4 " -> Proceso: " pname
+            }'
+            
+            # Chequeo específico de SSH expuesto públicamente
+            if echo "$listening_ports" | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
+                sugerencias+=("🌐 SSH Expuesto: Cambia el puerto por defecto (22) o restringe accesos en /etc/ssh/sshd_config.")
+                registrar_log "$LOG_WARN" "SEGURIDAD: SSH corriendo en puerto 22 público"
+                ((alertas_count++))
+            else
+                ((checks_passed++))
+            fi
+        else
+            pintar $VERDE "  ✔ No se detectaron puertos escuchando públicamente."
+            ((checks_passed++))
         fi
     else
         pintar $ROJO "  ❌ Comando 'ss' no encontrado."
     fi
     echo ""
 
-    # C. Ejecutables SUID
-    pintar $AMARILLO "🔍 [General] Archivos con bit SUID activado:"
-    local suid_count=$(find /usr/bin /usr/sbin -perm -4000 2>/dev/null | wc -l)
-    echo -e "  • Total de ejecutables SUID detectados: ${BLANCO}${suid_count}${RESET}"
-    if [ "$suid_count" -gt 60 ]; then
-        sugerencias+=("🛡️ SUID Elevado: Hay $suid_count binarios SUID. Audítalos usando: find / -perm -4000")
-    fi
-    echo ""
+    # B. Robustecimiento de Red (Kernel Sysctl)
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Parámetros de seguridad del Kernel (Sysctl Network):"
+    local syn_cookies
+    syn_cookies=$(sysctl -n net.ipv4.tcp_syncookies 2>/dev/null)
+    local accept_redirects
+    accept_redirects=$(sysctl -n net.ipv4.conf.all.accept_redirects 2>/dev/null)
 
-    # ==========================================
-    # 2. COMPROBACIONES ESPECÍFICAS Y FIREWALL
-    # ==========================================
-    pintar $MAGENTA "--- MÓDULOS Y FIREWALL DE LA DISTRIBUCIÓN ($Package) ---"
-    echo ""
-
-    # A. Cortafuegos
-    pintar $AMARILLO "🔍 Estado del Cortafuegos (Firewall):"
-    case "$Package" in
-        apt)
-            if command -v ufw &>/dev/null; then
-                local ufw_st=$(ufw status | head -n 1)
-                echo -e "  • UFW: ${BLANCO}${ufw_st}${RESET}"
-                if [[ "$ufw_st" == *"inactive"* ]]; then
-                    pintar $ROJO_BRILLANTE "  ⚠️ El firewall UFW está inactivo."
-                    registrar_log "$LOG_WARN" "SEGURIDAD: UFW Firewall inactivo"
-                    sugerencias+=("🔥 Firewall: Activa UFW ejecutando 'sudo ufw enable'.")
-                    ((alertas_count++))
-                fi
-            else
-                pintar $ROJO "  ❌ UFW no está instalado."
-                sugerencias+=("📦 Firewall: Instala un cortafuegos para tu sistema (ej. ufw/firewalld).")
-                ((alertas_count++))
-            fi
-            ;;
-        dnf)
-            if command -v firewall-cmd &>/dev/null; then
-                local fwd_st=$(systemctl is-active firewalld 2>/dev/null)
-                echo -e "  • Firewalld: ${BLANCO}${fwd_st}${RESET}"
-                if [ "$fwd_st" != "active" ]; then
-                    pintar $ROJO_BRILLANTE "  ⚠️ Firewalld está inactivo."
-                    registrar_log "$LOG_WARN" "SEGURIDAD: Firewalld inactivo"
-                    sugerencias+=("🔥 Firewall: Inicia Firewalld con 'systemctl enable --now firewalld'.")
-                    ((alertas_count++))
-                fi
-            else
-                pintar $ROJO "  ❌ Firewalld no está instalado."
-                sugerencias+=("📦 Firewall: Instala firewalld con 'dnf install firewalld'.")
-                ((alertas_count++))
-            fi
-            ;;
-        pacman|zypper)
-            if systemctl is-active iptables &>/dev/null || systemctl is-active nftables &>/dev/null; then
-                echo -e "  • Servidor con motor de reglas activo."
-            else
-                pintar $AMARILLO "  ⚠️ No se detectó un servicio de firewall (iptables/nftables) activo."
-                sugerencias+=("🔥 Firewall: Habilita y configura nftables o iptables.")
-                ((alertas_count++))
-            fi
-            ;;
-    esac
-    echo ""
-
-    # B. Módulos de Seguridad (MAC)
-    pintar $AMARILLO "🔍 Módulos de Seguridad MAC (AppArmor / SELinux):"
-    if command -v getenforce &>/dev/null; then
-        local selinux_st=$(getenforce)
-        echo -e "  • SELinux Estado: ${BLANCO}${selinux_st}${RESET}"
-        if [ "$selinux_st" == "Disabled" ] || [ "$selinux_st" == "Permissive" ]; then
-            sugerencias+=("🛡️ SELinux: Se recomienda cambiar el modo a Enforcing en /etc/selinux/config.")
-            registrar_log "$LOG_WARN" "SEGURIDAD: SELinux no está en modo Enforcing ($selinux_st)"
-            ((alertas_count++))
-        fi
-    elif command -v aa-status &>/dev/null; then
-        if aa-status --enabled 2>/dev/null; then
-            echo -e "  • AppArmor: ${VERDE}Activo y protegiendo el sistema${RESET}"
-        else
-            echo -e "  • AppArmor: ${ROJO_BRILLANTE}Inactivo o deshabilitado${RESET}"
-            sugerencias+=("🛡️ AppArmor: Activa el módulo ejecutando 'systemctl enable --now apparmor'.")
-            registrar_log "$LOG_WARN" "SEGURIDAD: AppArmor deshabilitado"
-            ((alertas_count++))
-        fi
+    if [ "$syn_cookies" -eq 1 ] && [ "$accept_redirects" -eq 0 ]; then
+        pintar $VERDE "  ✔ Protección TCP SYN Cookies activa y Redirecciones ICMP desactivadas."
+        ((checks_passed++))
     else
-        echo -e "  • ${AMARILLO}Sin módulo MAC explícito detectado.${RESET}"
+        pintar $AMARILLO "  ⚠️ Configuración de red del kernel mejorable."
+        [ "$syn_cookies" -ne 1 ] && sugerencias+=("🌐 Kernel: Habilita SYN Cookies (sysctl net.ipv4.tcp_syncookies=1).")
+        [ "$accept_redirects" -ne 0 ] && sugerencias+=("🌐 Kernel: Deshabilita ICMP Redirects (sysctl net.ipv4.conf.all.accept_redirects=0).")
+        ((alertas_count++))
     fi
     echo ""
-
-    # C. Intentos fallidos SSH
+    # C. Auditoría de Intentos SSH / Auth
+    ((total_checks++))
     pintar $AMARILLO "🔍 Accesos fallidos de seguridad recientes (SSH/Auth):"
     local ssh_logs=""
     case "$Package" in
         apt)
-            [ -f /var/log/auth.log ] && ssh_logs=$(grep "Failed password" /var/log/auth.log | tail -n 5)
+            [ -f /var/log/auth.log ] && ssh_logs=$(grep "Failed password" /var/log/auth.log 2>/dev/null | tail -n 5)
             ;;
         dnf|zypper)
-            [ -f /var/log/secure ] && ssh_logs=$(grep "Failed password" /var/log/secure | tail -n 5)
+            [ -f /var/log/secure ] && ssh_logs=$(grep "Failed password" /var/log/secure 2>/dev/null | tail -n 5)
             ;;
         pacman)
             ssh_logs=$(journalctl -u sshd -n 50 --no-pager 2>/dev/null | grep "Failed" | tail -n 5)
@@ -637,28 +612,154 @@ auditoria_seguridad() {
 
     if [ -n "$ssh_logs" ]; then
         echo "$ssh_logs" | awk '{print "  • " $0}'
-        sugerencias+=("🔐 Intentos SSH: Considera instalar 'fail2ban' o deshabilitar autenticación por contraseña.")
+        sugerencias+=("🔐 Intentos SSH: Instala 'fail2ban' o deshabilita la autenticación por contraseña en SSH.")
         registrar_log "$LOG_WARN" "SEGURIDAD: Detectados accesos fallidos SSH recientes"
+        ((alertas_count++))
     else
         pintar $VERDE "  ✔ Sin registros recientes de ataques o contraseñas fallidas por SSH."
+        ((checks_passed++))
     fi
     echo ""
 
     # ==========================================
-    # 3. PANEL DE SUGERENCIAS Y BALANCE FINAL
+    # 3. SISTEMA DE ARCHIVOS Y BINARIOS
     # ==========================================
+    pintar $MAGENTA "--- 3. ARCHIVOS Y PERMISOS DE SISTEMA ---"
+    echo ""
+
+    # A. Ejecutables SUID
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Archivos con bit SUID activado (Permisos de elevación):"
+    local suid_files
+    suid_files=$(find /usr/bin /usr/sbin /bin /sbin -perm -4000 2>/dev/null)
+    local suid_count
+    suid_count=$(echo "$suid_files" | grep -c -v '^$')
+    
+    echo -e "  • Total de ejecutables SUID detectados: ${BLANCO}${suid_count}${RESET}"
+    if [ "$suid_count" -gt 60 ]; then
+        pintar $AMARILLO "  ⚠️ Umbral alto de binarios SUID detectado."
+        sugerencias+=("🛡️ SUID Elevado: Hay $suid_count binarios SUID. Audítalos con: find / -perm -4000")
+        ((alertas_count++))
+    else
+        pintar $VERDE "  ✔ Cantidad de binarios SUID dentro de rangos normales."
+        ((checks_passed++))
+    fi
+    echo ""
+
+    # ==========================================
+    # 4. MÓDULOS DE SEGURIDAD Y FIREWALL ($Package)
+    # ==========================================
+    pintar $MAGENTA "--- 4. CORTAFUEGOS Y MÓDULOS MAC ($Package) ---"
+    echo ""
+
+    # A. Cortafuegos
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Estado del Cortafuegos (Firewall):"
+    local fw_active=false
+
+    case "$Package" in
+        apt)
+            if command -v ufw &>/dev/null; then
+                local ufw_st
+                ufw_st=$(ufw status 2>/dev/null | head -n 1)
+                echo -e "  • UFW: ${BLANCO}${ufw_st}${RESET}"
+                if [[ "$ufw_st" == *"active"* ]] && [[ "$ufw_st" != *"inactive"* ]]; then
+                    fw_active=true
+                fi
+            fi
+            ;;
+        dnf)
+            if command -v firewall-cmd &>/dev/null; then
+                local fwd_st
+                fwd_st=$(systemctl is-active firewalld 2>/dev/null)
+                echo -e "  • Firewalld: ${BLANCO}${fwd_st}${RESET}"
+                [ "$fwd_st" == "active" ] && fw_active=true
+            fi
+            ;;
+        pacman|zypper|*)
+            if systemctl is-active nftables &>/dev/null || systemctl is-active iptables &>/dev/null; then
+                echo -e "  • Servidor con motor de reglas activo (nftables/iptables)."
+                fw_active=true
+            fi
+            ;;
+    esac
+
+    if [ "$fw_active" = true ]; then
+        pintar $VERDE "  ✔ El cortafuegos está activo y protegiendo el sistema."
+        ((checks_passed++))
+    else
+        pintar $ROJO_BRILLANTE "  ⚠️ No se detectó ningún cortafuegos activo."
+        registrar_log "$LOG_WARN" "SEGURIDAD: Firewall inactivo en $Package"
+        sugerencias+=("🔥 Firewall: Habilita y configura el cortafuegos de tu sistema (ufw/firewalld/nftables).")
+        ((alertas_count++))
+    fi
+    echo ""
+
+    # B. Módulos MAC (SELinux / AppArmor)
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Módulos de Control de Acceso Mandatorio (MAC):"
+    if command -v getenforce &>/dev/null; then
+        local selinux_st
+        selinux_st=$(getenforce)
+        echo -e "  • SELinux Estado: ${BLANCO}${selinux_st}${RESET}"
+        if [ "$selinux_st" == "Enforcing" ]; then
+            pintar $VERDE "  ✔ SELinux está activo en modo Enforcing."
+            ((checks_passed++))
+        else
+            sugerencias+=("🛡️ SELinux: Cambia el modo a Enforcing en /etc/selinux/config.")
+            registrar_log "$LOG_WARN" "SEGURIDAD: SELinux en modo $selinux_st"
+            ((alertas_count++))
+        fi
+    elif command -v aa-status &>/dev/null; then
+        if aa-status --enabled 2>/dev/null; then
+            pintar $VERDE "  ✔ AppArmor está activo y protegiendo los perfiles."
+            ((checks_passed++))
+        else
+            pintar $ROJO_BRILLANTE "  ⚠️ AppArmor está inactivo."
+            sugerencias+=("🛡️ AppArmor: Activa el módulo ejecutando 'systemctl enable --now apparmor'.")
+            registrar_log "$LOG_WARN" "SEGURIDAD: AppArmor deshabilitado"
+            ((alertas_count++))
+        fi
+    else
+        echo -e "  • ${AMARILLO}Sin módulo MAC (AppArmor/SELinux) explícito en ejecución.${RESET}"
+        sugerencias+=("🛡️ MAC: Se recomienda habilitar AppArmor o SELinux para mitigar exploits.")
+        ((alertas_count++))
+    fi
+    echo ""
+
+    
+
+    # ==========================================
+    # 5. RESUMEN, SCORE Y PLAN DE ACCIÓN
+    # ==========================================
+    local score=$(( (checks_passed * 100) / total_checks ))
+    
     echo -e "${CIAN}====================================================${RESET}"
+    pintar $BLANCO "📊 BALANCE Y PUNTUACIÓN DE SEGURIDAD:"
+    echo -e "  • Pruebas superadas: ${VERDE}${checks_passed}/${total_checks}${RESET}"
+    echo -e "  • Alertas encontradas: ${ROJO_BRILLANTE}${alertas_count}${RESET}"
+    
+    if [ "$score" -ge 80 ]; then
+        echo -e "  • Nivel del sistema: ${VERDE_BRILLANTE}${score}% (SEGURO)${RESET}"
+    elif [ "$score" -ge 50 ]; then
+        echo -e "  • Nivel del sistema: ${AMARILLO}${score}% (MEJORABLE)${RESET}"
+    else
+        echo -e "  • Nivel del sistema: ${ROJO_BRILLANTE}${score}% (RIESGO ELEVADO)${RESET}"
+    fi
+    echo -e "${CIAN}----------------------------------------------------${RESET}"
+
     if [ ${#sugerencias[@]} -gt 0 ]; then
         pintar $AMARILLO "💡 PLAN DE ACCIÓN Y SUGERENCIAS RECOMENDADAS:"
         for sug in "${sugerencias[@]}"; do
             echo -e "  $sug"
         done
     else
-        pintar $VERDE_BRILLANTE "🎉 ¡Excelente! El sistema superó las comprobaciones básicas de seguridad."
+        pintar $VERDE_BRILLANTE "🎉 ¡Excelente! El sistema superó los test de seguridad."
     fi
     echo -e "${CIAN}====================================================${RESET}"
 
-    registrar_log "$LOG_INFO" "Auditoría completada. Total de alertas detectadas: $alertas_count"
+    registrar_log "$LOG_INFO" "Auditoría completada. Score: ${score}% ($checks_passed/$total_checks). Alertas: $alertas_count"
+    
     trap - SIGINT
     echo ""
     read -p "Presione Enter para volver al menú..."
@@ -1474,6 +1575,5 @@ hacer_backup() {
 }
 
 # --- EJECUCIÓN ---
-rotar_logs
+rotar_logs "silencioso"
 menu
- 
