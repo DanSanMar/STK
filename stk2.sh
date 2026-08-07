@@ -131,8 +131,19 @@ if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS_ID="${ID:-unknown}"
         OS_LIKE="${ID_LIKE:-unknown}"
-        VERSION="${VERSION:-unknown}"
         URL="${HOME_URL:-unknown}"
+        
+        # Asignación inteligente de versión respetando Rolling Release
+        if [ -n "$VERSION" ]; then
+            VERSION="$VERSION"
+        elif [ -n "$VERSION_ID" ]; then
+            VERSION="$VERSION_ID"
+        elif [[ "$OS_ID" == "arch" || "$OS_LIKE" == *"arch"* ]]; then
+            # Si es Arch/derivada y no hay versión, se indica que es Rolling Release
+            VERSION="Rolling Release"
+        else
+            VERSION="unknown"
+        fi
 fi
 
         # Lógica de detección 
