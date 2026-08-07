@@ -175,6 +175,7 @@ install_tools() {
         "dnf") dnf makecache ;;
         "pacman") pacman -Sy ;;
         "zypper") zypper refresh ;;
+        "jq") echo "jq" ;;
     esac
 
     for tool in "${tools_to_install[@]}"; do
@@ -252,7 +253,7 @@ salir() {
 # xsltproc/host: Herramientas de red/procesamiento
 # ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
 # procps: Para comandos de sistema como 'free' o 'top'
-dependencies=(fzf xsltproc host tput free curl wget tar hostname)
+dependencies=(fzf xsltproc host tput free curl wget tar hostname js)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -1395,88 +1396,224 @@ mostrar_spinner() {
         done
     done
 }
-#Funciones auxiliares para backups
-eliminar_backups() {
-    local DESTINO_DEF="/var/backups/stk_backups"
-    clear
-    mostrar_logo
-    pintar $CIAN "--- ELIMINAR COPIAS DE SEGURIDAD ---"
+# ==============================================================================
+#                 COPY4ME TUI EN BASH NATIVO (INTEGRADO EN STK)
+# ==============================================================================
 
-    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz")" ]; then
-        pintar $ROJO "No hay backups para eliminar."
-        read -p "Presione Enter..."
-        return
-    fi
+CONFIG_JSON="/var/backups/stk_backups/config.json"
 
-    # Listamos los archivos para que fzf permita seleccionar
-    # Usamos find para obtener rutas completas pero mostramos solo el nombre en la lista
-    local seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para BORRAR" "B O R R A D O  D E  A R C H I V O S")
-
-    if [ -n "$seleccion" ]; then
-        echo -e "\n${ROJO_BRILLANTE}⚠️ ADVERTENCIA: Vas a eliminar permanentemente:${RESET}"
-        pintar $BLANCO "$(basename "$seleccion")"
-        echo -ne "\n${AMARILLO}¿Estás seguro? (s/N): ${RESET}"
-        read -r confirmar
-
-        if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
-            if rm "$seleccion"; then
-                pintar $VERDE "✔ Archivo eliminado correctamente."
-                registrar_log "$LOG_WARN" "Backup eliminado manualmente: $seleccion"
-            else
-                pintar $ROJO "❌ Error al intentar eliminar el archivo."
-            fi
-        else
-            pintar $AZUL "Operación cancelada."
-        fi
-        sleep 1.5
+# Inicializa el archivo de configuración si no existe
+init_copy4me_config() {
+    mkdir -p "$(dirname "$CONFIG_JSON")"
+    if [ ! -f "$CONFIG_JSON" ]; then
+        echo '{"perfiles":{},"opciones":{"verificar_hash":true,"compresion":6}}' > "$CONFIG_JSON"
     fi
 }
-ver_backups_existentes() {
-    local DESTINO_DEF="/var/backups/stk_backups"
-    clear
-    mostrar_logo
-    pintar $CIAN "--- EXPLORADOR DE COPIAS DE SEGURIDAD ---"
-    echo -e "${AMARILLO}Directorio: ${BLANCO}$DESTINO_DEF${RESET}\n"
 
-    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(ls -A "$DESTINO_DEF")" ]; then
-        pintar $ROJO "No se encontraron copias de seguridad en la ruta predeterminada."
+# Obtiene la lista de perfiles guardados en el JSON
+obtener_perfiles_json() {
+    init_copy4me_config
+    jq -r '.perfiles | keys[]' "$CONFIG_JSON" 2>/dev/null
+}
+
+# Guarda o actualiza un perfil en el JSON
+guardar_perfil_json() {
+    local nombre="$1"
+    local origen="$2"
+    local destino="$3"
+    local fecha
+    fecha=$(date '+%Y-%m-%d %H:%M:%S')
+
+    init_copy4me_config
+    local tmp_json
+    tmp_json=$(mktemp)
+
+    jq --arg nom "$nombre" \
+       --arg orig "$origen" \
+       --arg dest "$destino" \
+       --arg date "$fecha" \
+       '.perfiles[$nom] = {
+           "ruta_local": $orig,
+           "ruta_destino": $dest,
+           "ultima_sincronizacion": $date
+       }' "$CONFIG_JSON" > "$tmp_json" && mv "$tmp_json" "$CONFIG_JSON"
+}
+
+# Elimina un perfil del JSON
+eliminar_perfil_json() {
+    local nombre="$1"
+    init_copy4me_config
+    local tmp_json
+    tmp_json=$(mktemp)
+
+    jq --arg nom "$nombre" 'del(.perfiles[$nom])' "$CONFIG_JSON" > "$tmp_json" && mv "$tmp_json" "$CONFIG_JSON"
+}
+
+# Sincronizador en Bash según el modo seleccionado
+ejecutar_sincronizacion_bash() {
+    local origen="$1"
+    local destino="$2"
+    local modo="$3"
+
+    mkdir -p "$destino"
+
+    echo -e "\n${AZUL}🚀 Iniciando sincronización (${modo^^})...${RESET}"
+    echo -e "${AMARILLO}📂 Origen:  ${BLANCO}$origen${RESET}"
+    echo -e "${AMARILLO}🎯 Destino: ${BLANCO}$destino${RESET}\n"
+
+    case "$modo" in
+        "incremental")
+            # Copia incremental: -a (archivo), -v (detallado), -u (solo actualiza si origen es más nuevo)
+            rsync -avu --progress "$origen/" "$destino/"
+            ;;
+        "espejo")
+            # Modo espejo: borra en destino los archivos que ya no existen en el origen
+            rsync -av --delete --progress "$origen/" "$destino/"
+            ;;
+        "bidireccional")
+            # Bidireccional simplificado en 2 pasadas
+            echo -e "${CIAN}🔄 Sincronizando Origen ➔ Destino...${RESET}"
+            rsync -avu "$origen/" "$destino/"
+            echo -e "${CIAN}🔄 Sincronizando Destino ➔ Origen...${RESET}"
+            rsync -avu "$destino/" "$origen/"
+            ;;
+    esac
+
+    if [ $? -eq 0 ]; then
+        pintar $VERDE_BRILLANTE "\n✔ Operación completada con éxito."
+        registrar_log "$LOG_INFO" "Copy4Me TUI ($modo): $origen -> $destino"
     else
-        # Listado detallado: Tamaño, Fecha de modificación y Nombre
-        printf "${AZUL}%-12s %-20s %-s${RESET}\n" "TAMAÑO" "FECHA" "ARCHIVO"
-        echo "--------------------------------------------------------------------------"
-        find "$DESTINO_DEF" -type f -name "*.tar.gz" -printf "%-12s %TY-%Tm-%Td %TH:%TM:%TS %p\n" | sed "s|$DESTINO_DEF/||g" | sort -r
+        pintar $ROJO "\n❌ Ocurrió un error durante la sincronización."
+        registrar_log "$LOG_ERR" "Copy4Me TUI Error: $origen -> $destino"
     fi
-    echo ""
-    read -p "Presione Enter para volver..."
 }
-verificar_espacio() {
-    local ORIGEN="$1"
-    local DESTINO="$2"
-    
-    # Tamaño estimado del origen en KB
-    local TAM_ORIGEN=$(du -s "$ORIGEN" | awk '{print $1}')
-    # Espacio disponible en destino en KB
-    local ESPACIO_DISP=$(df -Pk "$DESTINO" | tail -1 | awk '{print $4}')
-    
-    # Margen de seguridad: El backup comprimido suele ser menor, 
-    # pero necesitamos espacio para maniobrar.
-    if [ "$ESPACIO_DISP" -lt "$TAM_ORIGEN" ]; then
-        return 1 # No hay espacio suficiente
-    fi
-    return 0
-}
-rotar_backups() {
-    local DESTINO="$1"
-    local DIAS_RETENCION=15 # Valor para ajustar según preferencia
-    
-    # Comprobar si hay archivos más antiguos que los días definidos y eliminarlos
-    local ELIMINADOS=$(find "$DESTINO" -name "backup_*.tar.gz" -type f -mtime +$DIAS_RETENCION -print -delete)
-    
-    if [ -n "$ELIMINADOS" ]; then
-        local CANTIDAD=$(echo "$ELIMINADOS" | wc -l)
-        pintar $AMARILLO "♻️ Se han eliminado $CANTIDAD copias antiguas (más de $DIAS_RETENCION días)."
-        registrar_log "$LOG_INFO" "Rotación automática: $CANTIDAD backups antiguos eliminados en $DESTINO"
-    fi
+
+# Menú interactivo TUI con FZF
+copy4me_tui_main() {
+    while true; do
+        clear
+        mostrar_logo
+        pintar $CIAN "--- COPY4ME ENGINE TUI (NATIVO BASH) ---"
+
+        local menu_opts="1. 🚀 Sincronizar / Respaldar (Origen ➔ Destino)\n2. 📂 Gestionar Perfiles Guardados\n3. 🔌 Escanear Unidades USB / Externas\n4. ↩ Volver al Menú Principal"
+        local sel
+        sel=$(echo -e "$menu_opts" | fzf_estilo "Seleccione Acción" "C O P Y 4 M E  -  T U I")
+
+        if [ $? -ne 0 ] || [[ "$sel" == *"Volver"* ]]; then break; fi
+
+        case ${sel:0:1} in
+            1) # --- SINCRONIZACIÓN Y RESPALDO ---
+                local origen=""
+                local destino=""
+                local nombre_perfil=""
+
+                # 1. Cargar perfil o meter ruta nueva
+                local perfiles
+                perfiles=$(obtener_perfiles_json)
+                local opts_orig="➕ [NUEVO] Ingresar ruta manualmente\n"
+                
+                if [ -n "$perfiles" ]; then
+                    while read -r p; do
+                        local path_orig
+                        path_orig=$(jq -r ".perfiles[\"$p\"].ruta_local" "$CONFIG_JSON")
+                        opts_orig+="📁 [Perfil] $p ➔ $path_orig\n"
+                    done <<< "$perfiles"
+                fi
+
+                local sel_orig
+                sel_orig=$(echo -e "$opts_orig" | fzf_estilo "Seleccione Origen" "ORIGEN DE DATOS")
+                if [ -z "$sel_orig" ]; then continue; fi
+
+                if [[ "$sel_orig" == *"📁 [Perfil]"* ]]; then
+                    nombre_perfil=$(echo "$sel_orig" | awk '{print $3}')
+                    origen=$(jq -r ".perfiles[\"$nombre_perfil\"].ruta_local" "$CONFIG_JSON")
+                    destino=$(jq -r ".perfiles[\"$nombre_perfil\"].ruta_destino" "$CONFIG_JSON")
+                else
+                    echo -ne "\n${AMARILLO}Ingrese la ruta de ORIGEN (PC): ${RESET}"
+                    read -r origen
+                    if [ ! -d "$origen" ]; then
+                        pintar $ROJO "❌ La ruta de origen no existe."
+                        read -p "Presione Enter..."; continue
+                    fi
+                    nombre_perfil=$(basename "$origen")
+                fi
+
+                # 2. Seleccionar Destino si no viene cargado por perfil
+                if [ -z "$destino" ] || [ "$destino" == "null" ]; then
+                    local usbs
+                    usbs=$(lsblk -o MOUNTPOINT,TRAN,SIZE -n | grep "usb" | awk '{print $1}')
+                    local opts_dest="📂 [Manual] Ingresar ruta personalizada\n"
+
+                    if [ -n "$usbs" ]; then
+                        while read -r u; do
+                            [ -n "$u" ] && opts_dest+="🔌 [USB] $u\n"
+                        done <<< "$usbs"
+                    fi
+
+                    local sel_dest
+                    sel_dest=$(echo -e "$opts_dest" | fzf_estilo "Seleccione Destino" "DESTINO PARA $nombre_perfil")
+                    if [ -z "$sel_dest" ]; then continue; fi
+
+                    if [[ "$sel_dest" == *"🔌 [USB]"* ]]; then
+                        local usb_path
+                        usb_path=$(echo "$sel_dest" | awk '{print $3}')
+                        destino="$usb_path/copy4me_backups/$nombre_perfil"
+                    else
+                        echo -ne "\n${AMARILLO}Ingrese la ruta de DESTINO: ${RESET}"
+                        read -r destino
+                        if [ -z "$destino" ]; then continue; fi
+                    fi
+                fi
+
+                # 3. Selección de Modo de Sincronización con FZF
+                local modos="1. incremental   | Copia solo archivos nuevos o modificados\n2. espejo        | Borra en destino lo eliminado en origen\n3. bidireccional | Sincroniza cambios en ambos sentidos"
+                local sel_modo
+                sel_modo=$(echo -e "$modos" | fzf_estilo "Seleccione Modo" "MODO DE SINCRONIZACIÓN")
+                if [ -z "$sel_modo" ]; then continue; fi
+
+                local modo
+                modo=$(echo "$sel_modo" | awk '{print $2}')
+
+                # 4. Guardar Perfil y Ejecutar
+                guardar_perfil_json "$nombre_perfil" "$origen" "$destino"
+                ejecutar_sincronizacion_bash "$origen" "$destino" "$modo"
+                read -p "Presione Enter para continuar..."
+                ;;
+
+            2) # --- GESTIÓN DE PERFILES ---
+                local perfiles
+                perfiles=$(obtener_perfiles_json)
+                if [ -z "$perfiles" ]; then
+                    pintar $AMARILLO "No hay perfiles guardados."
+                    read -p "Presione Enter..."; continue
+                fi
+
+                local opts_del=""
+                while read -r p; do
+                    opts_del+="❌ Borrar: $p\n"
+                done <<< "$perfiles"
+
+                local sel_del
+                sel_del=$(echo -e "$opts_del" | fzf_estilo "Perfil a eliminar" "BORRAR PERFILES")
+                if [ -n "$sel_del" ]; then
+                    local p_target
+                    p_target=$(echo "$sel_del" | awk '{print $3}')
+                    eliminar_perfil_json "$p_target"
+                    pintar $VERDE "✔ Perfil '$p_target' eliminado."
+                    read -p "Presione Enter..."
+                fi
+                ;;
+
+            3) # --- DETECCIÓN DE USBs ---
+                clear
+                mostrar_logo
+                pintar $CIAN "--- UNIDADES USB DETECTADAS ---"
+                lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,TRAN | grep -E "usb|TRAN"
+                echo ""
+                read -p "Presione Enter para continuar..."
+                ;;
+        esac
+    done
 }
 
 hacer_backup() {
@@ -1488,17 +1625,18 @@ hacer_backup() {
         mostrar_logo
         pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
         
-        # Añadimos la opción 6 para eliminar y movemos Volver al 7
-        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 📜 VER BACKUPS REALIZADOS\n6. 🗑️ ELIMINAR BACKUPS\n7. 🔄 RESTAURAR BACKUPS\n8. ↩ Volver"
+        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 🚀 COPY4ME TUI (FZF Sync y Perfiles)\n6. 📜 VER BACKUPS REALIZADOS\n7. 🗑️ ELIMINAR BACKUPS\n8. 🔄 RESTAURAR BACKUPS\n9. ↩ Volver"
         local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione acción" "C O P I A  D E  S E G U R I D A D")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
         
-        # Lógica de saltos según selección
-        if [[ "${seleccion:0:1}" == "5" ]]; then ver_backups_existentes; continue; fi
-        if [[ "${seleccion:0:1}" == "6" ]]; then eliminar_backups; continue; fi
-        if [[ "${seleccion:0:1}" == "7" ]]; then restaurar_backup; continue; fi
-        if [[ "${seleccion:0:1}" == "8" ]]; then break; fi
+        # Saltos directos a subfunciones
+        if [[ "${seleccion:0:1}" == "5" ]]; then copy4me_tui_main; continue; fi
+        if [[ "${seleccion:0:1}" == "6" ]]; then ver_backups_existentes; continue; fi
+        if [[ "${seleccion:0:1}" == "7" ]]; then eliminar_backups; continue; fi
+        if [[ "${seleccion:0:1}" == "8" ]]; then restaurar_backup; continue; fi
+        if [[ "${seleccion:0:1}" == "9" ]]; then break; fi
+
         local ORIGEN=""
         local USUARIO_REAL=${SUDO_USER:-$USER}
 
@@ -1512,55 +1650,43 @@ hacer_backup() {
                 ;;
         esac
 
-        # 1. Validación de Origen
+        # (Resto de la lógica estándar de hacer_backup...)
         if [ ! -e "$ORIGEN" ]; then
             pintar $ROJO "❌ Error: La ruta '$ORIGEN' no existe."
             sleep 2; continue
         fi
 
-        # 2. Organización: Nombre de subcarpeta específica
         echo -ne "${CIAN}➤ Nombre para la subcarpeta de este backup (Enter para omitir): ${RESET}"
         read SUBDIR
         local RUTA_FINAL="$DESTINO_DEF/${SUBDIR:-"general"}"
 
-        # 3. Creación segura de directorio
         if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
             pintar $ROJO "❌ Error crítico: No se puede escribir en $RUTA_FINAL"
             sleep 2; continue
         fi
         chmod 700 "$DESTINO_DEF"
 
-        # 4. Preparación del archivo
         local FECHA=$(date +%Y%m%d_%H%M%S)
         local NOMBRE_ARCH="backup_$(basename "$ORIGEN")_${FECHA}.tar.gz"
         local DESTINO_COMPLETO="$RUTA_FINAL/$NOMBRE_ARCH"
 
-        # 5. Verificación de espacio
         if ! verificar_espacio "$ORIGEN" "$RUTA_FINAL"; then
             pintar $ROJO "❌ Espacio insuficiente en destino."
             read -p "Enter..."; continue
         fi
 
-        # 6. Ejecución con Spinner y Seguridad
         echo -e "\n${AZUL}🔄 Iniciando respaldo...${RESET}"
-        
-        # --- LANZAR SPINNER ---
-        mostrar_spinner & 
-        SPINNER_PID=$!
+        mostrar_spinner & SPINNER_PID=$!
 
-        # --- EJECUTAR TAR ---
         tar -czpf "$DESTINO_COMPLETO" \
             --exclude='*.log' --exclude='*.tmp' --exclude='*/.cache/*' \
             -C "$(dirname "$ORIGEN")" "$(basename "$ORIGEN")" > /tmp/stk_backup_err 2>&1
         TAR_EXIT_CODE=$?
 
-        # --- DETENER SPINNER ---
-        kill "$SPINNER_PID" 2>/dev/null
-        wait "$SPINNER_PID" 2>/dev/null
-        printf "\r\e[K" # Borra la línea del spinner
+        kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+        printf "\r\e[K"
 
         if [ $TAR_EXIT_CODE -eq 0 ]; then
-            # 7. Integridad y Reporte Final
             chmod 600 "$DESTINO_COMPLETO"
             local SIZE=$(du -h "$DESTINO_COMPLETO" | cut -f1)
             local HASH=$(sha256sum "$DESTINO_COMPLETO" | awk '{print $1}' | cut -c1-16)
