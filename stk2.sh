@@ -736,46 +736,85 @@ gestionar_usuarios() {
 super_limpieza() {
     echo ""
     pintar $MAGENTA "Iniciando Súper Limpieza..."
-    ANTES=$(df / | awk 'NR==2 {print $3}')
     
+    # 1. Feedback visual mientras trabaja
+    mostrar_spinner & SPINNER_PID=$!
+
+    # 2. Medir espacio libre inicial en la raíz y en /home (si está separado)
+    local ANTES_RAIZ=$(df --output=avail / | tail -n 1)
+    local ANTES_HOME=$(df --output=avail /home 2>/dev/null | tail -n 1)
+
+    # 3. Limpieza de logs antiguos de systemd (libera mucho espacio en todas las distros)
+    if command -v journalctl &>/dev/null; then
+        journalctl --vacuum-time=3d >/dev/null 2>&1
+    fi
+
+    # 4. Limpieza del gestor de paquetes según la distro
     case "$Package" in
         apt)
-            apt-get install -f -y > /dev/null 2>&1
-            apt-get autoremove -y > /dev/null 2>&1
-            apt-get autoclean -y > /dev/null 2>&1
-            apt-get clean > /dev/null 2>&1
+            apt-get install -f -y >/dev/null 2>&1
+            apt-get autoremove --purge -y >/dev/null 2>&1
+            apt-get autoclean -y >/dev/null 2>&1
+            apt-get clean >/dev/null 2>&1
             ;;
         dnf)
-            dnf clean all > /dev/null 2>&1
-            dnf autoremove -y > /dev/null 2>&1
+            dnf clean all >/dev/null 2>&1
+            dnf autoremove -y >/dev/null 2>&1
             ;;
         pacman)
-            pacman -Sc --noconfirm > /dev/null 2>&1
+            # Limpia paquetes no instalados y antiguas versiones de la caché
+            pacman -Sc --noconfirm >/dev/null 2>&1
+            # Elimina paquetes huérfanos si existen
+            local huerfanos=$(pacman -Qtdq 2>/dev/null)
+            if [ -n "$huerfanos" ]; then
+                pacman -Rns $huerfanos --noconfirm >/dev/null 2>&1
+            fi
             ;;
         zypper)
-            zypper clean --all > /dev/null 2>&1
-            zypper clean --packages > /dev/null 2>&1
+            zypper clean --all >/dev/null 2>&1
+            zypper clean --packages >/dev/null 2>&1
             ;;
         *)
+            kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+            printf "\r\e[K"
             pintar $ROJO "❌ Limpieza automática no soportada para $Package"
             return 1
             ;;
     esac
-    
-    # Limpieza de papelera (común a todos)
-    find /home -maxdepth 2 -path "*/.local/share/Trash/*" -delete 2>/dev/null
-    
-    DESPUES=$(df / | awk 'NR==2 {print $3}')
-    
-    if [ "$ANTES" -gt "$DESPUES" ] 2>/dev/null; then
-        LIBERADO=$(( (ANTES - DESPUES) / 1024 ))
+
+    # 5. Limpieza profunda de papeleras de usuarios (evaluando dinámicamente)
+    find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
+    find /root/.local/share/Trash/files /root/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
+
+    # 6. Limpieza segura de miniatura de imágenes (Caché de thumbnails)
+    find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
+
+    # 7. Detener spinner
+    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+    printf "\r\e[K"
+
+    # 8. Medir espacio final
+    local DESPUES_RAIZ=$(df --output=avail / | tail -n 1)
+    local DESPUES_HOME=$(df --output=avail /home 2>/dev/null | tail -n 1)
+
+    local DIF_RAIZ=$(( (DESPUES_RAIZ - ANTES_RAIZ) / 1024 ))
+    local DIF_HOME=0
+    [ -n "$ANTES_HOME" ] && [ -n "$DESPUES_HOME" ] && DIF_HOME=$(( (DESPUES_HOME - ANTES_HOME) / 1024 ))
+
+    local LIBERADO=$(( DIF_RAIZ + DIF_HOME ))
+
+    # 9. Reporte de resultados
+    if [ "$LIBERADO" -gt 0 ]; then
         pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
-        [[ $LIBERADO -gt 0 ]] && echo "Se han liberado aprox. ${LIBERADO} MB."
-        registrar_log "$LOG_INFO" "LIMPIEZA: Se liberaron aprox. ${LIBERADO:-0} MB"
+        echo -e "Se han liberado aprox. ${BLANCO}${LIBERADO} MB${RESET}."
+        registrar_log "$LOG_INFO" "LIMPIEZA: Se liberaron aprox. ${LIBERADO} MB"
     else
-        pintar $VERDE "Limpieza completada (sin cambios significativos de espacio)."
+        pintar $VERDE "Limpieza completada (el sistema ya estaba optimizado)."
+        registrar_log "$LOG_INFO" "LIMPIEZA: Completada sin cambios significativos"
     fi
-    read -p "Pulse Enter..."
+
+    echo ""
+    read -p "Pulse Enter para volver..."
 }
 mostrar_logo_monitor() {
     # Definimos el logo con limpieza de línea \e[K al principio de cada fila
