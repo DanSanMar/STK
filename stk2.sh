@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.8.1 Restaurar Backups y Auditoría de Seguridad"
+V="5.8.2 Testeando en Arch"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -126,71 +126,13 @@ install_tools() {
 
     for tool in "${tools_to_install[@]}"; do
         pkg=$(get_package_name "$tool")
-
-        if [[ "$pkg" == "GEM_REQUIRED" ]]; then
-            echo -e "\n${AZUL}💎 Instalando $tool y dependencias de compilación para $Package...${RESET}"
-            
-            case "$Package" in
-                "apt")
-                    apt update -y
-                    apt install -y ruby-full build-essential zlib1g-dev libcurl4-openssl-dev libcurl4
-                    ;;
-                "dnf")
-                    # Equivalentes exactos para Fedora
-                    dnf install -y ruby ruby-devel gcc gcc-c++ make zlib-devel libcurl-devel openssl-devel
-                    ;;
-                *)
-                    echo -e "${ROJO}⚠️ $Package no soportado para dependencias Ruby. Intenta instalarlas manualmente.${RESET}"
-                    ;;
-            esac
-    
-            ldconfig 2>/dev/null
-            echo -e "${AZUL}⚙️ Instalando gema WPScan...${RESET}"
-            gem install wpscan
-            continue
-        fi
-
-        if [[ "$pkg" == "SNAP_REQUIRED" ]]; then
-
-            if ! command -v snap &> /dev/null; then
-                echo -e "\n${AMARILLO}⚠️ $tool requiere Snap, pero no está instalado.${RESET}"
-                echo -ne "${AMARILLO}¿Desea instalar snapd ahora? (s/n): ${RESET}"
-                read -r snap_pref
-                if [[ "$snap_pref" == "s" ]]; then
-                    echo -e "\n${AZUL}📦 Instalando motor de Snap...${RESET}"
-                    case "$Package" in
-                        "apt") 
-                            apt install -y snapd
-                            systemctl enable --now snapd.socket
-                            # Enlace simbólico vital en Debian para rutas estándar
-                            ln -s /var/lib/snapd/snap /snap 2>/dev/null 
-                            ;;
-                        "dnf") dnf install -y snapd && systemctl enable --now snapd.socket ;;
-                    esac
-                    export PATH="$PATH:/snap/bin:/var/lib/snapd/snap/bin"
-                    
-                else
-                    echo -e "${ROJO}❌ No se puede instalar $tool por falta de Snap.${RESET}"
-                    continue
-                fi
-            fi
-
-
-            echo -e "${AZUL}📦 Instalando $tool vía Snap...${RESET}"
-            local classic=""
-            [[ "$tool" == "feroxbuster" || "$tool" == "fzf" ]] && classic="--classic"
-            snap install "$tool" $classic
-            export PATH=$PATH:/var/lib/snapd/snap/bin
-            
-        else
-            echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
-            case "$Package" in
-                "apt") apt install -y "$pkg" ;;
-                "dnf") dnf install -y "$pkg" ;;
-                "pacman") pacman -S --noconfirm "$pkg" ;;
-                "zypper") zypper install -y "$pkg" ;;
-            esac
-        fi
+        echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
+        case "$Package" in
+            "apt") apt install -y "$pkg" ;;
+            "dnf") dnf install -y "$pkg" ;;
+            "pacman") pacman -S --noconfirm "$pkg" ;;
+            "zypper") zypper install -y "$pkg" ;;
+        esac
     done
 }
 
@@ -202,23 +144,21 @@ mostrar_instrucciones() {
 
     for tool in "${missing_tools[@]}"; do
         echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
-        case "$tool" in
-            "fzf"|"zenity"|"xsltproc"|"host")
-                pkg=$(get_package_name "$tool")
-                echo -e "   ${VERDE}✔ Estándar:${RESET} sudo $Package install -y $pkg"
+        pkg=$(get_package_name "$tool")
+
+        case "$Package" in
+            "pacman")
+                echo -e "   ${VERDE}✔ Comando:${RESET} sudo pacman -S $pkg"
                 ;;
-            "feroxbuster")
-                echo -e "   ${VERDE}✔ Snap:${RESET}      sudo snap install feroxbuster"
-                echo -e "   ${VERDE}✔ Manual:${RESET}    curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/master/install-nix.sh | bash"
+            "apt"|"dnf"|"zypper")
+                echo -e "   ${VERDE}✔ Comando:${RESET} sudo $Package install -y $pkg"
                 ;;
-            "wpscan")
-                echo -e "   ${VERDE}✔ RubyGem:${RESET}   sudo gem install wpscan"
-                echo -e "   ${VERDE}✔ Snap:${RESET}      sudo snap install wpscan"
+            *)
+                echo -e "   ${VERDE}✔ Comando:${RESET} Usa el gestor de paquetes de tu sistema para instalar: $pkg"
                 ;;
         esac
         echo -e "${AZUL}--------------------------------------------------${RESET}"
     done
-    
 }
 #opciones especificas para instalación automática
 get_package_name() {
@@ -228,12 +168,11 @@ get_package_name() {
         "host") [[ "$Package" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
         "tput") [[ "$Package" == "apt" ]] && echo "ncurses-bin" || echo "ncurses" ;;
         "free") echo "procps" ;;
-        "feroxbuster") echo "SNAP_REQUIRED" ;;
-        "wpscan") echo "GEM_REQUIRED" ;; 
+        "hostname") [[ "$Package" == "pacman" ]] && echo "inetutils" || echo "hostname" ;;
         "fzf") echo "fzf" ;;
         *) echo "$tool" ;;
     esac
-}
+} 
 
 pintar() { 
     local COLOR="$1" 
@@ -407,7 +346,11 @@ fzf_estilo() {
 }
 
 # LÓGICA FZF menú principal
+
 fzf_menu_principal() {
+    local host_name=$(hostname 2>/dev/null || cat /etc/hostname)
+    local kernel_ver=$(uname -r | cut -d- -f1)
+
     fzf --ansi \
         --height=15 \
         --layout=reverse \
@@ -417,8 +360,7 @@ fzf_menu_principal() {
         --header-lines=1 \
         --color="border:#5fafd7,header:#af87ff,prompt:#5fb2ff,pointer:#afff00" \
         --preview-window="up:25%:border-bottom" \
-        --preview="echo -e '
-\033[1;36mINFORMACIÓN\033[0m | \033[1;33m Fecha:\033[0m $DATE | \033[1;33m Host:\033[0m $(hostname) | \033[1;33m Kernel:\033[0m $(uname -r | cut -d- -f1)'"
+        --preview="echo -e '\033[1;36mINFORMACIÓN\033[0m | \033[1;33mFecha:\033[0m $DATE | \033[1;33mHost:\033[0m $host_name | \033[1;33mKernel:\033[0m $kernel_ver'"
 }
 #función del menú principal
 menu() {
