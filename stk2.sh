@@ -175,7 +175,7 @@ install_tools() {
         "dnf") dnf makecache ;;
         "pacman") pacman -Sy ;;
         "zypper") zypper refresh ;;
-        "jq") echo "jq" ;;
+        
     esac
 
     for tool in "${tools_to_install[@]}"; do
@@ -224,9 +224,17 @@ get_package_name() {
         "free") echo "procps" ;;
         "hostname") [[ "$Package" == "pacman" ]] && echo "inetutils" || echo "hostname" ;;
         "fzf") echo "fzf" ;;
+        "js") 
+            case "$Package" in
+                "pacman") echo "js128" ;;       # En Arch actual es js128 / quickjs
+                "apt") echo "gjs" ;;            # O nodejs / libjavascriptcoregtk-4.0-bin
+                "dnf") echo "mozjs115" ;;
+                *) echo "js" ;;
+            esac
+            ;;
         *) echo "$tool" ;;
     esac
-} 
+}
 
 pintar() { 
     local COLOR="$1" 
@@ -258,9 +266,20 @@ dependencies=(fzf xsltproc host tput free curl wget tar hostname js)
 check_dependencies() {
     missing_tools=()
     for tool in "${dependencies[@]}"; do
-        # Intenta encontrarlo de forma normal, y si no, busca en la ruta de Snap
-        if ! command -v "$tool" &> /dev/null && [ ! -f "/snap/bin/$tool" ] && [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
-            missing_tools+=("$tool")
+        if [[ "$tool" == "js" ]]; then
+            if ! command -v js &>/dev/null && \
+               ! command -v js128 &>/dev/null && \
+               ! command -v qjs &>/dev/null && \
+               ! command -v gjs &>/dev/null && \
+               ! command -v node &>/dev/null; then
+                missing_tools+=("js")
+            fi
+        else
+            if ! command -v "$tool" &> /dev/null && \
+               [ ! -f "/snap/bin/$tool" ] && \
+               [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
+                missing_tools+=("$tool")
+            fi
         fi
     done
 }
@@ -285,33 +304,41 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
         # 1. Intentar instalar
         install_tools "${missing_tools[@]}"
         
-        # 2. Verificación crítica: ¿Realmente se instaló fzf?
+        # 2. Verificación general de dependencias críticas
+        check_dependencies
+
+        # Crear enlace de compatibilidad dinámico para 'js' en Arch / Linux
+        if ! command -v js &>/dev/null; then
+            if command -v js128 &>/dev/null; then
+                ln -sf $(which js128) /usr/local/bin/js
+            elif command -v qjs &>/dev/null; then
+                ln -sf $(which qjs) /usr/local/bin/js
+            elif command -v gjs &>/dev/null; then
+                ln -sf $(which gjs) /usr/local/bin/js
+            elif command -v node &>/dev/null; then
+                ln -sf $(which node) /usr/local/bin/js
+            fi
+        fi
+        # Comprobación explícita de fzf (imprescindible para los menús)
         if ! command -v fzf &> /dev/null; then
             echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
-            echo -e "${AMARILLO}Por favor, instálalo manualmente y reinicia.${RESET}"
             registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
-        registrar_log "$LOG_INFO" "Dependencias instaladas con exito: ${missing_tools[*]}"
-        # 3. Re-verificar si quedan otras herramientas pendientes
-        check_dependencies
+
+        # Comprobación explícita de js (si estaba en la lista inicial)
+        if ! command -v js &> /dev/null; then
+            echo -e "${AMARILLO}⚠️ Advertencia: El intérprete 'js' no se encontró o requiere un alias en el PATH.${RESET}"
+            registrar_log "$LOG_WARN" "Dependencia 'js' no localizada tras la instalación."
+        fi
+
+        # 3. Verificación de herramientas pendientes restantes
         if [ ${#missing_tools[@]} -gt 0 ]; then
             echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
             read -p "Presiona Enter para continuar de todos modos..."
+        else
+            registrar_log "$LOG_INFO" "Todas las dependencias instaladas con éxito."
         fi
-
-    elif [[ "$confirm" == "i" ]]; then
-        mostrar_instrucciones
-        echo -e "\n${CIAN}Una vez instaladas, vuelve a ejecutar el script.${RESET}"
-        exit 0
-
-    elif [[ "$confirm" == "n" ]]; then
-        echo -e "${AMARILLO}Continuando sin las dependencias... (Puede fallar)${RESET}"
-        # No hacemos nada, el script sigue su curso
-
-    else
-        echo -e "${ROJO}❌ Opción no válida. Abortando.${RESET}"
-        exit 1
     fi
 fi
 restaurar_backup() {
