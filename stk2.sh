@@ -36,20 +36,62 @@ registrar_log() {
     echo "[$FECHA] [$NIVEL] [$USER] - $MENSAJE" >> "$LOG_FILE"
 }
 rotar_logs() {
-    # Definimos el límite en Kilobytes (ejemplo: 500 KB)
+    # Mantenemos el límite en Kilobytes (500 KB)
     local MAX_SIZE=500
-    
-    if [ -f "$LOG_FILE" ]; then
-        # Obtenemos el tamaño actual en KB
-        local SIZE=$(du -k "$LOG_FILE" | cut -f1)
-        
-        if [ "$SIZE" -ge "$MAX_SIZE" ]; then
-            # El comando > vacía el archivo instantáneamente sin cambiar el nombre
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Log reiniciado por alcanzar el límite de $MAX_SIZE KB." > "$LOG_FILE"
-            
-            # Aseguramos que los permisos sigan siendo correctos
+    local MODO_SILENCIOSO="${1:-modo_interactivo}"
+
+    if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+        clear
+        mostrar_logo
+        pintar $CIAN "--- ROTACIÓN Y MANTENIMIENTO DE LOGS ---"
+        echo -e "${AMARILLO}➤ Archivo de bitácora:${RESET} ${BLANCO}$LOG_FILE${RESET}"
+        echo -e "${AMARILLO}➤ Límite configurado:${RESET}  ${BLANCO}${MAX_SIZE} KB${RESET}\n"
+    fi
+
+    if [ ! -f "$LOG_FILE" ]; then
+        if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+            pintar $ROJO "❌ El archivo de log no existe aún. Creando uno nuevo..."
+            umask 027
+            touch "$LOG_FILE"
             chmod 640 "$LOG_FILE"
+            registrar_log "$LOG_INFO" "Bitácora reiniciada manualmente."[cite: 1]
+            pintar $VERDE "✔ Archivo creado e inicializado correctamente."
+            read -p "Presione Enter para volver..."
         fi
+        return 0
+    fi
+
+    # Obtener el tamaño actual del archivo en KB
+    local SIZE=$(du -k "$LOG_FILE" | cut -f1)
+
+    if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+        echo -e "${CIAN}🔍 Comprobando tamaño actual...${RESET}"
+        echo -e "   Tamaño detectado: ${BLANCO}${SIZE} KB${RESET} / Límite: ${BLANCO}${MAX_SIZE} KB${RESET}\n"
+    fi
+
+    if [ "$SIZE" -ge "$MAX_SIZE" ]; then
+        [ "$MODO_SILENCIOSO" != "silencioso" ] && pintar $AMARILLO "⚠️ El archivo excede el límite. Procediendo con el vaciado y rotación..."
+        
+        # Guardar marca del reinicio en el log vaciando el contenido anterior
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Log reiniciado por alcanzar el límite de $MAX_SIZE KB (Tamaño anterior: ${SIZE} KB)." > "$LOG_FILE"
+        
+        # Ajustar permisos por seguridad
+        chmod 640 "$LOG_FILE"
+
+        if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+            pintar $VERDE_BRILLANTE "✔ Se han liberado $((SIZE)) KB de espacio en la bitácora."
+            pintar $VERDE "✔ Permisos reafirmados a 640 (root:root/adm)."
+        fi
+    else
+        if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+            pintar $VERDE "✔ El tamaño del log está dentro de los márgenes aceptables."
+            echo -e "${AZUL}ℹ️ No se requirió rotación en este momento.${RESET}"
+        fi
+    fi
+
+    if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
+        echo ""
+        read -p "Presione Enter para volver al menú..."
     fi
 }
 ver_logs() {
@@ -431,7 +473,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Limpieza de Archivos\n2. Ver Bitácora (Logs)\n3. Limpiar archivos de log\n4. ↩ Volver" | fzf_estilo "Seleccione" "MANTENIMIENTO")
+                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | fzf_estilo "Seleccione" "MANTENIMIENTO")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) super_limpieza ;;
