@@ -494,42 +494,67 @@ Actualizar_sistema() {
     mostrar_logo
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
     echo ""
-        # 2. Ejecución de comandos según el Package
+
+    local ESTADO_ACTUALIZACION=0
+
+    # 1. Actualización según el gestor principal del sistema
     case "$Package" in
         apt)
             pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
-            apt update && apt full-upgrade -y && apt autoremove -y
+            DEBIAN_FRONTEND=noninteractive apt-get update -y && \
+            DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y && \
+            apt-get autoremove -y
+            ESTADO_ACTUALIZACION=$?
             ;;
         dnf)
             pintar $VERDE "Actualizando sistema (DNF)..."
-            dnf upgrade -y && dnf autoremove -y
+            dnf upgrade --refresh -y && dnf autoremove -y
+            ESTADO_ACTUALIZACION=$?
             ;;
         pacman)
             pintar $VERDE "Sincronizando repositorios y sistema (PACMAN)..."
             pacman -Syu --noconfirm
+            ESTADO_ACTUALIZACION=$?
             ;;
         zypper)
             pintar $VERDE "Refrescando y actualizando (ZYPPER)..."
             zypper refresh && zypper update -y
+            ESTADO_ACTUALIZACION=$?
             ;;
         *)
-            pintar $ROJO "❌ Error: No se pudo identificar un Package compatible."
+            pintar $ROJO "❌ Error: No se pudo identificar un gestor de paquetes compatible."
             read -p "Presione Enter para volver..."
+            trap - SIGINT
             return 1
             ;;
     esac
 
-    # 3. Resultado final
-    if [ $? -eq 0 ]; then
+    # 2. Actualización opcional para paquetes Flatpak (si está instalado)
+    if command -v flatpak &>/dev/null; then
         echo ""
-        pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
-        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."
-    else
-        echo ""
-        pintar $ROJO "✘ Hubo un error durante la actualización."
-        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."
+        pintar $AZUL "📦 Actualizando paquetes Flatpak..."
+        flatpak update -y
     fi
 
+    # 3. Actualización opcional para paquetes Snap (si está instalado)
+    if command -v snap &>/dev/null; then
+        echo ""
+        pintar $AZUL "📦 Actualizando paquetes Snap..."
+        snap refresh
+    fi
+
+    # 4. Evaluación del resultado y registro en logs
+    echo ""
+    if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
+        pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
+        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."[cite: 1]
+    else
+        pintar $ROJO "✘ Hubo un error durante la actualización."
+        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."[cite: 1]
+    fi
+
+    # Restaurar la trampa de señal por defecto antes de salir
+    trap - SIGINT
     echo ""
     read -p "Presione Enter para volver al menú..."
 }
