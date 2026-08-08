@@ -991,10 +991,192 @@ desinstalar_programa() {
     read -p "Presione Enter para volver..."
 }
 
+# ==============================================================================
+#                 GESTIÓN DE USUARIOS Y PERMISOS
+# ==============================================================================
+
+# Obtener el grupo administrativo adecuado según el gestor de paquetes / distro
+obtener_grupo_sudo() {
+    if grep -q "^sudo:" /etc/group; then
+        echo "sudo"
+    elif grep -q "^wheel:" /etc/group; then
+        echo "wheel"
+    else
+        echo "sudo"
+    fi
+}
+
+# Función auxiliar para modificar o asignar permisos
+modificar_permisos_usuario() {
+    local user="$1"
+    local grupo_admin
+    grupo_admin=$(obtener_grupo_sudo)
+
+    local opciones_rol="1. 👤 Estándar (Sin privilegios root)\n2. 🔑 Administrador (Añadir a $grupo_admin)\n3. ↩ Cancelar"
+    local sel_rol
+    sel_rol=$(echo -e "$opciones_rol" | fzf_estilo "Rol para $user" "NIVEL DE PERMISOS")
+
+    case ${sel_rol:0:1} in
+        1)
+            gpasswd -d "$user" "$grupo_admin" 2>/dev/null
+            usermod -s /bin/bash "$user" 2>/dev/null
+            pintar $VERDE "✔ Privilegios elevados removidos. '$user' es un usuario Estándar."
+            registrar_log "$LOG_INFO" "Permisos cambiados: $user -> Estándar"
+            ;;
+        2)
+            usermod -aG "$grupo_admin" "$user" 2>/dev/null
+            usermod -s /bin/bash "$user" 2>/dev/null
+            pintar $VERDE_BRILLANTE "✔ Usuario '$user' añadido al grupo $grupo_admin (Administrador)."
+            registrar_log "$LOG_WARN" "Permisos elevados otorgados: $user -> Administrador ($grupo_admin)"
+            ;;
+        *)
+            pintar $AZUL "Operación cancelada sin cambios de permisos."
+            ;;
+    esac
+}
+
+gestionar_usuarios() {
+    trap "clear; return" SIGINT
+    while true; do
+        clear
+        mostrar_logo
+        
+        local opciones="1. 📋 Listar usuarios humanos\n2. ➕ Crear usuario (Con permisos)\n3. 🛡️ Modificar permisos de usuario\n4. 🗑️ Eliminar usuario\n5. ↩ Volver"
+        local seleccion_users
+        seleccion_users=$(echo -e "$opciones" | fzf_estilo "Acción" "G E S T I Ó N  D E  U S U A R I O S")
+        
+        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* || -z "$seleccion_users" ]]; then 
+            break 
+        fi
+
+        case ${seleccion_users:0:1} in
+            1) 
+                listar_usuarios 
+                ;;
+
+            2) 
+                local user
+                user=$(pedir_nombre)
+                if [ -n "$user" ]; then
+                    if id "$user" &>/dev/null; then
+                        pintar $ROJO "⚠️ El usuario '$user' ya existe en el sistema."
+                        sleep 2
+                        continue
+                    fi
+
+                    pintar $AMARILLO "➤ Creando usuario $user..."
+                    local status_creacion=1
+
+                    if [[ "$Package" == "apt" ]]; then
+                        adduser --disabled-password --gecos "" "$user" 2>/dev/null
+                        status_creacion=$?
+                    else
+                        useradd -m -s /bin/bash "$user" 2>/dev/null
+                        status_creacion=$?
+                    fi
+
+                    if [ $status_creacion -eq 0 ]; then
+                        pintar $AMARILLO "🔑 Establezca la contraseña para $user:"
+                        passwd "$user"
+                        
+                        registrar_log "$LOG_INFO" "Usuario creado: $user"
+                        
+                        echo ""
+                        pintar $CIAN "--- ASIGNACIÓN INICIAL DE PERMISOS ---"
+                        modificar_permisos_usuario "$user"
+                    else
+                        pintar $ROJO "❌ Error al crear el usuario '$user'."
+                        registrar_log "$LOG_ERR" "Fallo al crear usuario: $user"
+                    fi
+                fi
+                read -p "Presione Enter para continuar..." 
+                ;;
+
+            3)
+                clear
+                mostrar_logo
+                pintar $CIAN "--- MODIFICAR PERMISOS DE USUARIOS ---"
+                
+                # Obtener listado de usuarios humanos (UID >= 1000)
+                local lista_users
+                lista_users=$(cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 < 60000 {print $1}')
+
+                if [ -z "$lista_users" ]; then
+                    pintar $AMARILLO "No se encontraron usuarios humanos configurables."
+                    read -p "Presione Enter..."; continue
+                fi
+
+                local user_sel
+                user_sel=$(echo "$lista_users" | fzf_estilo "Seleccione usuario" "MODIFICAR PERMISOS")
+
+                if [ -n "$user_sel" ]; then
+                    local grupo_admin
+                    grupo_admin=$(obtener_grupo_sudo)
+                    
+                    echo -e "\n${AMARILLO}Usuario seleccionado:${RESET} ${BLANCO}$user_sel${RESET}"
+                    if id -nG "$user_sel" | grep -qw "$grupo_admin"; then
+                        echo -e "${AMARILLO}Estado actual:${RESET} ${VERDE_BRILLANTE}ADMINISTRADOR ($grupo_admin)${RESET}\n"
+                    else
+                        echo -e "${AMARILLO}Estado actual:${RESET} ${AZUL}ESTÁNDAR${RESET}\n"
+                    fi
+
+                    modificar_permisos_usuario "$user_sel"
+                    read -p "Presione Enter para continuar..."
+                fi
+                ;;
+
+            4) 
+                local user
+                user=$(pedir_nombre)
+                if [ -n "$user" ]; then
+                    if ! id "$user" &>/dev/null; then
+                        pintar $ROJO "⚠️ El usuario '$user' no existe."
+                        sleep 2
+                        continue
+                    fi
+
+                    echo ""
+                    echo -ne "${ROJO_BRILLANTE}⚠️ ¿Está seguro que desea eliminar el usuario $user y su carpeta /home? (s/N): ${RESET}"
+                    read -r conf
+                    
+                    if [[ "$conf" == "s" || "$conf" == "S" ]]; then
+                        pintar $ROJO "➤ Eliminando usuario $user..."
+                        
+                        # Matar procesos del usuario antes de borrarlo para evitar bloqueos
+                        pkill -u "$user" 2>/dev/null
+                        
+                        if [[ "$Package" == "apt" ]]; then
+                            deluser --remove-home "$user" 2>/dev/null && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
+                        else
+                            userdel -r "$user" 2>/dev/null && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
+                        fi
+                        
+                        pintar $VERDE "✔ Usuario '$user' eliminado correctamente."
+                    else
+                        pintar $AZUL "Operación cancelada."
+                    fi
+                fi
+                read -p "Presione Enter para continuar..." 
+                ;;
+        esac
+    done
+}
+
 listar_usuarios() {
     echo ""
-    pintar $AZUL_BRILLANTE "--- Usuarios Humanos (UID >= 1000) ---"
-    cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 < 60000 {print "  • " $1}'
+    for u in $(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd); do
+        pintar $AZUL "================================================================="
+        pintar $NEGRITA$CIAN "USUARIO: $MAGENTA $u"
+        echo "-----------------------------------------------------------------"
+        pintar $NEGRITA$CIAN "GRUPOS : $AZUL_BRILLANTE $(id -nG "$u")"
+        echo "-----------------------------------------------------------------"
+        pintar $NEGRITA$CIAN "SUDO   : $RESET $(sudo -l -U "$u")"
+        pintar $VERDE"================================================================="
+        sleep 2
+                    
+    done
+    echo ""
+    echo "================================================================="
     echo ""
     read -p "Presione Enter para continuar..."
 }
@@ -1019,61 +1201,7 @@ pedir_nombre() {
     done
     echo "$nombre"  
 }
-
-gestionar_usuarios() {
-    trap "clear; return" SIGINT
-    while true; do
-        
-        clear
-        mostrar_logo
-        # Usamos fzf_estilo 
-        local opciones="1. Listar usuarios humanos\n2. Crear usuario\n3. Eliminar usuario\n4. ↩ Volver"
-        seleccion_users=$(echo -e "$opciones" | fzf_estilo "Acción" "G E S T I Ó N  DE  U S U A R I O S")
-        
-       
-        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* ]]; then 
-            break 
-        fi
-
-        case ${seleccion_users:0:1} in
-            1) listar_usuarios ;;
-            2) 
-                user=$(pedir_nombre)
-                if [ -n "$user" ]; then
-                    pintar $AMARILLO "➤ Creando usuario $user..."
-                    # Lógica según el Package detectado
-                    if [[ "$Package" == "apt" ]]; then
-                        adduser "$user" && registrar_log "$LOG_INFO" "Usuario creado: $user"
-                    else
-                        # Para Fedora, Arch, etc., usamos useradd (estándar universal)
-                        useradd -m -s /bin/bash "$user"
-                        pintar $AMARILLO "Establezca la contraseña para $user:"
-                        passwd "$user"
-                        registrar_log "$LOG_INFO" "Usuario creado (useradd): $user"
-                    fi
-                fi
-                read -p "Proceso finalizado. Presione Enter para continuar..." ;;
-            3) 
-                user=$(pedir_nombre)
-                if [ -n "$user" ]; then
-                    echo ""
-                    echo -ne "${ROJO}➤ ¿Está seguro que desea eliminar el usuario $user? ${RESET}"
-                    read
-                    echo ""
-                    pintar $ROJO "➤ Eliminando usuario $user..."
-                    if [[ "$Package" == "apt" ]]; then
-                        deluser --remove-home "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
-                    else
-                        # userdel -r es el equivalente universal
-                        userdel -r "$user" && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
-                    fi
-                fi
-                echo ""
-                read -p "Proceso finalizado. Presione Enter..." ;;
-                      
-        esac
-    done
-}
+#--------------------------
 super_limpieza() {
     echo ""
     pintar $MAGENTA "Iniciando Súper Limpieza..."
