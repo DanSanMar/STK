@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.8.2 Testeando en Arch"
+V="5.8.5 Testeando en Arch"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -261,7 +261,7 @@ salir() {
 # xsltproc/host: Herramientas de red/procesamiento
 # ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
 # procps: Para comandos de sistema como 'free' o 'top'
-dependencies=(fzf xsltproc host tput free curl wget tar hostname js)
+dependencies=(fzf xsltproc host tput free curl wget tar hostname js jq rsync)
 # --- LÓGICA DE RE-VERIFICACIÓN ---
 check_dependencies() {
     missing_tools=()
@@ -1424,26 +1424,25 @@ mostrar_spinner() {
     done
 }
 # ==============================================================================
-#                 COPY4ME TUI EN BASH NATIVO (INTEGRADO EN STK)
+#                 CONFIGURACIÓN Y FUNCIONES BASE DE BACKUP
 # ==============================================================================
 
 CONFIG_JSON="/var/backups/stk_backups/config.json"
+DESTINO_DEF="/var/backups/stk_backups"
 
-# Inicializa el archivo de configuración si no existe
 init_copy4me_config() {
     mkdir -p "$(dirname "$CONFIG_JSON")"
     if [ ! -f "$CONFIG_JSON" ]; then
         echo '{"perfiles":{},"opciones":{"verificar_hash":true,"compresion":6}}' > "$CONFIG_JSON"
+        chmod 600 "$CONFIG_JSON"
     fi
 }
 
-# Obtiene la lista de perfiles guardados en el JSON
 obtener_perfiles_json() {
     init_copy4me_config
     jq -r '.perfiles | keys[]' "$CONFIG_JSON" 2>/dev/null
 }
 
-# Guarda o actualiza un perfil en el JSON
 guardar_perfil_json() {
     local nombre="$1"
     local origen="$2"
@@ -1455,94 +1454,438 @@ guardar_perfil_json() {
     local tmp_json
     tmp_json=$(mktemp)
 
-    jq --arg nom "$nombre" \
-       --arg orig "$origen" \
-       --arg dest "$destino" \
-       --arg date "$fecha" \
-       '.perfiles[$nom] = {
-           "ruta_local": $orig,
-           "ruta_destino": $dest,
-           "ultima_sincronizacion": $date
-       }' "$CONFIG_JSON" > "$tmp_json" && mv "$tmp_json" "$CONFIG_JSON"
+    # CORRECCIÓN 1: Uso seguro de mktemp y mv para escritura atómica
+    if jq --arg nom "$nombre" \
+          --arg orig "$origen" \
+          --arg dest "$destino" \
+          --arg date "$fecha" \
+          '.perfiles[$nom] = {
+              "ruta_local": $orig,
+              "ruta_destino": $dest,
+              "ultima_sincronizacion": $date
+          }' "$CONFIG_JSON" > "$tmp_json"; then
+        mv "$tmp_json" "$CONFIG_JSON"
+        chmod 600 "$CONFIG_JSON"
+    else
+        rm -f "$tmp_json"
+    fi
 }
 
-# Elimina un perfil del JSON
 eliminar_perfil_json() {
     local nombre="$1"
     init_copy4me_config
     local tmp_json
     tmp_json=$(mktemp)
 
-    jq --arg nom "$nombre" 'del(.perfiles[$nom])' "$CONFIG_JSON" > "$tmp_json" && mv "$tmp_json" "$CONFIG_JSON"
+    if jq --arg nom "$nombre" 'del(.perfiles[$nom])' "$CONFIG_JSON" > "$tmp_json"; then
+        mv "$tmp_json" "$CONFIG_JSON"
+        chmod 600 "$CONFIG_JSON"
+    else
+        rm -f "$tmp_json"
+    fi
 }
 
-# Sincronizador en Bash según el modo seleccionado
+verificar_espacio() {
+    local origen="$1"
+    local destino="$2"
+    
+    # CORRECCIÓN 7: Obtener el punto de montaje existente más cercano si el destino no existe aún
+    local dest_dir="$destino"
+    while [ ! -d "$dest_dir" ] && [ "$dest_dir" != "/" ]; do
+        dest_dir=$(dirname "$dest_dir")
+    done
+
+    local tam_origen
+    tam_origen=$(du -sk "$origen" 2>/dev/null | cut -f1)
+    local disp_destino
+    disp_destino=$(df -k "$dest_dir" 2>/dev/null | tail -n 1 | awk '{print $4}')
+    
+    tam_origen=${tam_origen:-0}
+    disp_destino=${disp_destino:-0}
+    
+    [ "$disp_destino" -gt "$tam_origen" ]
+}
+
+rotar_backups() {
+    local ruta="$1"
+    local max_backups=5
+    local count
+    count=$(find "$ruta" -maxdepth 1 -name "*.tar.gz" 2>/dev/null | wc -l)
+
+    if [ "$count" -gt "$max_backups" ]; then
+        # CORRECCIÓN 2: Uso de exec ls -1t para garantizar portabilidad sin errores de sintaxis en find
+        find "$ruta" -maxdepth 1 -name "*.tar.gz" -exec ls -1t {} + 2>/dev/null | \
+            tail -n +$((max_backups + 1)) | xargs rm -f 2>/dev/null
+        registrar_log "$LOG_INFO" "Rotación de backups ejecutada en $ruta (Límite: $max_backups)"
+    fi
+}
+
+obtener_puntos_montaje_externos() {
+    local USUARIO_REAL=${SUDO_USER:-$USER}
+    {
+        lsblk -o MOUNTPOINT -n 2>/dev/null | grep -v "^$" | grep -E "^/(media|run/media|mnt|media/$USUARIO_REAL)"
+        find "/media/$USUARIO_REAL" "/run/media/$USUARIO_REAL" "/media" "/mnt" -maxdepth 2 -mindepth 1 -type d 2>/dev/null
+    } | sort -u
+}
+
+# ==============================================================================
+#                 NAVEGADOR DE DIRECTORIOS INTERACTIVO (FZF)
+# ==============================================================================
+
+fzf_seleccionar_directorio() {
+    local dir_actual="${1:-$HOME}"
+    dir_actual=$(readlink -f "$dir_actual" 2>/dev/null || echo "$dir_actual")
+
+    while true; do
+        if [ ! -d "$dir_actual" ] || [ ! -r "$dir_actual" ]; then
+            dir_actual="$HOME"
+        fi
+
+        # Construir la lista de opciones
+        local lineas_menu=""
+        lineas_menu+="✅ [SELECCIONAR ESTA CARPETA]\t$dir_actual\n"
+        lineas_menu+="➕ [CREAR NUEVA CARPETA AQUÍ]\t$dir_actual\n"
+        lineas_menu+="⬆️ [SUBIR A CARPETA PADRE]\t$dir_actual\n"
+
+        while IFS= read -r sub_d; do
+            [ -n "$sub_d" ] && lineas_menu+="📁 $(basename "$sub_d")\t$sub_d\n"
+        done < <(find "$dir_actual" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+
+        # Ejecutar FZF mostrando solo la primera columna (el texto legible/icono)
+        local sel
+        sel=$(echo -e "$lineas_menu" | fzf --ansi --height=18 --reverse --border=rounded \
+            --prompt="Navegar ❯ " \
+            --header="Directorio actual: $dir_actual" \
+            --delimiter="\t" --with-nth=1)
+
+        # Si el usuario cancela con ESC o Ctrl+C
+        if [ $? -ne 0 ] || [ -z "$sel" ]; then
+            return 1
+        fi
+
+        # Extraer la opción seleccionada y su ruta real (columna 2)
+        local opcion_texto
+        opcion_texto=$(echo "$sel" | cut -d$'\t' -f1)
+        local ruta_target
+        ruta_target=$(echo "$sel" | cut -d$'\t' -f2)
+
+        if [[ "$opcion_texto" == *"✅ [SELECCIONAR ESTA CARPETA]"* ]]; then
+            echo "$dir_actual"
+            return 0
+        elif [[ "$opcion_texto" == *"➕ [CREAR NUEVA CARPETA AQUÍ]"* ]]; then
+            echo -ne "\n\033[33mEscriba el nombre de la nueva carpeta: \033[0m" >&2
+            read -r nueva_k
+            if [ -n "$nueva_k" ]; then
+                local target="$dir_actual/$nueva_k"
+                mkdir -p "$target" 2>/dev/null
+                if [ -d "$target" ]; then
+                    dir_actual="$target"
+                else
+                    echo -e "\033[31m❌ Error: No se pudo crear la carpeta en $dir_actual (Compruebe permisos)\033[0m" >&2
+                    sleep 2
+                fi
+            fi
+        elif [[ "$opcion_texto" == *"⬆️ [SUBIR A CARPETA PADRE]"* ]]; then
+            dir_actual=$(dirname "$dir_actual")
+        elif [ -n "$ruta_target" ] && [ -d "$ruta_target" ]; then
+            dir_actual="$ruta_target"
+        fi
+    done
+}
+
+# ==============================================================================
+#                 GESTIÓN Y VISUALIZACIÓN DE BACKUPS (.tar.gz)
+# ==============================================================================
+
+ver_backups_existentes() {
+    clear
+    mostrar_logo
+    pintar $CIAN "--- BACKUPS LOCALES EXISTENTES ---"
+
+    if [ ! -d "$DESTINO_DEF" ]; then
+        pintar $ROJO "No se encontró el directorio de backups ($DESTINO_DEF)."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    local archivos
+    archivos=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" 2>/dev/null)
+    if [ -z "$archivos" ]; then
+        pintar $AMARILLO "No hay archivos de backup (.tar.gz) disponibles."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    echo "$archivos" | fzf --ansi \
+        --height=18 \
+        --reverse \
+        --border=rounded \
+        --prompt="➤ Inspeccionar Backup: " \
+        --header="--- VISTA PREVIA DEL CONTENIDO (.tar.gz) ---" \
+        --preview="tar -tvf {} | head -n 40" \
+        --preview-window="right:60%"
+
+    read -p "Presione Enter para volver..."
+}
+
+eliminar_backups() {
+    clear
+    mostrar_logo
+    pintar $CIAN "--- ELIMINAR COPIAS DE SEGURIDAD ---"
+
+    local archivos
+    archivos=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" 2>/dev/null)
+    if [ -z "$archivos" ]; then
+        pintar $AMARILLO "No hay respaldos para eliminar."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    local sel
+    sel=$(echo "$archivos" | fzf_estilo "Seleccione backup a ELIMINAR" "E L I M I N A C I Ó N")
+
+    if [ -n "$sel" ]; then
+        echo -ne "\n${ROJO_BRILLANTE}⚠️ ¿Seguro que desea eliminar $(basename "$sel")? (s/N): ${RESET}"
+        read -r conf
+        if [[ "$conf" == "s" || "$conf" == "S" ]]; then
+            rm -f "$sel"
+            pintar $VERDE "✔ Archivo eliminado correctamente."
+            registrar_log "$LOG_WARN" "Backup eliminado: $sel"
+        else
+            pintar $AZUL "Operación cancelada."
+        fi
+        read -p "Presione Enter..."
+    fi
+}
+
+restaurar_backup() {
+    clear
+    mostrar_logo
+    pintar $CIAN "--- RESTAURAR COPIA DE SEGURIDAD ---"
+
+    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz" 2>/dev/null)" ]; then
+        pintar $ROJO "No hay backups disponibles para restaurar."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    local seleccion
+    seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para RESTAURAR" "R E S T A U R A C I Ó N")
+
+    if [ -n "$seleccion" ]; then
+        echo -e "\n${AMARILLO}¿Dónde desea restaurar el backup?${RESET}"
+        echo -e "1. En su ruta original (¡Peligro: Puede sobrescribir archivos!)"
+        echo -e "2. En una ruta temporal (/tmp/stk_restaurado)"
+        echo -ne "\nSeleccione una opción (1/2): "
+        read -r opt_restaurar
+
+        local ruta_extraccion="/"
+        if [[ "$opt_restaurar" == "2" ]]; then
+            ruta_extraccion="/tmp/stk_restaurado"
+            mkdir -p "$ruta_extraccion"
+        fi
+
+        echo -ne "\n${ROJO_BRILLANTE}⚠️ ¿Confirmar restauración de $(basename "$seleccion")? (s/N): ${RESET}"
+        read -r confirmar
+
+        if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
+            echo -e "\n${AZUL}🔄 Extrayendo archivos...${RESET}"
+            mostrar_spinner & SPINNER_PID=$!
+            
+            tar -xzpf "$seleccion" -C "$ruta_extraccion" > /tmp/stk_restore_err 2>&1
+            local EXIT_CODE=$?
+
+            kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+            printf "\r\e[K"
+
+            if [ $EXIT_CODE -eq 0 ]; then
+                pintar $VERDE_BRILLANTE "✔ Backup restaurado con éxito en: $ruta_extraccion"
+                registrar_log "$LOG_INFO" "Backup restaurado: $seleccion en $ruta_extraccion"
+            else
+                pintar $ROJO "❌ Error al restaurar:"
+                cat /tmp/stk_restore_err
+                registrar_log "$LOG_ERR" "Error al restaurar backup: $seleccion"
+            fi
+        else
+            pintar $AZUL "Operación cancelada."
+        fi
+        read -p "Presione Enter..."
+    fi
+}
+
+# ==============================================================================
+#  OPCIÓN 1: RESPALDO LOCAL AUTOMÁTICO (.tar.gz)
+# ==============================================================================
+
+autocopy_atomatic() {
+    trap "clear; return" SIGINT
+
+    while true; do
+        clear
+        mostrar_logo
+        pintar $CIAN "--- RESPALDO LOCAL AUTOMÁTICO (PC) ---"
+
+        local USUARIO_REAL=${SUDO_USER:-$USER}
+        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual (/home/$USUARIO_REAL)\n3. 🌐 Web (/var/www)\n4. 🔍 Explorar e Indicar Carpeta con FZF\n5. ↩ Volver"
+        local sel
+        sel=$(echo -e "$opciones" | fzf_estilo "Origen Local" "SELECCIONAR ORIGEN")
+
+        if [ $? -ne 0 ] || [ -z "$sel" ] || [[ "${sel:0:1}" == "5" ]]; then break; fi
+
+        local ORIGEN=""
+        case ${sel:0:1} in
+            1) ORIGEN="/etc" ;;
+            2) ORIGEN="/home/$USUARIO_REAL" ;;
+            3) ORIGEN="/var/www" ;;
+            4) ORIGEN=$(fzf_seleccionar_directorio "/home/$USUARIO_REAL") ;;
+        esac
+
+        if [ -z "$ORIGEN" ] || [ ! -e "$ORIGEN" ]; then
+            pintar $ROJO "❌ Error: Ruta de origen inválida o no seleccionada."
+            sleep 2; continue
+        fi
+
+        echo -ne "\n${CIAN}➤ Subcarpeta para organizar el backup (Enter para 'general'): ${RESET}"
+        read -r SUBDIR
+        local RUTA_FINAL="$DESTINO_DEF/${SUBDIR:-"general"}"
+
+        if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
+            pintar $ROJO "❌ Error crítico: Sin permisos de escritura en $RUTA_FINAL"
+            sleep 2; continue
+        fi
+        chmod 700 "$DESTINO_DEF" 2>/dev/null
+
+        local FECHA
+        FECHA=$(date +%Y%m%d_%H%M%S)
+        local NOMBRE_ARCH="backup_$(basename "$ORIGEN")_${FECHA}.tar.gz"
+        local DESTINO_COMPLETO="$RUTA_FINAL/$NOMBRE_ARCH"
+
+        if ! verificar_espacio "$ORIGEN" "$RUTA_FINAL"; then
+            pintar $ROJO "❌ Espacio insuficiente en el disco local para comprimir este directorio."
+            read -p "Presione Enter para continuar..."; continue
+        fi
+
+        echo -e "\n${AZUL}🔄 Empaquetando y comprimiendo archivos...${RESET}"
+        mostrar_spinner & SPINNER_PID=$!
+
+        local PARENT_DIR
+        PARENT_DIR=$(dirname "$ORIGEN")
+        local TARGET_BASE
+        TARGET_BASE=$(basename "$ORIGEN")
+        [ "$PARENT_DIR" == "/" ] && PARENT_DIR=""
+
+        # CORRECCIÓN 5 y 6: umask restringido durante compresión y exclusión de globs aislados
+        (
+            umask 077
+            tar -czpf "$DESTINO_COMPLETO" \
+                --exclude='*.log' --exclude='*.tmp' --exclude='*/.cache/*' \
+                -C "${PARENT_DIR:-/}" "$TARGET_BASE" > /tmp/stk_backup_err 2>&1
+        )
+        local TAR_EXIT_CODE=$?
+
+        kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+        printf "\r\e[K"
+
+        if [ $TAR_EXIT_CODE -eq 0 ]; then
+            chmod 600 "$DESTINO_COMPLETO"
+            local SIZE
+            SIZE=$(du -h "$DESTINO_COMPLETO" | cut -f1)
+            local HASH
+            HASH=$(sha256sum "$DESTINO_COMPLETO" | awk '{print $1}' | cut -c1-16)
+
+            echo -e "${VERDE_BRILLANTE}✅ BACKUP LOCAL COMPLETADO CON ÉXITO${RESET}"
+            echo -e "${BLANCO}------------------------------------------------${RESET}"
+            echo -e "${AMARILLO}Origen:    ${BLANCO}$ORIGEN${RESET}"
+            echo -e "${AMARILLO}Archivo:   ${BLANCO}$NOMBRE_ARCH${RESET}"
+            echo -e "${AMARILLO}Ruta:      ${BLANCO}$RUTA_FINAL${RESET}"
+            echo -e "${AMARILLO}Tamaño:    ${BLANCO}$SIZE${RESET}"
+            echo -e "${AMARILLO}SHA256:    ${BLANCO}$HASH... (verificado)${RESET}"
+            echo -e "${BLANCO}------------------------------------------------${RESET}"
+
+            registrar_log "$LOG_INFO" "Backup Automático: $NOMBRE_ARCH en $RUTA_FINAL (Hash: $HASH)"
+            rotar_backups "$RUTA_FINAL"
+        else
+            pintar $ROJO "❌ Error al comprimir el respaldo:"
+            cat /tmp/stk_backup_err
+            registrar_log "$LOG_ERR" "Error en tar al respaldar $ORIGEN"
+        fi
+
+        read -p "Presione Enter para continuar..."
+    done
+}
+
+# ==============================================================================
+#  OPCIÓN 2: COPY4ME TUI ENGINE (RSYNC CON PERFILES Y MULTI-DISTRO USB)
+# ==============================================================================
+
 ejecutar_sincronizacion_bash() {
     local origen="$1"
     local destino="$2"
     local modo="$3"
 
-    mkdir -p "$destino"
+    if ! mkdir -p "$destino" 2>/dev/null; then
+        pintar $ROJO "\n❌ Error: No se tienen permisos para escribir en el destino: $destino"
+        read -p "Presione Enter..."
+        return 1
+    fi
 
-    echo -e "\n${AZUL}🚀 Iniciando sincronización (${modo^^})...${RESET}"
+    echo -e "\n${AZUL}🚀 Ejecutando rsync (${modo^^})...${RESET}"
     echo -e "${AMARILLO}📂 Origen:  ${BLANCO}$origen${RESET}"
     echo -e "${AMARILLO}🎯 Destino: ${BLANCO}$destino${RESET}\n"
 
     case "$modo" in
         "incremental")
-            # Copia incremental: -a (archivo), -v (detallado), -u (solo actualiza si origen es más nuevo)
             rsync -avu --progress "$origen/" "$destino/"
             ;;
         "espejo")
-            # Modo espejo: borra en destino los archivos que ya no existen en el origen
             rsync -av --delete --progress "$origen/" "$destino/"
             ;;
         "bidireccional")
-            # Bidireccional simplificado en 2 pasadas
-            echo -e "${CIAN}🔄 Sincronizando Origen ➔ Destino...${RESET}"
-            rsync -avu "$origen/" "$destino/"
-            echo -e "${CIAN}🔄 Sincronizando Destino ➔ Origen...${RESET}"
-            rsync -avu "$destino/" "$origen/"
+            echo -e "${CIAN}🔄 Pasada 1: Origen ➔ Destino...${RESET}"
+            rsync -avu --progress "$origen/" "$destino/"
+            echo -e "${CIAN}🔄 Pasada 2: Destino ➔ Origen...${RESET}"
+            rsync -avu --progress "$destino/" "$origen/"
             ;;
     esac
 
     if [ $? -eq 0 ]; then
-        pintar $VERDE_BRILLANTE "\n✔ Operación completada con éxito."
-        registrar_log "$LOG_INFO" "Copy4Me TUI ($modo): $origen -> $destino"
+        pintar $VERDE_BRILLANTE "\n✔ ¡Sincronización finalizada correctamente!"
+        registrar_log "$LOG_INFO" "COPY4ME ($modo): $origen -> $destino"
     else
-        pintar $ROJO "\n❌ Ocurrió un error durante la sincronización."
-        registrar_log "$LOG_ERR" "Copy4Me TUI Error: $origen -> $destino"
+        pintar $ROJO "\n❌ Error durante la transferencia con rsync."
+        registrar_log "$LOG_ERR" "COPY4ME Falló: $origen -> $destino"
     fi
 }
 
-# Menú interactivo TUI con FZF
 copy4me_tui_main() {
+    local USUARIO_REAL=${SUDO_USER:-$USER}
+
     while true; do
         clear
         mostrar_logo
-        pintar $CIAN "--- COPY4ME ENGINE TUI (NATIVO BASH) ---"
+        pintar $CIAN "--- COPY4ME ENGINE TUI (RSYNC & PERFILES) ---"
 
-        local menu_opts="1. 🚀 Sincronizar / Respaldar (Origen ➔ Destino)\n2. 📂 Gestionar Perfiles Guardados\n3. 🔌 Escanear Unidades USB / Externas\n4. ↩ Volver al Menú Principal"
+        local menu_opts="1. 🚀 Realizar Sincronización / Respaldo\n2. 📂 Gestionar Perfiles Guardados\n3. 🔌 Escanear y Probar Unidades Externas/USB\n4. ↩ Volver"
         local sel
-        sel=$(echo -e "$menu_opts" | fzf_estilo "Seleccione Acción" "C O P Y 4 M E  -  T U I")
+        sel=$(echo -e "$menu_opts" | fzf_estilo "Seleccione Acción" "C O P Y 4 M E")
 
-        if [ $? -ne 0 ] || [[ "$sel" == *"Volver"* ]]; then break; fi
+        if [ $? -ne 0 ] || [ -z "$sel" ] || [[ "${sel:0:1}" == "4" ]]; then break; fi
 
         case ${sel:0:1} in
-            1) # --- SINCRONIZACIÓN Y RESPALDO ---
+            1)
                 local origen=""
                 local destino=""
                 local nombre_perfil=""
 
-                # 1. Cargar perfil o meter ruta nueva
                 local perfiles
                 perfiles=$(obtener_perfiles_json)
-                local opts_orig="➕ [NUEVO] Ingresar ruta manualmente\n"
+                local opts_orig="🔍 [NUEVO] Explorar carpetas con FZF\n"
                 
                 if [ -n "$perfiles" ]; then
                     while read -r p; do
+                        # CORRECCIÓN 3: Uso seguro de --arg en jq para nombres de perfiles con espacios
                         local path_orig
-                        path_orig=$(jq -r ".perfiles[\"$p\"].ruta_local" "$CONFIG_JSON")
+                        path_orig=$(jq -r --arg p "$p" '.perfiles[$p].ruta_local' "$CONFIG_JSON")
                         opts_orig+="📁 [Perfil] $p ➔ $path_orig\n"
                     done <<< "$perfiles"
                 fi
@@ -1552,62 +1895,77 @@ copy4me_tui_main() {
                 if [ -z "$sel_orig" ]; then continue; fi
 
                 if [[ "$sel_orig" == *"📁 [Perfil]"* ]]; then
-                    nombre_perfil=$(echo "$sel_orig" | awk '{print $3}')
-                    origen=$(jq -r ".perfiles[\"$nombre_perfil\"].ruta_local" "$CONFIG_JSON")
-                    destino=$(jq -r ".perfiles[\"$nombre_perfil\"].ruta_destino" "$CONFIG_JSON")
+                    # CORRECCIÓN 4: Extracción de perfil por sed soportando espacios adecuadamente
+                    nombre_perfil=$(echo "$sel_orig" | sed -n 's/.*📁 \[Perfil\] \(.*\) ➔ .*/\1/p')
+                    origen=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_local' "$CONFIG_JSON")
+                    destino=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_destino' "$CONFIG_JSON")
                 else
-                    echo -ne "\n${AMARILLO}Ingrese la ruta de ORIGEN (PC): ${RESET}"
-                    read -r origen
-                    if [ ! -d "$origen" ]; then
-                        pintar $ROJO "❌ La ruta de origen no existe."
-                        read -p "Presione Enter..."; continue
+                    origen=$(fzf_seleccionar_directorio "/home/$USUARIO_REAL")
+                    if [ -z "$origen" ] || [ ! -d "$origen" ]; then
+                        pintar $ROJO "❌ No se seleccionó una carpeta de origen válida."
+                        sleep 2; continue
                     fi
                     nombre_perfil=$(basename "$origen")
                 fi
 
-                # 2. Seleccionar Destino si no viene cargado por perfil
                 if [ -z "$destino" ] || [ "$destino" == "null" ]; then
                     local usbs
-                    usbs=$(lsblk -o MOUNTPOINT,TRAN,SIZE -n | grep "usb" | awk '{print $1}')
-                    local opts_dest="📂 [Manual] Ingresar ruta personalizada\n"
+                    usbs=$(obtener_puntos_montaje_externos)
+                    local opts_dest="🔍 Explorar/Crear carpeta en PC con FZF\n"
 
                     if [ -n "$usbs" ]; then
                         while read -r u; do
-                            [ -n "$u" ] && opts_dest+="🔌 [USB] $u\n"
+                            [ -n "$u" ] && [ -d "$u" ] && opts_dest+="🔌 [Montaje detectado] $u\n"
                         done <<< "$usbs"
                     fi
 
                     local sel_dest
-                    sel_dest=$(echo -e "$opts_dest" | fzf_estilo "Seleccione Destino" "DESTINO PARA $nombre_perfil")
+                    sel_dest=$(echo -e "$opts_dest" | fzf_estilo "Seleccione Destino" "DESTINO PARA: $nombre_perfil")
                     if [ -z "$sel_dest" ]; then continue; fi
 
-                    if [[ "$sel_dest" == *"🔌 [USB]"* ]]; then
-                        local usb_path
-                        usb_path=$(echo "$sel_dest" | awk '{print $3}')
-                        destino="$usb_path/copy4me_backups/$nombre_perfil"
+                    if [[ "$sel_dest" == *"🔌 [Montaje detectado]"* ]]; then
+                        local usb_root
+                        usb_root=$(echo "$sel_dest" | sed 's/.*🔌 \[Montaje detectado\] //')
+                        
+                        local sub_usb_opts="1. Usar raíz de la unidad ($usb_root/copy4me_backups/$nombre_perfil)\n2. 🔍 Navegar o crear subcarpeta con FZF"
+                        local sel_sub_usb
+                        sel_sub_usb=$(echo -e "$sub_usb_opts" | fzf_estilo "Opciones de montaje" "DIRECTORIO EN UNIDAD")
+
+                        if [[ "${sel_sub_usb:0:1}" == "2" ]]; then
+                            local dest_fzf
+                            dest_fzf=$(fzf_seleccionar_directorio "$usb_root")
+                            if [ -n "$dest_fzf" ]; then
+                                destino="$dest_fzf/$nombre_perfil"
+                            else
+                                continue
+                            fi
+                        else
+                            destino="$usb_root/copy4me_backups/$nombre_perfil"
+                        fi
                     else
-                        echo -ne "\n${AMARILLO}Ingrese la ruta de DESTINO: ${RESET}"
-                        read -r destino
-                        if [ -z "$destino" ]; then continue; fi
+                        destino=$(fzf_seleccionar_directorio "/home/$USUARIO_REAL")
+                        if [ -n "$destino" ]; then
+                            destino="$destino/$nombre_perfil"
+                        else
+                            continue
+                        fi
                     fi
                 fi
 
-                # 3. Selección de Modo de Sincronización con FZF
                 local modos="1. incremental   | Copia solo archivos nuevos o modificados\n2. espejo        | Borra en destino lo eliminado en origen\n3. bidireccional | Sincroniza cambios en ambos sentidos"
                 local sel_modo
-                sel_modo=$(echo -e "$modos" | fzf_estilo "Seleccione Modo" "MODO DE SINCRONIZACIÓN")
+                sel_modo=$(echo -e "$modos" | fzf_estilo "Seleccione Modo" "MODO SINCRONIZACIÓN")
                 if [ -z "$sel_modo" ]; then continue; fi
 
                 local modo
                 modo=$(echo "$sel_modo" | awk '{print $2}')
 
-                # 4. Guardar Perfil y Ejecutar
                 guardar_perfil_json "$nombre_perfil" "$origen" "$destino"
                 ejecutar_sincronizacion_bash "$origen" "$destino" "$modo"
                 read -p "Presione Enter para continuar..."
                 ;;
 
-            2) # --- GESTIÓN DE PERFILES ---
+            2)
                 local perfiles
                 perfiles=$(obtener_perfiles_json)
                 if [ -z "$perfiles" ]; then
@@ -1617,25 +1975,27 @@ copy4me_tui_main() {
 
                 local opts_del=""
                 while read -r p; do
-                    opts_del+="❌ Borrar: $p\n"
+                    opts_del+="❌ Borrar Perfil: $p\n"
                 done <<< "$perfiles"
 
                 local sel_del
                 sel_del=$(echo -e "$opts_del" | fzf_estilo "Perfil a eliminar" "BORRAR PERFILES")
                 if [ -n "$sel_del" ]; then
                     local p_target
-                    p_target=$(echo "$sel_del" | awk '{print $3}')
+                    p_target=$(echo "$sel_del" | sed 's/.*❌ Borrar Perfil: //')
                     eliminar_perfil_json "$p_target"
                     pintar $VERDE "✔ Perfil '$p_target' eliminado."
                     read -p "Presione Enter..."
                 fi
                 ;;
 
-            3) # --- DETECCIÓN DE USBs ---
+            3)
                 clear
                 mostrar_logo
-                pintar $CIAN "--- UNIDADES USB DETECTADAS ---"
-                lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,TRAN | grep -E "usb|TRAN"
+                pintar $CIAN "--- DISPOSITIVOS Y PUNTOS DE MONTAJE DETECTADOS ---"
+                lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,TRAN | grep -v "^$"
+                echo -e "\n${AMARILLO}Rutas de almacenamiento externo detectadas:${RESET}"
+                obtener_puntos_montaje_externos
                 echo ""
                 read -p "Presione Enter para continuar..."
                 ;;
@@ -1643,98 +2003,32 @@ copy4me_tui_main() {
     done
 }
 
+# ==============================================================================
+#           MENÚ PRINCIPAL Y ESTRUCTURA GENERAL DE BACKUP
+# ==============================================================================
+
 hacer_backup() {
     trap "clear; return" SIGINT
-    local DESTINO_DEF="/var/backups/stk_backups"
 
     while true; do
         clear
         mostrar_logo
-        pintar $CIAN "--- GESTIÓN DE COPIAS DE SEGURIDAD ---"
+        pintar $CIAN "--- GESTIÓN INTEGRAL DE COPIAS DE SEGURIDAD ---"
         
-        local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual\n3. 🌐 Web (/var/www)\n4. ✍️ Ruta Personalizada\n5. 🚀 COPY4ME TUI (FZF Sync y Perfiles)\n6. 📜 VER BACKUPS REALIZADOS\n7. 🗑️ ELIMINAR BACKUPS\n8. 🔄 RESTAURAR BACKUPS\n9. ↩ Volver"
-        local seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione acción" "C O P I A  D E  S E G U R I D A D")
+        local opciones="1. 📁 Respaldo Local Automático (PC - Compressed .tar.gz)\n2. 🚀 COPY4ME TUI Engine (Rsync, USB y Perfiles)\n3. 📜 Ver Backups Locales Existentes\n4. 🗑️ Eliminar Backups Locales\n5. 🔄 Restaurar Backup Comprimido\n6. ↩ Volver al Menú Principal"
+        local seleccion
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione opción" "G E S T I Ó N  D E  B A C K U P S")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
         
-        # Saltos directos a subfunciones
-        if [[ "${seleccion:0:1}" == "5" ]]; then copy4me_tui_main; continue; fi
-        if [[ "${seleccion:0:1}" == "6" ]]; then ver_backups_existentes; continue; fi
-        if [[ "${seleccion:0:1}" == "7" ]]; then eliminar_backups; continue; fi
-        if [[ "${seleccion:0:1}" == "8" ]]; then restaurar_backup; continue; fi
-        if [[ "${seleccion:0:1}" == "9" ]]; then break; fi
-
-        local ORIGEN=""
-        local USUARIO_REAL=${SUDO_USER:-$USER}
-
         case ${seleccion:0:1} in
-            1) ORIGEN="/etc" ;;
-            2) ORIGEN="/home/$USUARIO_REAL" ;;
-            3) ORIGEN="/var/www" ;;
-            4) 
-                echo -ne "\n${AMARILLO}➤ Ingrese ruta absoluta: ${RESET}"
-                read ORIGEN
-                ;;
+            1) autocopy_atomatic ;;
+            2) copy4me_tui_main ;;
+            3) ver_backups_existentes ;;
+            4) eliminar_backups ;;
+            5) restaurar_backup ;;
+            6) break ;;
         esac
-
-        # (Resto de la lógica estándar de hacer_backup...)
-        if [ ! -e "$ORIGEN" ]; then
-            pintar $ROJO "❌ Error: La ruta '$ORIGEN' no existe."
-            sleep 2; continue
-        fi
-
-        echo -ne "${CIAN}➤ Nombre para la subcarpeta de este backup (Enter para omitir): ${RESET}"
-        read SUBDIR
-        local RUTA_FINAL="$DESTINO_DEF/${SUBDIR:-"general"}"
-
-        if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
-            pintar $ROJO "❌ Error crítico: No se puede escribir en $RUTA_FINAL"
-            sleep 2; continue
-        fi
-        chmod 700 "$DESTINO_DEF"
-
-        local FECHA=$(date +%Y%m%d_%H%M%S)
-        local NOMBRE_ARCH="backup_$(basename "$ORIGEN")_${FECHA}.tar.gz"
-        local DESTINO_COMPLETO="$RUTA_FINAL/$NOMBRE_ARCH"
-
-        if ! verificar_espacio "$ORIGEN" "$RUTA_FINAL"; then
-            pintar $ROJO "❌ Espacio insuficiente en destino."
-            read -p "Enter..."; continue
-        fi
-
-        echo -e "\n${AZUL}🔄 Iniciando respaldo...${RESET}"
-        mostrar_spinner & SPINNER_PID=$!
-
-        tar -czpf "$DESTINO_COMPLETO" \
-            --exclude='*.log' --exclude='*.tmp' --exclude='*/.cache/*' \
-            -C "$(dirname "$ORIGEN")" "$(basename "$ORIGEN")" > /tmp/stk_backup_err 2>&1
-        TAR_EXIT_CODE=$?
-
-        kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-        printf "\r\e[K"
-
-        if [ $TAR_EXIT_CODE -eq 0 ]; then
-            chmod 600 "$DESTINO_COMPLETO"
-            local SIZE=$(du -h "$DESTINO_COMPLETO" | cut -f1)
-            local HASH=$(sha256sum "$DESTINO_COMPLETO" | awk '{print $1}' | cut -c1-16)
-
-            echo -e "${VERDE_BRILLANTE}✅ BACKUP COMPLETADO CON ÉXITO${RESET}"
-            echo -e "${BLANCO}------------------------------------------------${RESET}"
-            echo -e "${AMARILLO}Archivo:   ${BLANCO}$NOMBRE_ARCH${RESET}"
-            echo -e "${AMARILLO}Ruta:      ${BLANCO}$RUTA_FINAL${RESET}"
-            echo -e "${AMARILLO}Tamaño:    ${BLANCO}$SIZE${RESET}"
-            echo -e "${AMARILLO}SHA256:    ${BLANCO}$HASH... (verificado)${RESET}"
-            echo -e "${BLANCO}------------------------------------------------${RESET}"
-            
-            registrar_log "$LOG_INFO" "Backup exitoso: $NOMBRE_ARCH en $RUTA_FINAL (Hash: $HASH)"
-            rotar_backups "$RUTA_FINAL"
-        else
-            pintar $ROJO "❌ Error durante la compresión:"
-            cat /tmp/stk_backup_err
-            registrar_log "$LOG_ERR" "Error en tar al respaldar $ORIGEN"
-        fi
-        
-        read -p "Presione Enter para continuar..."
     done
 }
 
