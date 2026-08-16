@@ -532,16 +532,16 @@ modo_auto() {
     pintar "$AZUL" "📌 Paso 2/4: Súper limpieza del sistema"
     super_limpieza
 
-    # 3. Rotación de logs silenciosa
+    # 3. Auditoría de seguridad
     echo ""
-    pintar "$AZUL" "📌 Paso 3/4: Mantenimiento y rotación de bitácoras"
-    rotar_logs "silencioso"
-
-    # 4. Auditoría de seguridad
-    echo ""
-    pintar "$AZUL" "📌 Paso 4/4: Auditoría de seguridad del sistema"
+    pintar "$AZUL" "📌 Paso 3/4: Auditoría de seguridad del sistema"
     auditoria_seguridad
 
+    # 4. Servicios fallidos
+    echo ""
+    pintar "$AZUL" "📌 Paso 4/4: Auditoría de Servicios"
+    gestionar_servicios
+    
     registrar_log "$LOG_INFO" "MODO AUTO completado con éxito"
 }
 auditoria_seguridad() {
