@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.8.5 Testeando en Arch"
+V="5.8.6 Arch ok"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -219,15 +219,23 @@ get_package_name() {
     local tool=$1
     case "$tool" in
         "xsltproc") echo "xsltproc" ;;
-        "host") [[ "$Package" == "apt" ]] && echo "dnsutils" || echo "bind-utils" ;;
+        "host") 
+            case "$Package" in
+                "apt") echo  "bind9-dnsutils" ;;
+                "pacman") echo "bind" ;;
+                "dnf") echo "bind-utils" ;;
+                "zypper") echo "bind-utils" ;;
+                *) echo "bind-utils" ;;
+            esac
+            ;;
         "tput") [[ "$Package" == "apt" ]] && echo "ncurses-bin" || echo "ncurses" ;;
-        "free") echo "procps" ;;
+        "free") [[ "$Package" == "pacman" ]] && echo "procps-ng" || echo "procps" ;;
         "hostname") [[ "$Package" == "pacman" ]] && echo "inetutils" || echo "hostname" ;;
         "fzf") echo "fzf" ;;
         "js") 
             case "$Package" in
                 "pacman") echo "js128" ;;       # En Arch actual es js128 / quickjs
-                "apt") echo "gjs" ;;            # O nodejs / libjavascriptcoregtk-4.0-bin
+                "apt") echo "nodejs" ;;            # O nodejs / libjavascriptcoregtk-4.0-bin
                 "dnf") echo "mozjs115" ;;
                 *) echo "js" ;;
             esac
