@@ -516,33 +516,203 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
     done
 }
 
+# --- NUEVO MODO AUTOMÁTICO AUTÓNOMO Y VERBOSO ---
+
 modo_auto() {
     clear
     mostrar_logo
-    pintar "$MAGENTA" "--- INICIANDO MODO AUTOMÁTICO DE MANTENIMIENTO ---"
-    registrar_log "$LOG_INFO" "Inicio de ejecución del MODO AUTO"
+    pintar "$MAGENTA" "════════════════════════════════════════════════════════════════"
+    pintar "$BLANCO"  " 🤖 INICIANDO MODO AUTOMÁTICO INTEGRAL DE MANTENIMIENTO"
+    pintar "$MAGENTA" "════════════════════════════════════════════════════════════════"
     echo ""
 
-    # 1. Actualización del sistema
-    pintar "$AZUL" "📌 Paso 1/4: Actualización del sistema"
-    Actualizar_sistema
+    local T_INICIO
+    T_INICIO=$(date +%s)
+    local FECHA_INICIO
+    FECHA_INICIO=$(date '+%Y-%m-%d %H:%M:%S')
 
-    # 2. Mantenimiento y limpieza
-    echo ""
-    pintar "$AZUL" "📌 Paso 2/4: Súper limpieza del sistema"
-    super_limpieza
+    registrar_log "$LOG_INFO" "=== INICIO DE MODO AUTO ==="
 
-    # 3. Auditoría de seguridad
-    echo ""
-    pintar "$AZUL" "📌 Paso 3/4: Auditoría de seguridad del sistema"
-    auditoria_seguridad
+    # Variables para almacenar el resumen verboso
+    local RES_ACTUALIZACION="Sin procesar"
+    local RES_LIMPIEZA="Sin procesar"
+    local RES_SEGURIDAD="Sin procesar"
+    local RES_SERVICIOS="Sin procesar"
 
-    # 4. Servicios fallidos
-    echo ""
-    pintar "$AZUL" "📌 Paso 4/4: Auditoría de Servicios"
-    gestionar_servicios
+    # --------------------------------------------------------------------------
+    # PASO 1: ACTUALIZACIÓN DEL SISTEMA
+    # --------------------------------------------------------------------------
+    pintar "$AZUL_BRILLANTE" "📌 [1/4] Ejecutando Actualización del Sistema ($Package)..."
+    local LOG_TEMP_ACT
+    LOG_TEMP_ACT=$(mktemp)
     
-    registrar_log "$LOG_INFO" "MODO AUTO completado con éxito"
+    case "$Package" in
+        apt)
+            DEBIAN_FRONTEND=noninteractive apt-get update -y &>"$LOG_TEMP_ACT" && \
+            DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y &>>"$LOG_TEMP_ACT" && \
+            apt-get autoremove -y &>>"$LOG_TEMP_ACT"
+            ;;
+        dnf)
+            dnf upgrade --refresh -y &>"$LOG_TEMP_ACT" && dnf autoremove -y &>>"$LOG_TEMP_ACT"
+            ;;
+        pacman)
+            pacman -Syu --noconfirm &>"$LOG_TEMP_ACT"
+            ;;
+        zypper)
+            zypper refresh &>"$LOG_TEMP_ACT" && zypper update -y &>>"$LOG_TEMP_ACT"
+            ;;
+    esac
+
+    if [ $? -eq 0 ]; then
+        RES_ACTUALIZACION="✔ Sistema actualizado correctamente mediante $Package."
+        pintar "$VERDE" "   └─ Operación completada con éxito."
+    else
+        RES_ACTUALIZACION="❌ Error durante la actualización con $Package."
+        pintar "$ROJO" "   └─ Ocurrió un error (ver detalle en la bitácora)."
+    fi
+    rm -f "$LOG_TEMP_ACT"
+
+    # Actualizaciones secundarias opcionales
+    command -v flatpak &>/dev/null && flatpak update -y &>/dev/null
+    command -v snap &>/dev/null && snap refresh &>/dev/null
+
+    echo ""
+
+    # --------------------------------------------------------------------------
+    # PASO 2: SÚPER LIMPIEZA
+    # --------------------------------------------------------------------------
+    pintar "$AZUL_BRILLANTE" "📌 [2/4] Ejecutando Limpieza de Archivos y Caché..."
+    local ANTES_RAIZ
+    ANTES_RAIZ=$(df --output=avail / | tail -n 1)
+
+    # Vaciado de logs journald antiguos
+    command -v journalctl &>/dev/null && journalctl --vacuum-time=3d &>/dev/null
+
+    # Limpieza de paquetes
+    case "$Package" in
+        apt)    apt-get install -f -y &>/dev/null; apt-get autoremove --purge -y &>/dev/null; apt-get clean &>/dev/null ;;
+        dnf)    dnf clean all &>/dev/null; dnf autoremove -y &>/dev/null ;;
+        pacman) pacman -Sc --noconfirm &>/dev/null ;;
+        zypper) zypper clean --all &>/dev/null ;;
+    esac
+
+    # Limpieza de papeleras y thumbnails
+    find /home/*/.local/share/Trash/files /root/.local/share/Trash/files -mindepth 1 -delete 2>/dev/null
+    find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
+
+    local DESPUES_RAIZ
+    DESPUES_RAIZ=$(df --output=avail / | tail -n 1)
+    local LIBERADO_MB=$(( (DESPUES_RAIZ - ANTES_RAIZ) / 1024 ))
+    [ "$LIBERADO_MB" -lt 0 ] && LIBERADO_MB=0
+
+    RES_LIMPIEZA="✔ Limpieza finalizada. Espacio liberado en /: ~${LIBERADO_MB} MB."
+    pintar "$VERDE" "   └─ $RES_LIMPIEZA"
+    echo ""
+
+    # --------------------------------------------------------------------------
+    # PASO 3: AUDITORÍA DE SEGURIDAD
+    # --------------------------------------------------------------------------
+    pintar "$AZUL_BRILLANTE" "📌 [3/4] Auditando Parámetros de Seguridad..."
+    local sec_checks=0
+    local sec_passed=0
+    local sec_alertas=()
+
+    # UID 0
+    ((sec_checks++))
+    if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd | wc -l) -gt 1 ]; then
+        sec_alertas+=("Múltiples usuarios UID 0 detectados")
+    else
+        ((sec_passed++))
+    fi
+
+    # Cuentas sin clave
+    ((sec_checks++))
+    if [ -n "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
+        sec_alertas+=("Cuentas con credenciales inactivas/sin clave")
+    else
+        ((sec_passed++))
+    fi
+
+    # Estado Cortafuegos
+    ((sec_checks++))
+    local fw_active=false
+    case "$Package" in
+        apt)    ufw status 2>/dev/null | grep -q "active" && fw_active=true ;;
+        dnf)    systemctl is-active firewalld &>/dev/null && fw_active=true ;;
+        *)      (systemctl is-active nftables &>/dev/null || systemctl is-active iptables &>/dev/null) && fw_active=true ;;
+    esac
+
+    if [ "$fw_active" = true ]; then
+        ((sec_passed++))
+    else
+        sec_alertas+=("Firewall inactivo")
+    fi
+
+    local score=$(( (sec_passed * 100) / sec_checks ))
+    RES_SEGURIDAD="Puntuación: ${score}% (${sec_passed}/${sec_checks} pruebas pasadas). Alertas: ${#sec_alertas[@]}."
+    pintar "$VERDE" "   └─ $RES_SEGURIDAD"
+    echo ""
+
+    # --------------------------------------------------------------------------
+    # PASO 4: REVISIÓN DE SERVICIOS FALLIDOS
+    # --------------------------------------------------------------------------
+    pintar "$AZUL_BRILLANTE" "📌 [4/4] Analizando Estado de Servicios (Systemd)..."
+    local svcs_failed
+    svcs_failed=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+    local count_failed=0
+
+    if [ -n "$svcs_failed" ]; then
+        count_failed=$(echo "$svcs_failed" | wc -l)
+        RES_SERVICIOS="⚠️ Detectados $count_failed servicio(s) fallido(s): $(echo $svcs_failed | tr '\n' ' ')"
+        pintar "$AMARILLO" "   └─ $RES_SERVICIOS"
+    else
+        RES_SERVICIOS="✔ Todos los servicios están funcionando correctamente (0 fallidos)."
+        pintar "$VERDE" "   └─ $RES_SERVICIOS"
+    fi
+
+    # --------------------------------------------------------------------------
+    # CÁLCULO DE TIEMPOS Y RESUMEN VERBOSO FINAL
+    # --------------------------------------------------------------------------
+    local T_FIN
+    T_FIN=$(date +%s)
+    local DURACION=$(( T_FIN - T_INICIO ))
+
+    echo ""
+    pintar "$CIAN" "════════════════════════════════════════════════════════════════"
+    pintar "$BLANCO" "       📋 INFORME Y RESUMEN FINAL - MODO AUTOMÁTICO"
+    pintar "$CIAN" "════════════════════════════════════════════════════════════════"
+    echo -e "${AMARILLO}➤ Fecha y Hora de Inicio:${RESET} ${BLANCO}${FECHA_INICIO}${RESET}"
+    echo -e "${AMARILLO}➤ Tiempo Total Transcurrido:${RESET} ${BLANCO}${DURACION} segundos${RESET}\n"
+
+    echo -e "${NEGRITA}${MAGENTA}DETALLES POR MÓDULO:${RESET}"
+    echo -e " ${AZUL}1. Actualización:${RESET} $RES_ACTUALIZACION"
+    echo -e " ${AZUL}2. Limpieza:${RESET}       $RES_LIMPIEZA"
+    echo -e " ${AZUL}3. Seguridad:${RESET}       $RES_SEGURIDAD"
+    echo -e " ${AZUL}4. Servicios:${RESET}       $RES_SERVICIOS"
+
+    if [ ${#sec_alertas[@]} -gt 0 ]; then
+        echo -e "\n${AMARILLO}⚠️ Alertas de Seguridad Detectadas:${RESET}"
+        for alt in "${sec_alertas[@]}"; do
+            echo -e "   • $alt"
+        done
+    fi
+    pintar "$CIAN" "════════════════════════════════════════════════════════════════"
+
+    # --- REGISTRO COMPLETO EN LA BITÁCORA (LOG) ---
+    registrar_log "$LOG_INFO" "=== RESUMEN MODO AUTO (Duración: ${DURACION}s) ==="
+    registrar_log "$LOG_INFO" "MÓDULO ACT: $RES_ACTUALIZACION"
+    registrar_log "$LOG_INFO" "MÓDULO LIMP: $RES_LIMPIEZA"
+    registrar_log "$LOG_INFO" "MÓDULO SEG: $RES_SEGURIDAD"
+    if [ ${#sec_alertas[@]} -gt 0 ]; then
+        for alt in "${sec_alertas[@]}"; do
+            registrar_log "$LOG_WARN" "SEG-ALERTA: $alt"
+        done
+    fi
+    registrar_log "$LOG_INFO" "MÓDULO SVC: $RES_SERVICIOS"
+    registrar_log "$LOG_INFO" "=== FIN DE MODO AUTO ==="
+
+    echo ""
+    read -p "Presione Enter para volver al menú principal..."
 }
 auditoria_seguridad() {
     trap "clear; return" SIGINT
