@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9 Auto"
+V="5.9.1 Auto en test"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -519,6 +519,9 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
 # --- NUEVO MODO AUTOMÁTICO AUTÓNOMO Y VERBOSO ---
 
 modo_auto() {
+    # Capturar Ctrl+C para volver de forma segura al menú principal
+    trap "clear; return" SIGINT
+
     clear
     mostrar_logo
     pintar "$MAGENTA" "════════════════════════════════════════════════════════════════"
@@ -531,9 +534,9 @@ modo_auto() {
     local FECHA_INICIO
     FECHA_INICIO=$(date '+%Y-%m-%d %H:%M:%S')
 
-    registrar_log "$LOG_INFO" "=== INICIO DE MODO AUTO ==="
+    registrar_log "$LOG_INFO" "=== INICIO DE MODO AUTO INTEGRAL ==="
 
-    # Variables para almacenar el resumen verboso
+    # Variables de estado y resumen
     local RES_ACTUALIZACION="Sin procesar"
     local RES_LIMPIEZA="Sin procesar"
     local RES_SEGURIDAD="Sin procesar"
@@ -543,62 +546,135 @@ modo_auto() {
     # PASO 1: ACTUALIZACIÓN DEL SISTEMA
     # --------------------------------------------------------------------------
     pintar "$AZUL_BRILLANTE" "📌 [1/4] Ejecutando Actualización del Sistema ($Package)..."
+    mostrar_spinner & SPINNER_PID=$!
+    
     local LOG_TEMP_ACT
     LOG_TEMP_ACT=$(mktemp)
-    
+    local ESTADO_ACT=1
+    local PKGS_ACTUALIZADOS=()
+
     case "$Package" in
         apt)
+            # Guardar lista de paquetes actualizables antes de ejecutar
+            mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
+
             DEBIAN_FRONTEND=noninteractive apt-get update -y &>"$LOG_TEMP_ACT" && \
             DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y &>>"$LOG_TEMP_ACT" && \
             apt-get autoremove -y &>>"$LOG_TEMP_ACT"
+            ESTADO_ACT=$?
             ;;
+
+        pacman)
+            # Extraer paquetes desde el log temporal de pacman
+            pacman -Syu --noconfirm &>"$LOG_TEMP_ACT"
+            ESTADO_ACT=$?
+            if [ $ESTADO_ACT -eq 0 ]; then
+                mapfile -t PKGS_ACTUALIZADOS < <(grep -E "upgraded|actualizado" "$LOG_TEMP_ACT" | awk '{print $2}')
+            fi
+            ;;
+
         dnf)
             dnf upgrade --refresh -y &>"$LOG_TEMP_ACT" && dnf autoremove -y &>>"$LOG_TEMP_ACT"
+            ESTADO_ACT=$?
+            if [ $ESTADO_ACT -eq 0 ]; then
+                mapfile -t PKGS_ACTUALIZADOS < <(grep -E "Upgraded:|Upgrade" "$LOG_TEMP_ACT" | awk '{print $2}')
+            fi
             ;;
-        pacman)
-            pacman -Syu --noconfirm &>"$LOG_TEMP_ACT"
-            ;;
+
         zypper)
             zypper refresh &>"$LOG_TEMP_ACT" && zypper update -y &>>"$LOG_TEMP_ACT"
+            ESTADO_ACT=$?
             ;;
     esac
 
-    if [ $? -eq 0 ]; then
-        RES_ACTUALIZACION="✔ Sistema actualizado correctamente mediante $Package."
-        pintar "$VERDE" "   └─ Operación completada con éxito."
+    # --- Flatpak ---
+    local RES_FLATPAK=""
+    local FLATPAKS_ACT=()
+    if command -v flatpak &>/dev/null; then
+        local LOG_FLATPAK
+        LOG_FLATPAK=$(mktemp)
+        flatpak update -y &>"$LOG_FLATPAK"
+        
+        if grep -qi -E "nothing to do|nothing updated|nada que hacer" "$LOG_FLATPAK"; then
+            RES_FLATPAK="Flatpak: Sin cambios."
+        else
+            mapfile -t FLATPAKS_ACT < <(grep -E "Updating|Installing|Actualizando" "$LOG_FLATPAK" | awk -F"'" '{print $2}')
+            RES_FLATPAK="Flatpak: ${#FLATPAKS_ACT[@]} aplicación(es) actualizada(s)."
+        fi
+        rm -f "$LOG_FLATPAK"
+    fi
+
+    # --- Snap ---
+    local RES_SNAP=""
+    local SNAPS_ACT=()
+    if command -v snap &>/dev/null; then
+        local LOG_SNAP
+        LOG_SNAP=$(mktemp)
+        snap refresh &>"$LOG_SNAP"
+        
+        if grep -qi -E "all snaps are up to date|todos los snaps están actualizados" "$LOG_SNAP"; then
+            RES_SNAP="Snap: Sin cambios."
+        else
+            mapfile -t SNAPS_ACT < <(grep -v "All snaps" "$LOG_SNAP" | awk 'NR>1 {print $1}')
+            RES_SNAP="Snap: ${#SNAPS_ACT[@]} paquete(s) actualizado(s)."
+        fi
+        rm -f "$LOG_SNAP"
+    fi
+
+    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+    printf "\r\e[K"
+
+    if [ $ESTADO_ACT -eq 0 ]; then
+        local total_pkgs=$(( ${#PKGS_ACTUALIZADOS[@]} + ${#FLATPAKS_ACT[@]} + ${#SNAPS_ACT[@]} ))
+        RES_ACTUALIZACION="✔ Sistema al día ($Package: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
+        [ -n "$RES_SNAP" ] && RES_ACTUALIZACION="$RES_ACTUALIZACION | $RES_SNAP"
+        RES_ACTUALIZACION="$RES_ACTUALIZACION)"
+        pintar "$VERDE" "   └─ $RES_ACTUALIZACION"
     else
-        RES_ACTUALIZACION="❌ Error durante la actualización con $Package."
-        pintar "$ROJO" "   └─ Ocurrió un error (ver detalle en la bitácora)."
+        RES_ACTUALIZACION="❌ Error en la actualización del gestor principal ($Package)."
+        pintar "$ROJO" "   └─ $RES_ACTUALIZACION"
     fi
     rm -f "$LOG_TEMP_ACT"
-
-    # Actualizaciones secundarias opcionales
-    command -v flatpak &>/dev/null && flatpak update -y &>/dev/null
-    command -v snap &>/dev/null && snap refresh &>/dev/null
-
     echo ""
 
     # --------------------------------------------------------------------------
     # PASO 2: SÚPER LIMPIEZA
     # --------------------------------------------------------------------------
-    pintar "$AZUL_BRILLANTE" "📌 [2/4] Ejecutando Limpieza de Archivos y Caché..."
+    pintar "$AZUL_BRILLANTE" "📌 [2/4] Ejecutando Limpieza Profunda del Sistema..."
+    mostrar_spinner & SPINNER_PID=$!
+
     local ANTES_RAIZ
     ANTES_RAIZ=$(df --output=avail / | tail -n 1)
 
-    # Vaciado de logs journald antiguos
     command -v journalctl &>/dev/null && journalctl --vacuum-time=3d &>/dev/null
 
-    # Limpieza de paquetes
     case "$Package" in
-        apt)    apt-get install -f -y &>/dev/null; apt-get autoremove --purge -y &>/dev/null; apt-get clean &>/dev/null ;;
-        dnf)    dnf clean all &>/dev/null; dnf autoremove -y &>/dev/null ;;
-        pacman) pacman -Sc --noconfirm &>/dev/null ;;
-        zypper) zypper clean --all &>/dev/null ;;
+        apt)
+            apt-get install -f -y &>/dev/null
+            apt-get autoremove --purge -y &>/dev/null
+            apt-get autoclean -y &>/dev/null
+            apt-get clean &>/dev/null
+            ;;
+        dnf)
+            dnf clean all &>/dev/null
+            dnf autoremove -y &>/dev/null
+            ;;
+        pacman)
+            pacman -Sc --noconfirm &>/dev/null
+            local huerfanos
+            huerfanos=$(pacman -Qtdq 2>/dev/null)
+            [ -n "$huerfanos" ] && pacman -Rns $huerfanos --noconfirm &>/dev/null
+            ;;
+        zypper)
+            zypper clean --all &>/dev/null
+            ;;
     esac
 
-    # Limpieza de papeleras y thumbnails
     find /home/*/.local/share/Trash/files /root/.local/share/Trash/files -mindepth 1 -delete 2>/dev/null
     find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
+
+    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+    printf "\r\e[K"
 
     local DESPUES_RAIZ
     DESPUES_RAIZ=$(df --output=avail / | tail -n 1)
@@ -612,32 +688,32 @@ modo_auto() {
     # --------------------------------------------------------------------------
     # PASO 3: AUDITORÍA DE SEGURIDAD
     # --------------------------------------------------------------------------
-    pintar "$AZUL_BRILLANTE" "📌 [3/4] Auditando Parámetros de Seguridad..."
+    pintar "$AZUL_BRILLANTE" "📌 [3/4] Auditando Parámetros Críticos de Seguridad..."
     local sec_checks=0
     local sec_passed=0
     local sec_alertas=()
 
-    # UID 0
+    # 1. Chequeo UID 0
     ((sec_checks++))
     if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd | wc -l) -gt 1 ]; then
-        sec_alertas+=("Múltiples usuarios UID 0 detectados")
+        sec_alertas+=("Múltiples usuarios con UID 0 detectados")
     else
         ((sec_passed++))
     fi
 
-    # Cuentas sin clave
+    # 2. Cuentas sin clave
     ((sec_checks++))
-    if [ -n "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
-        sec_alertas+=("Cuentas con credenciales inactivas/sin clave")
+    if [ -n "$(awk -F: '($2 == "" || $2 == "!!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
+        sec_alertas+=("Cuentas inactivas o sin contraseña configurada")
     else
         ((sec_passed++))
     fi
 
-    # Estado Cortafuegos
+    # 3. Estado Cortafuegos
     ((sec_checks++))
     local fw_active=false
     case "$Package" in
-        apt)    ufw status 2>/dev/null | grep -q "active" && fw_active=true ;;
+        apt)    command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active" && fw_active=true ;;
         dnf)    systemctl is-active firewalld &>/dev/null && fw_active=true ;;
         *)      (systemctl is-active nftables &>/dev/null || systemctl is-active iptables &>/dev/null) && fw_active=true ;;
     esac
@@ -645,12 +721,39 @@ modo_auto() {
     if [ "$fw_active" = true ]; then
         ((sec_passed++))
     else
-        sec_alertas+=("Firewall inactivo")
+        sec_alertas+=("Firewall inactivo o deshabilitado")
+    fi
+
+    # 4. Chequeo SSH
+    ((sec_checks++))
+    if command -v ss &>/dev/null; then
+        if ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
+            sec_alertas+=("Puerto SSH (22) expuesto públicamente")
+        else
+            ((sec_passed++))
+        fi
+    else
+        ((sec_passed++))
+    fi
+
+    # 5. Módulos MAC (SELinux / AppArmor)
+    ((sec_checks++))
+    if command -v getenforce &>/dev/null && [ "$(getenforce)" == "Enforcing" ]; then
+        ((sec_passed++))
+    elif command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
+        ((sec_passed++))
+    else
+        sec_alertas+=("Sin módulo MAC activo (AppArmor/SELinux)")
     fi
 
     local score=$(( (sec_passed * 100) / sec_checks ))
-    RES_SEGURIDAD="Puntuación: ${score}% (${sec_passed}/${sec_checks} pruebas pasadas). Alertas: ${#sec_alertas[@]}."
-    pintar "$VERDE" "   └─ $RES_SEGURIDAD"
+    RES_SEGURIDAD="Puntuación: ${score}% (${sec_passed}/${sec_checks} pruebas). Alertas: ${#sec_alertas[@]}."
+    
+    if [ $score -ge 80 ]; then
+        pintar "$VERDE" "   └─ $RES_SEGURIDAD"
+    else
+        pintar "$AMARILLO" "   └─ $RES_SEGURIDAD"
+    fi
     echo ""
 
     # --------------------------------------------------------------------------
@@ -659,19 +762,23 @@ modo_auto() {
     pintar "$AZUL_BRILLANTE" "📌 [4/4] Analizando Estado de Servicios (Systemd)..."
     local svcs_failed
     svcs_failed=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
-    local count_failed=0
 
     if [ -n "$svcs_failed" ]; then
-        count_failed=$(echo "$svcs_failed" | wc -l)
-        RES_SERVICIOS="⚠️ Detectados $count_failed servicio(s) fallido(s): $(echo $svcs_failed | tr '\n' ' ')"
+        local count_failed
+        count_failed=$(echo "$svcs_failed" | grep -c '^')
+        local svcs_list
+        svcs_list=$(echo "$svcs_failed" | tr '\n' ' ')
+        RES_SERVICIOS="⚠️ Detectados $count_failed servicio(s) fallido(s): $svcs_list"
         pintar "$AMARILLO" "   └─ $RES_SERVICIOS"
+        echo "Puedes ir al menú de Gestión de Servicios para más detalles y opciones de actuación"
     else
-        RES_SERVICIOS="✔ Todos los servicios están funcionando correctamente (0 fallidos)."
+        RES_SERVICIOS="✔ Todos los servicios operan correctamente (0 fallidos)."
         pintar "$VERDE" "   └─ $RES_SERVICIOS"
     fi
+    echo ""
 
     # --------------------------------------------------------------------------
-    # CÁLCULO DE TIEMPOS Y RESUMEN VERBOSO FINAL
+    # RESUMEN Y REGISTRO FINAL
     # --------------------------------------------------------------------------
     local T_FIN
     T_FIN=$(date +%s)
@@ -681,15 +788,30 @@ modo_auto() {
     pintar "$CIAN" "════════════════════════════════════════════════════════════════"
     pintar "$BLANCO" "       📋 INFORME Y RESUMEN FINAL - MODO AUTOMÁTICO"
     pintar "$CIAN" "════════════════════════════════════════════════════════════════"
-    echo -e "${AMARILLO}➤ Fecha y Hora de Inicio:${RESET} ${BLANCO}${FECHA_INICIO}${RESET}"
-    echo -e "${AMARILLO}➤ Tiempo Total Transcurrido:${RESET} ${BLANCO}${DURACION} segundos${RESET}\n"
+    echo -e "${AMARILLO}➤ Fecha de Inicio:${RESET}     ${BLANCO}${FECHA_INICIO}${RESET}"
+    echo -e "${AMARILLO}➤ Tiempo Transcurrido:${RESET}  ${BLANCO}${DURACION} segundos${RESET}\n"
 
-    echo -e "${NEGRITA}${MAGENTA}DETALLES POR MÓDULO:${RESET}"
+    echo -e "${NEGRITA}${MAGENTA}RESULTADOS POR MÓDULO:${RESET}"
     echo -e " ${AZUL}1. Actualización:${RESET} $RES_ACTUALIZACION"
     echo -e " ${AZUL}2. Limpieza:${RESET}       $RES_LIMPIEZA"
     echo -e " ${AZUL}3. Seguridad:${RESET}       $RES_SEGURIDAD"
     echo -e " ${AZUL}4. Servicios:${RESET}       $RES_SERVICIOS"
 
+    # Desglose detallado si se detectaron paquetes actualizados
+    if [ ${#PKGS_ACTUALIZADOS[@]} -gt 0 ] || [ ${#FLATPAKS_ACT[@]} -gt 0 ] || [ ${#SNAPS_ACT[@]} -gt 0 ]; then
+        echo -e "\n${AMARILLO}📦 Detalle de Paquetes Actualizados:${RESET}"
+        
+        if [ ${#PKGS_ACTUALIZADOS[@]} -gt 0 ]; then
+            echo -e "   ${AZUL_BRILLANTE}• Sistema ($Package):${RESET} ${PKGS_ACTUALIZADOS[*]}"
+        fi
+        if [ ${#FLATPAKS_ACT[@]} -gt 0 ]; then
+            echo -e "   ${AZUL_BRILLANTE}• Flatpak:${RESET} ${FLATPAKS_ACT[*]}"
+        fi
+        if [ ${#SNAPS_ACT[@]} -gt 0 ]; then
+            echo -e "   ${AZUL_BRILLANTE}• Snap:${RESET} ${SNAPS_ACT[*]}"
+        fi
+    fi
+    
     if [ ${#sec_alertas[@]} -gt 0 ]; then
         echo -e "\n${AMARILLO}⚠️ Alertas de Seguridad Detectadas:${RESET}"
         for alt in "${sec_alertas[@]}"; do
@@ -698,19 +820,18 @@ modo_auto() {
     fi
     pintar "$CIAN" "════════════════════════════════════════════════════════════════"
 
-    # --- REGISTRO COMPLETO EN LA BITÁCORA (LOG) ---
+    # Bitácora
     registrar_log "$LOG_INFO" "=== RESUMEN MODO AUTO (Duración: ${DURACION}s) ==="
-    registrar_log "$LOG_INFO" "MÓDULO ACT: $RES_ACTUALIZACION"
-    registrar_log "$LOG_INFO" "MÓDULO LIMP: $RES_LIMPIEZA"
-    registrar_log "$LOG_INFO" "MÓDULO SEG: $RES_SEGURIDAD"
-    if [ ${#sec_alertas[@]} -gt 0 ]; then
-        for alt in "${sec_alertas[@]}"; do
-            registrar_log "$LOG_WARN" "SEG-ALERTA: $alt"
-        done
-    fi
-    registrar_log "$LOG_INFO" "MÓDULO SVC: $RES_SERVICIOS"
+    registrar_log "$LOG_INFO" "ACTUALIZACIÓN: $RES_ACTUALIZACION"
+    registrar_log "$LOG_INFO" "LIMPIEZA: $RES_LIMPIEZA"
+    registrar_log "$LOG_INFO" "SEGURIDAD: $RES_SEGURIDAD"
+    for alt in "${sec_alertas[@]}"; do
+        registrar_log "$LOG_WARN" "SEG-ALERTA: $alt"
+    done
+    registrar_log "$LOG_INFO" "SERVICIOS: $RES_SERVICIOS"
     registrar_log "$LOG_INFO" "=== FIN DE MODO AUTO ==="
 
+    trap - SIGINT
     echo ""
     read -p "Presione Enter para volver al menú principal..."
 }
