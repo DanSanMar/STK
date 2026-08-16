@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.8.6 Arch ok"
+V="5.9 Auto"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -18,9 +18,10 @@ MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
+
 # --- CONFIGURACIÓN DE LOGS ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
-# niveles de severidad
+# Niveles de severidad
 LOG_INFO="INFO"
 LOG_WARN="WARN"
 LOG_ERR="ERROR"
@@ -30,11 +31,13 @@ DATE=$(date +"%d/%m/%Y")
 registrar_log() {
     local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
     local MENSAJE="${2}"
-    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')
+    local FECHA
+    FECHA=$(date '+%Y-%m-%d %H:%M:%S')
     
     # Formato: [FECHA] [NIVEL] [USUARIO] - MENSAJE
     echo "[$FECHA] [$NIVEL] [$USER] - $MENSAJE" >> "$LOG_FILE"
 }
+
 rotar_logs() {
     # Mantenemos el límite en Kilobytes (500 KB)
     local MAX_SIZE=500
@@ -43,26 +46,27 @@ rotar_logs() {
     if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
         clear
         mostrar_logo
-        pintar $CIAN "--- ROTACIÓN Y MANTENIMIENTO DE LOGS ---"
+        pintar "$CIAN" "--- ROTACIÓN Y MANTENIMIENTO DE LOGS ---"
         echo -e "${AMARILLO}➤ Archivo de bitácora:${RESET} ${BLANCO}$LOG_FILE${RESET}"
         echo -e "${AMARILLO}➤ Límite configurado:${RESET}  ${BLANCO}${MAX_SIZE} KB${RESET}\n"
     fi
 
     if [ ! -f "$LOG_FILE" ]; then
         if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
-            pintar $ROJO "❌ El archivo de log no existe aún. Creando uno nuevo..."
+            pintar "$ROJO" "❌ El archivo de log no existe aún. Creando uno nuevo..."
             umask 027
             touch "$LOG_FILE"
             chmod 640 "$LOG_FILE"
-            registrar_log "$LOG_INFO" "Bitácora reiniciada manualmente."[cite: 1]
-            pintar $VERDE "✔ Archivo creado e inicializado correctamente."
+            registrar_log "$LOG_INFO" "Bitácora reiniciada manualmente."
+            pintar "$VERDE" "✔ Archivo creado e inicializado correctamente."
             read -p "Presione Enter para volver..."
         fi
         return 0
     fi
 
     # Obtener el tamaño actual del archivo en KB
-    local SIZE=$(du -k "$LOG_FILE" | cut -f1)
+    local SIZE
+    SIZE=$(du -k "$LOG_FILE" | cut -f1)
 
     if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
         echo -e "${CIAN}🔍 Comprobando tamaño actual...${RESET}"
@@ -70,7 +74,7 @@ rotar_logs() {
     fi
 
     if [ "$SIZE" -ge "$MAX_SIZE" ]; then
-        [ "$MODO_SILENCIOSO" != "silencioso" ] && pintar $AMARILLO "⚠️ El archivo excede el límite. Procediendo con el vaciado y rotación..."
+        [ "$MODO_SILENCIOSO" != "silencioso" ] && pintar "$AMARILLO" "⚠️ El archivo excede el límite. Procediendo con el vaciado y rotación..."
         
         # Guardar marca del reinicio en el log vaciando el contenido anterior
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Log reiniciado por alcanzar el límite de $MAX_SIZE KB (Tamaño anterior: ${SIZE} KB)." > "$LOG_FILE"
@@ -79,12 +83,12 @@ rotar_logs() {
         chmod 640 "$LOG_FILE"
 
         if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
-            pintar $VERDE_BRILLANTE "✔ Se han liberado $((SIZE)) KB de espacio en la bitácora."
-            pintar $VERDE "✔ Permisos reafirmados a 640 (root:root/adm)."
+            pintar "$VERDE_BRILLANTE" "✔ Se han liberado ${SIZE} KB de espacio en la bitácora."
+            pintar "$VERDE" "✔ Permisos reafirmados a 640 (root:root/adm)."
         fi
     else
         if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
-            pintar $VERDE "✔ El tamaño del log está dentro de los márgenes aceptables."
+            pintar "$VERDE" "✔ El tamaño del log está dentro de los márgenes aceptables."
             echo -e "${AZUL}ℹ️ No se requirió rotación en este momento.${RESET}"
         fi
     fi
@@ -94,76 +98,77 @@ rotar_logs() {
         read -p "Presione Enter para volver al menú..."
     fi
 }
+
 ver_logs() {
     clear
     mostrar_logo
     if [ -f "$LOG_FILE" ]; then
-        pintar $CIAN "--- Últimas 20 entradas de la bitácora ---"
-        # Colorear INFO en verde, WARN en amarillo y ERROR en rojo al mostrar
+        pintar "$CIAN" "--- Últimas 20 entradas de la bitácora ---"
         tail -n 20 "$LOG_FILE" | awk '
             /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
             /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
             /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
         '
     else
-        pintar $ROJO "Aún no hay registros."
+        pintar "$ROJO" "Aún no hay registros."
     fi
     echo ""
     read -p "Presione Enter para volver..."
 }
+
 # --- COMPROBACIÓN DE SUDO ---
 if [ "$EUID" -ne 0 ]; then
     echo -e "${ROJO_BRILLANTE}⚠️ Error: Este script requiere privilegios de root.${RESET}"
     echo -e "${AMARILLO}Prueba con: sudo $0${RESET}"
     exit 1
 fi
-# Inicio y comprobación de resgristo de logs
+
+# Inicio y comprobación de registro de logs
 if [ ! -f "$LOG_FILE" ]; then
     umask 027
     touch "$LOG_FILE"
     chmod 640 "$LOG_FILE" # Solo root y el grupo pueden leerlo
     registrar_log "$LOG_INFO" "Bitácora inicializada - STK v$V"
 fi
-    # 1. Identificación del Package de paquetes, usamos variable Package vacia
+
+# Detección del gestor de paquetes
 Package=""
 
 if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="${ID:-unknown}"
-        OS_LIKE="${ID_LIKE:-unknown}"
-        URL="${HOME_URL:-unknown}"
-        
-        # Asignación inteligente de versión respetando Rolling Release
-        if [ -n "$VERSION" ]; then
-            VERSION="$VERSION"
-        elif [ -n "$VERSION_ID" ]; then
-            VERSION="$VERSION_ID"
-        elif [[ "$OS_ID" == "arch" || "$OS_LIKE" == *"arch"* ]]; then
-            # Si es Arch/derivada y no hay versión, se indica que es Rolling Release
-            VERSION="Rolling Release"
-        else
-            VERSION="unknown"
-        fi
+    . /etc/os-release
+    OS_ID="${ID:-unknown}"
+    OS_LIKE="${ID_LIKE:-unknown}"
+    URL="${HOME_URL:-unknown}"
+    
+    if [ -n "$VERSION" ]; then
+        VERSION="$VERSION"
+    elif [ -n "$VERSION_ID" ]; then
+        VERSION="$VERSION_ID"
+    elif [[ "$OS_ID" == "arch" || "$OS_LIKE" == *"arch"* ]]; then
+        VERSION="Rolling Release"
+    else
+        VERSION="unknown"
+    fi
 fi
 
-        # Lógica de detección 
-    case "$OS_ID" in
-        debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
-        fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
-        arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
-        opensuse*|suse)                            Package="zypper" ;;
-        *)
-            if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
-            elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
-            elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
-            elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
-            elif command -v apt &>/dev/null;    then Package="apt"
-            elif command -v dnf &>/dev/null;    then Package="dnf"
-            elif command -v pacman &>/dev/null; then Package="pacman"
-            elif command -v zypper &>/dev/null; then Package="zypper"
-            else Package="unknown"; fi
-            ;;
-    esac
+case "$OS_ID" in
+    debian|ubuntu|linuxmint|pop|kali|raspbian) Package="apt" ;;
+    fedora|rhel|centos|rocky|almalinux)        Package="dnf" ;;
+    arch|manjaro|endeavouros|garuda)           Package="pacman" ;;
+    opensuse*|suse)                            Package="zypper" ;;
+    *)
+        if [[ "$OS_LIKE" == *"debian"* ]]; then Package="apt"
+        elif [[ "$OS_LIKE" == *"fedora"* ]] || [[ "$OS_LIKE" == *"rhel"* ]]; then Package="dnf"
+        elif [[ "$OS_LIKE" == *"arch"* ]]; then Package="pacman"
+        elif [[ "$OS_LIKE" == *"suse"* ]]; then Package="zypper"
+        elif command -v apt &>/dev/null;    then Package="apt"
+        elif command -v dnf &>/dev/null;    then Package="dnf"
+        elif command -v pacman &>/dev/null; then Package="pacman"
+        elif command -v zypper &>/dev/null; then Package="zypper"
+        else Package="unknown"; fi
+        ;;
+esac
+
 # --- FUNCIONES AUXILIARES ---
 
 install_tools() {
@@ -175,7 +180,6 @@ install_tools() {
         "dnf") dnf makecache ;;
         "pacman") pacman -Sy ;;
         "zypper") zypper refresh ;;
-        
     esac
 
     for tool in "${tools_to_install[@]}"; do
@@ -192,55 +196,83 @@ install_tools() {
 
 mostrar_instrucciones() {
     clear
+    local pkg_upper
+    pkg_upper=$(echo "$Package" | tr '[:lower:]' '[:upper:]')
+
     echo -e "\n${AZUL}══════════════════════════════════════════════════${RESET}"
-    echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${Package^^})${RESET}"
+    echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${pkg_upper})${RESET}"
     echo -e "${AZUL}══════════════════════════════════════════════════${RESET}\n"
 
     for tool in "${missing_tools[@]}"; do
-        echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
         pkg=$(get_package_name "$tool")
 
+        if [[ "$tool" != "$pkg" ]]; then
+            echo -e "${AMARILLO}🛠  Comando faltante: ${BLANCO}$tool${AMARILLO} (Paquete: ${BLANCO}$pkg${AMARILLO})${RESET}"
+        else
+            echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
+        fi
+
         case "$Package" in
-            "pacman")
-                echo -e "   ${VERDE}✔ Comando:${RESET} sudo pacman -S $pkg"
+            pacman)
+                echo -e "   ${VERDE}✔ Comando:${RESET} pacman -S $pkg"
                 ;;
-            "apt"|"dnf"|"zypper")
-                echo -e "   ${VERDE}✔ Comando:${RESET} sudo $Package install -y $pkg"
+            apt|dnf|zypper)
+                echo -e "   ${VERDE}✔ Comando:${RESET} $Package install -y $pkg"
                 ;;
             *)
-                echo -e "   ${VERDE}✔ Comando:${RESET} Usa el gestor de paquetes de tu sistema para instalar: $pkg"
+                echo -e "   ${VERDE}✔ Comando:${RESET} Usa el gestor de tu sistema para instalar: $pkg"
                 ;;
         esac
         echo -e "${AZUL}--------------------------------------------------${RESET}"
     done
 }
-#opciones especificas para instalación automática
+
 get_package_name() {
-    local tool=$1
+    local tool="$1"
+
     case "$tool" in
-        "xsltproc") echo "xsltproc" ;;
+        "xsltproc"|"fzf")
+            echo "$tool"
+            ;;
         "host") 
             case "$Package" in
-                "apt") echo  "bind9-dnsutils" ;;
-                "pacman") echo "bind" ;;
-                "dnf") echo "bind-utils" ;;
-                "zypper") echo "bind-utils" ;;
-                *) echo "bind-utils" ;;
+                apt)    echo "bind9-dnsutils" ;;
+                pacman) echo "bind" ;;
+                *)      echo "bind-utils" ;;
             esac
             ;;
-        "tput") [[ "$Package" == "apt" ]] && echo "ncurses-bin" || echo "ncurses" ;;
-        "free") [[ "$Package" == "pacman" ]] && echo "procps-ng" || echo "procps" ;;
-        "hostname") [[ "$Package" == "pacman" ]] && echo "inetutils" || echo "hostname" ;;
-        "fzf") echo "fzf" ;;
+        "tput")
+            if [[ "$Package" == "apt" ]]; then
+                echo "ncurses-bin"
+            else
+                echo "ncurses"
+            fi
+            ;;
+        "free")
+            if [[ "$Package" == "pacman" ]]; then
+                echo "procps-ng"
+            else
+                echo "procps"
+            fi
+            ;;
+        "hostname")
+            if [[ "$Package" == "pacman" ]]; then
+                echo "inetutils"
+            else
+                echo "hostname"
+            fi
+            ;;
         "js") 
             case "$Package" in
-                "pacman") echo "js128" ;;       # En Arch actual es js128 / quickjs
-                "apt") echo "nodejs" ;;            # O nodejs / libjavascriptcoregtk-4.0-bin
-                "dnf") echo "mozjs115" ;;
-                *) echo "js" ;;
+                pacman) echo "js128" ;;
+                apt)    echo "nodejs" ;;
+                dnf)    echo "mozjs115" ;;
+                *)      echo "nodejs" ;;
             esac
             ;;
-        *) echo "$tool" ;;
+        *)
+            echo "$tool"
+            ;;
     esac
 }
 
@@ -249,43 +281,40 @@ pintar() {
     local MENSAJE="$2" 
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
-# --- CAPTURA DE SEÑALES (Salida limpia con Ctrl+C) ---
+
+# --- CAPTURA DE SEÑALES ---
 trap salir SIGINT SIGTERM
 
 salir() {
-    
     echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
-    pintar $AZUL "Saliendo de forma segura..."
+    pintar "$AZUL" "Saliendo de forma segura..."
     echo ""
-    pintar $VERDE "¡Gracias por usar STK, hasta pronto!"
+    pintar "$VERDE" "¡Gracias por usar STK, hasta pronto!"
     echo ""
     echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     exit 0
 }
 
 # --- DEFINICIÓN DE DEPENDENCIAS ---
-# fzf: Menú interactivo
-# xsltproc/host: Herramientas de red/procesamiento
-# ncurses-bin/ncurses-utils: Para el manejo del cursor (tput)
-# procps: Para comandos de sistema como 'free' o 'top'
 dependencies=(fzf xsltproc host tput free curl wget tar hostname js jq rsync)
-# --- LÓGICA DE RE-VERIFICACIÓN ---
+
 check_dependencies() {
     missing_tools=()
+    local js_executables=(js js128 js115 qjs gjs node nodejs)
+
     for tool in "${dependencies[@]}"; do
         if [[ "$tool" == "js" ]]; then
-            if ! command -v js &>/dev/null && \
-               ! command -v js128 &>/dev/null && \
-               ! command -v qjs &>/dev/null && \
-               ! command -v gjs &>/dev/null && \
-               ! command -v node &>/dev/null; then
-                missing_tools+=("js")
-            fi
+            local found_js=false
+            for exe in "${js_executables[@]}"; do
+                if command -v "$exe" &>/dev/null; then
+                    found_js=true
+                    break
+                fi
+            done
+            [[ "$found_js" == false ]] && missing_tools+=("js")
         else
-            if ! command -v "$tool" &> /dev/null && \
-               [ ! -f "/snap/bin/$tool" ] && \
-               [ ! -f "/var/lib/snapd/snap/bin/$tool" ]; then
+            if ! command -v "$tool" &>/dev/null; then
                 missing_tools+=("$tool")
             fi
         fi
@@ -294,115 +323,61 @@ check_dependencies() {
 
 # --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
 if ! ping -c 1 8.8.8.8 &>/dev/null; then
-    pintar $ROJO "❌ No hay conexión a internet. Algunas funciones fallarán."
+    pintar "$ROJO" "❌ No hay conexión a internet. Algunas funciones fallarán."
 fi
-#llamada para comprobar los programas necesarios
+
 check_dependencies
-#Herramientas no instaladas
+
 if [ ${#missing_tools[@]} -gt 0 ]; then
     echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
     echo -e "${CIAN}¿Qué deseas hacer?${RESET}"
-    echo -e "   ${BLANCO}s) Intento de instalación automática (Sudo)${RESET}"
+    echo -e "   ${BLANCO}s) Intento de instalación automática${RESET}"
     echo -e "   ${BLANCO}i) Mostrar instrucciones de instalación manual${RESET}"
     echo -e "   ${BLANCO}n) Continuar de todos modos (Puede fallar)${RESET}"
     echo -ne "\n${AMARILLO}Selecciona una opción: ${RESET}"
     read -r confirm
 
     if [[ "$confirm" == "s" ]]; then
-        # 1. Intentar instalar
         install_tools "${missing_tools[@]}"
-        
-        # 2. Verificación general de dependencias críticas
         check_dependencies
 
-        # Crear enlace de compatibilidad dinámico para 'js' en Arch / Linux
+        # Crear enlace de compatibilidad dinámico para 'js' si no existe
         if ! command -v js &>/dev/null; then
-            if command -v js128 &>/dev/null; then
-                ln -sf $(which js128) /usr/local/bin/js
-            elif command -v qjs &>/dev/null; then
-                ln -sf $(which qjs) /usr/local/bin/js
-            elif command -v gjs &>/dev/null; then
-                ln -sf $(which gjs) /usr/local/bin/js
-            elif command -v node &>/dev/null; then
-                ln -sf $(which node) /usr/local/bin/js
-            fi
+            js_candidates=(js128 js115 qjs gjs node nodejs)
+            for target in "${js_candidates[@]}"; do
+                if command -v "$target" &>/dev/null; then
+                    target_path=$(command -v "$target")
+                    echo -e "${AMARILLO}🔗 Creando enlace de compatibilidad para 'js' -> $target_path${RESET}"
+                    ln -sf "$target_path" /usr/local/bin/js
+                    break
+                fi
+            done
         fi
-        # Comprobación explícita de fzf (imprescindible para los menús)
-        if ! command -v fzf &> /dev/null; then
+
+        if ! command -v fzf &>/dev/null; then
             echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
             registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
 
-        # Comprobación explícita de js (si estaba en la lista inicial)
-        if ! command -v js &> /dev/null; then
+        if ! command -v js &>/dev/null; then
             echo -e "${AMARILLO}⚠️ Advertencia: El intérprete 'js' no se encontró o requiere un alias en el PATH.${RESET}"
             registrar_log "$LOG_WARN" "Dependencia 'js' no localizada tras la instalación."
         fi
 
-        # 3. Verificación de herramientas pendientes restantes
         if [ ${#missing_tools[@]} -gt 0 ]; then
             echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
             read -p "Presiona Enter para continuar de todos modos..."
         else
             registrar_log "$LOG_INFO" "Todas las dependencias instaladas con éxito."
         fi
+
+    elif [[ "$confirm" == "i" ]]; then
+        mostrar_instrucciones
+        read -p "Presiona Enter para continuar una vez hayas instalado las herramientas..."
+        check_dependencies
     fi
 fi
-restaurar_backup() {
-    local DESTINO_DEF="/var/backups/stk_backups"
-    clear
-    mostrar_logo
-    pintar $CIAN "--- RESTAURAR COPIA DE SEGURIDAD ---"
-
-    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz")" ]; then
-        pintar $ROJO "No hay backups disponibles para restaurar."
-        read -p "Presione Enter..."
-        return
-    fi
-
-    local seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para RESTAURAR" "R E S T A U R A C I Ó N")
-
-    if [ -n "$seleccion" ]; then
-        echo -e "\n${AMARILLO}¿Dónde desea restaurar el backup?${RESET}"
-        echo -e "1. En su ruta original (¡Peligro: Puede sobrescribir archivos!)"
-        echo -e "2. En una ruta temporal (/tmp/stk_restaurado)"
-        echo -ne "\nSeleccione una opción (1/2): "
-        read -r opt_restaurar
-
-        local ruta_extraccion="/"
-        if [[ "$opt_restaurar" == "2" ]]; then
-            ruta_extraccion="/tmp/stk_restaurado"
-            mkdir -p "$ruta_extraccion"
-        fi
-
-        echo -ne "\n${ROJO_BRILLANTE}⚠️ ¿Confirmar restauración de $(basename "$seleccion")? (s/N): ${RESET}"
-        read -r confirmar
-
-        if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
-            echo -e "\n${AZUL}🔄 Extrayendo archivos...${RESET}"
-            mostrar_spinner & SPINNER_PID=$!
-            
-            tar -xzpf "$seleccion" -C "$ruta_extraccion" > /tmp/stk_restore_err 2>&1
-            local EXIT_CODE=$?
-
-            kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-            printf "\r\e[K"
-
-            if [ $EXIT_CODE -eq 0 ]; then
-                pintar $VERDE_BRILLANTE "✔ Backup restaurado con éxito en: $ruta_extraccion"
-                registrar_log "$LOG_INFO" "Backup restaurado: $seleccion en $ruta_extraccion"
-            else
-                pintar $ROJO "❌ Error al restaurar:"
-                cat /tmp/stk_restore_err
-                registrar_log "$LOG_ERR" "Error al restaurar backup: $seleccion"
-            fi
-        else
-            pintar $AZUL "Operación cancelada."
-        fi
-        read -p "Presione Enter..."
-    fi
-}
 
 mostrar_logo() {
     # He re-alineado los bloques de ASCII para que encajen perfectamente
