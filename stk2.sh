@@ -434,11 +434,12 @@ menu() {
         
         # El encabezado es la primera línea que fzf ignorará gracias a --header-lines=1
 opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
+0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditoria.
 1. 📊 | MONITORIZACIÓN  | Analisis de rendimiento, red y seguridad
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
-5. ❌ | SALIR           | Control+C"
+5. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
         seleccion=$(echo -e "$opciones" | fzf_menu_principal)
@@ -448,6 +449,11 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
 
         # Extraemos solo el número antes del punto para el case
         case ${seleccion%%.*} in
+            
+            0) # --- MODO AUTO ---
+                modo_auto
+                ;;
+
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
@@ -510,6 +516,34 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
     done
 }
 
+modo_auto() {
+    clear
+    mostrar_logo
+    pintar "$MAGENTA" "--- INICIANDO MODO AUTOMÁTICO DE MANTENIMIENTO ---"
+    registrar_log "$LOG_INFO" "Inicio de ejecución del MODO AUTO"
+    echo ""
+
+    # 1. Actualización del sistema
+    pintar "$AZUL" "📌 Paso 1/4: Actualización del sistema"
+    Actualizar_sistema
+
+    # 2. Mantenimiento y limpieza
+    echo ""
+    pintar "$AZUL" "📌 Paso 2/4: Súper limpieza del sistema"
+    super_limpieza
+
+    # 3. Rotación de logs silenciosa
+    echo ""
+    pintar "$AZUL" "📌 Paso 3/4: Mantenimiento y rotación de bitácoras"
+    rotar_logs "silencioso"
+
+    # 4. Auditoría de seguridad
+    echo ""
+    pintar "$AZUL" "📌 Paso 4/4: Auditoría de seguridad del sistema"
+    auditoria_seguridad
+
+    registrar_log "$LOG_INFO" "MODO AUTO completado con éxito"
+}
 auditoria_seguridad() {
     trap "clear; return" SIGINT
     clear
