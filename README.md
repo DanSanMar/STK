@@ -2,7 +2,7 @@
  <img width="500" height="300" alt="image" src=https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png />
  </div>
 
-# 🛠️ STK - System Tool Kit (v5.8.5) Estamos probando y afinando para sacar la V.6
+# 🛠️ STK - System Tool Kit (v5.9.1) Estamos probando y afinando para sacar la V.6
 
 **System Tool Kit** es una potente herramienta de mantenimiento para sistemas basados en Linux (probada en Debian/Ubuntu/Kali/Fedora y las mismas distros en WSL2). Proporciona una interfaz visual intuitiva gracias a los menús creados con FZF para gestionar el mantenimiento/actualización, monitorización y administración del sistema.
 
@@ -13,8 +13,8 @@
 * **Monitor de Rendimiento:** Tablero visual en tiempo real con barras de estado para **CPU**, **RAM** y **Disco**.
 * **Gestión de Backups Pro:** Sistema de copias de seguridad con verificación de espacio, integridad **SHA256** y rotación automática.
 * **Seguridad y Auditoría:** Registro de actividad (Logs) persistente y comprobación estricta de privilegios.
-* **Nuevas funciones de la v.5.8.1:** Se añade una opción para restaurar los Backups y una pequeña Auditoria de Seguridad. 
-
+* **Funciones de la v.5.8.1:** Se añade una opción para restaurar los Backups y una pequeña Auditoria de Seguridad. 
+* **Nuevas funciones de la v.5.9.1:** Se añade un Modo Auto al menú principal, una forma directa de actualizar, limpiar, auditar la seguridad y revisar los servicios fallidos. 
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -107,6 +107,12 @@ A diferencia de scripts básicos, STK:
 * **Mejora:** Menús `fzf` para los dos sistemas de backups
 * **Optimización:** Mejoras visuales y robusted para distintas distros.
 * **Seguridad:** Implementación de auditoria de seguridad más completa.
+
+## 📝 Registro de Cambios (v5.9.1)
+* **Nuevo:** Integración del ejecutor rápido `modo_auto` para mantenimiento automatizado y auditoría integral del sistema.
+* **Mejora:** Detección inteligente de gestores de paquetes principales (`apt`, `pacman`, `dnf`, `zypper`) y secundarios (`flatpak`, `snap`).
+* **Optimización:** Limpieza profunda con cálculo dinámico de espacio en disco recuperado y gestión de `journalctl`.
+* **Seguridad:** Evaluación de seguridad con sistema de puntuación porcentual y verificación del estado de servicios en `systemd`.
 ---
 **Autor:** [DanSanMar](https://github.com/DanSanMar)  
 **Descripción:** Herramienta integral de mantenimiento para Linux.
