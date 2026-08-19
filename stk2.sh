@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.1 Auto en test"
+V="5.9.2 Auto en test"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -274,6 +274,24 @@ get_package_name() {
             echo "$tool"
             ;;
     esac
+}
+
+comprobar_firewall() {
+    # 1. Inspeccionar reglas reales en el Kernel vía nftables
+    if command -v nft &>/dev/null && [ $(nft list ruleset 2>/dev/null | wc -l) -gt 0 ]; then
+        return 0
+    # 2. Inspeccionar reglas reales en el Kernel vía iptables
+    elif command -v iptables &>/dev/null && [ $(iptables -S 2>/dev/null | grep -E '^-A' | wc -l) -gt 0 ]; then
+        return 0
+    # 3. Verificar estado de UFW (Debian/Ubuntu)
+    elif command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "status: active"; then
+        return 0
+    # 4. Verificar estado de Firewalld (RHEL/Fedora/CentOS)
+    elif command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | grep -q "running"; then
+        return 0
+    fi
+
+    return 1
 }
 
 pintar() { 
@@ -711,17 +729,10 @@ modo_auto() {
 
     # 3. Estado Cortafuegos
     ((sec_checks++))
-    local fw_active=false
-    case "$Package" in
-        apt)    command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active" && fw_active=true ;;
-        dnf)    systemctl is-active firewalld &>/dev/null && fw_active=true ;;
-        *)      (systemctl is-active nftables &>/dev/null || systemctl is-active iptables &>/dev/null) && fw_active=true ;;
-    esac
-
-    if [ "$fw_active" = true ]; then
+    if comprobar_firewall; then
         ((sec_passed++))
     else
-        sec_alertas+=("Firewall inactivo o deshabilitado")
+        sec_alertas+=("Firewall inactivo o sin reglas configuradas")
     fi
 
     # 4. Chequeo SSH
@@ -1002,41 +1013,13 @@ auditoria_seguridad() {
     # A. Cortafuegos
     ((total_checks++))
     pintar $AMARILLO "🔍 Estado del Cortafuegos (Firewall):"
-    local fw_active=false
 
-    case "$Package" in
-        apt)
-            if command -v ufw &>/dev/null; then
-                local ufw_st
-                ufw_st=$(ufw status 2>/dev/null | head -n 1)
-                echo -e "  • UFW: ${BLANCO}${ufw_st}${RESET}"
-                if [[ "$ufw_st" == *"active"* ]] && [[ "$ufw_st" != *"inactive"* ]]; then
-                    fw_active=true
-                fi
-            fi
-            ;;
-        dnf)
-            if command -v firewall-cmd &>/dev/null; then
-                local fwd_st
-                fwd_st=$(systemctl is-active firewalld 2>/dev/null)
-                echo -e "  • Firewalld: ${BLANCO}${fwd_st}${RESET}"
-                [ "$fwd_st" == "active" ] && fw_active=true
-            fi
-            ;;
-        pacman|zypper|*)
-            if systemctl is-active nftables &>/dev/null || systemctl is-active iptables &>/dev/null; then
-                echo -e "  • Servidor con motor de reglas activo (nftables/iptables)."
-                fw_active=true
-            fi
-            ;;
-    esac
-
-    if [ "$fw_active" = true ]; then
-        pintar $VERDE "  ✔ El cortafuegos está activo y protegiendo el sistema."
+    if comprobar_firewall; then
+        pintar $VERDE "  ✔ Se detectaron reglas de cortafuegos activas en el sistema."
         ((checks_passed++))
     else
-        pintar $ROJO_BRILLANTE "  ⚠️ No se detectó ningún cortafuegos activo."
-        registrar_log "$LOG_WARN" "SEGURIDAD: Firewall inactivo en $Package"
+        pintar $ROJO_BRILLANTE "  ⚠️ No se detectó ningún cortafuegos o motor de filtrado activo."
+        registrar_log "$LOG_WARN" "SEGURIDAD: Firewall inactivo o sin reglas filtrando."
         sugerencias+=("🔥 Firewall: Habilita y configura el cortafuegos de tu sistema (ufw/firewalld/nftables).")
         ((alertas_count++))
     fi
