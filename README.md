@@ -2,7 +2,26 @@
  <img width="500" height="300" alt="image" src=https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png />
  </div>
 
-# 🛠️ STK - System Tool Kit (v5.9.1) Estamos probando y afinando para sacar la V.6
+# 🛠️ STK - System Tool Kit (v5.9.4) Estamos probando y afinando para sacar la V.6
+
+<div align="center">
+
+<!-- BANNER PRINCIPAL -->
+<img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
+
+<!-- ETIQUETAS ESENCIALES -->
+![Version](https://img.shields.io/badge/versión-5.9.4-blue?style=flat-square&logo=github)
+![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
+![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
+![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
+![Licencia](https://img.shields.io/badge/licencia-MIT-orange?style=flat-square&logo=opensourceinitiative)
+
+![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
+![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
+
+# 🛠️ STK - System Tool Kit (v5.9.4)
+
+</div>
 
 **System Tool Kit** es una potente herramienta de mantenimiento para sistemas basados en Linux (probada en Debian/Ubuntu/Kali/Fedora y las mismas distros en WSL2). Proporciona una interfaz visual intuitiva gracias a los menús creados con FZF para gestionar el mantenimiento/actualización, monitorización y administración del sistema.
 
@@ -14,7 +33,8 @@
 * **Gestión de Backups Pro:** Sistema de copias de seguridad con verificación de espacio, integridad **SHA256** y rotación automática.
 * **Seguridad y Auditoría:** Registro de actividad (Logs) persistente y comprobación estricta de privilegios.
 * **Funciones de la v.5.8.1:** Se añade una opción para restaurar los Backups y una pequeña Auditoria de Seguridad. 
-* **Nuevas funciones de la v.5.9.1:** Se añade un Modo Auto al menú principal, una forma directa de actualizar, limpiar, auditar la seguridad y revisar los servicios fallidos. 
+* **Funciones de la v.5.9.1:** Se añade un Modo Auto al menú principal, una forma directa de actualizar, limpiar, auditar la seguridad y revisar los servicios fallidos. 
+* **Nuevas funciones de la v.5.9.4:** Se añade una opción de gestión de Firewall con UFW dentro del menú de Auditoria de Seguridad.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -113,6 +133,11 @@ A diferencia de scripts básicos, STK:
 * **Mejora:** Detección inteligente de gestores de paquetes principales (`apt`, `pacman`, `dnf`, `zypper`) y secundarios (`flatpak`, `snap`).
 * **Optimización:** Limpieza profunda con cálculo dinámico de espacio en disco recuperado y gestión de `journalctl`.
 * **Seguridad:** Evaluación de seguridad con sistema de puntuación porcentual y verificación del estado de servicios en `systemd`.
+
+## 📝 Registro de Cambios (v5.9.4) (Actual)
+* **Nuevo:** Integración completa de UFW Firewall Manager.
+* **Mejora:** Menús optimizados para gestión de reglas y auditoría de tráfico.
+* **Seguridad:** Detección de escaneos de puertos y fuerza bruta.
 ---
 **Autor:** [DanSanMar](https://github.com/DanSanMar)  
 **Descripción:** Herramienta integral de mantenimiento para Linux.
