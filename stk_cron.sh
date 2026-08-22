@@ -401,8 +401,9 @@ programar_nueva_tarea() {
         7)
             local fzf_input=""
             for key in "${!TAREAS_DISPONIBLES[@]}"; do
-                fzf_input+="[ ] $key: ${TAREAS_DISPONIBLES[$key]}\n"
+                fzf_input+="$key: ${TAREAS_DISPONIBLES[$key]}\n"
             done
+
             if ! command -v fzf &>/dev/null; then
                 for key in "${!TAREAS_DISPONIBLES[@]}"; do
                     echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
@@ -417,13 +418,15 @@ programar_nueva_tarea() {
                 done
             else
                 local seleccionadas
-                seleccionadas=$(echo -e "$fzf_input" | fzf --ansi --height=18 --reverse --border=rounded \
-                    --prompt="➤ Marque con TAB: " --header="SELECCIONE CON TAB Y ENTER" --multi)
+                seleccionadas=$(echo -e -n "$fzf_input" | fzf --ansi --height=18 --reverse --border=rounded \
+                    --prompt="➤ Usa TAB para marcar varias: " \
+                    --header="SELECCIONAR MÚLTIPLES (TAB + ENTER)" --multi)
                 
                 [ -z "$seleccionadas" ] && return
                 
                 while IFS= read -r line; do
-                    local t_id=$(echo "$line" | awk -F'[' '{print $2}' | awk -F']' '{print $2}' | awk -F':' '{print $1}' | tr -d ' ')
+                    [ -z "$line" ] && continue
+                    local t_id=$(echo "$line" | cut -d':' -f1 | tr -d ' ')
                     if [[ -n "${TAREAS_DISPONIBLES[$t_id]}" ]]; then
                         TAREAS_SELECCIONADAS+=("$t_id:${TAREAS_DISPONIBLES[$t_id]}")
                     fi
@@ -648,12 +651,27 @@ ver_configuracion_cron() {
     echo ""
     
     if [ -f "$CRON_CONFIG_FILE" ]; then
-        pintar "$VERDE_BRILLANTE" "✅ Configuración activa:"
-        echo ""
         if command -v jq &>/dev/null; then
-            cat "$CRON_CONFIG_FILE" | jq '.' 2>/dev/null || cat "$CRON_CONFIG_FILE"
+            local schedule=$(jq -r '.configuracion.schedule // "No definido"' "$CRON_CONFIG_FILE")
+            local desc=$(jq -r '.configuracion.descripcion // "Sin descripción"' "$CRON_CONFIG_FILE")
+            local activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE")
+            local fecha_act=$(jq -r '.configuracion.fecha_activacion // "N/A"' "$CRON_CONFIG_FILE")
+            local ult_ejec=$(jq -r '.configuracion.ultima_ejecucion // "Nunca"' "$CRON_CONFIG_FILE")
+
+            if [ "$activado" == "true" ]; then
+                echo -e "Estado:          ${VERDE_BRILLANTE}ACTIVO${RESET}"
+            else
+                echo -e "Estado:          ${ROJO}INACTIVO${RESET}"
+            fi
+            echo -e "Frecuencia:      ${AZUL}$desc${RESET}"
+            echo -e "Cron Expression: ${AZUL}$schedule${RESET}"
+            echo -e "Activado el:     ${AZUL}$fecha_act${RESET}"
+            echo -e "Última ejecución:${AZUL}$ult_ejec${RESET}"
+            echo ""
+            echo -e "${AMARILLO}Tareas seleccionadas:${RESET}"
+            jq -r '.tareas[] | "  • " + .descripcion + " (ID: " + .id + ")"' "$CRON_CONFIG_FILE"
         else
-            cat "$CRON_CONFIG_FILE"
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" | sed 's/^/  • /'
         fi
     else
         pintar "$ROJO" "❌ No hay configuración activa."
