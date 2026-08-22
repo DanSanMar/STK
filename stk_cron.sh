@@ -30,6 +30,7 @@ CIAN='\e[36m'
 MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
+AZUL_BRILLANTE='\e[94m'
 BLANCO='\e[97m'
 
 # Definir función pintar propia
@@ -338,7 +339,7 @@ obtener_frecuencia_descripcion() {
         if command -v jq &>/dev/null; then
             jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
         else
-            grep -o '"descripcion":"[^"]*"' "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 || echo "No configurada"
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
         fi
     else
         echo "No configurada"
@@ -350,7 +351,7 @@ obtener_tareas_configuradas() {
         if command -v jq &>/dev/null; then
             jq -r '.tareas[] | .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
         else
-            grep -o '"descripcion":"[^"]*"' "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
         fi
     else
         echo "Ninguna"
@@ -454,7 +455,7 @@ seleccionar_tareas() {
 
                 TAREAS_SELECCIONADAS=()
                 while IFS= read -r line; do
-                    local tarea_id=$(echo "$line" | awk '{print $2}' | cut -d: -f1)
+                    local tarea_id=$(echo "$line" | sed -n 's/.*\[ \] \([^:]*\):.*/\1/p')
                     if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
                         TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
                     fi
