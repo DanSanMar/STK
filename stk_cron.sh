@@ -3,10 +3,7 @@
 #                 GESTOR DE TAREAS AUTOMATIZADAS (CRON)
 # ==============================================================================
 # STK - Módulo de programación automática de tareas
-# Versión: 1.0
-# 
-# Este script se integra con stk2.sh y permite programar tareas automáticas
-# usando el sistema CRON del sistema.
+# Versión: 2.0 (Flujo corregido y guiado por pasos)
 # ==============================================================================
 
 # --- DETECCIÓN DE DIRECTORIO Y CARGA DE CONFIGURACIÓN ---
@@ -15,43 +12,43 @@ STK2_SCRIPT="$SCRIPT_DIR/stk2.sh"
 
 # Verificar que existe stk2.sh
 if [ ! -f "$STK2_SCRIPT" ]; then
-    echo -e "\033[91m❌ Error: No se encuentra stk2.sh en el mismo directorio\033[0m"
-    echo -e "\033[33mEjecuta este script desde el directorio donde está stk2.sh\033[0m"
+    echo -e "\033[91m❌ Error: No se encuentra stk2.sh en el mismo directorio\033[0m"[cite: 1]
+    echo -e "\033[33mEjecuta este script desde el directorio donde está stk2.sh\033[0m"[cite: 1]
     exit 1
 fi
 
-# Definir colores propios (sin sourcear stk2.sh)
-RESET='\e[0m'
-VERDE_BRILLANTE='\e[92m'
-VERDE='\e[32m'
-AMARILLO='\e[33m'
-AZUL='\e[34m'
-CIAN='\e[36m'
-MAGENTA='\e[35m'
-ROJO='\e[31m'
-ROJO_BRILLANTE='\e[91m'
-AZUL_BRILLANTE='\e[94m'
-BLANCO='\e[97m'
+# Definir colores propios
+RESET='\e[0m'[cite: 1]
+VERDE_BRILLANTE='\e[92m'[cite: 1]
+VERDE='\e[32m'[cite: 1]
+AMARILLO='\e[33m'[cite: 1]
+AZUL='\e[34m'[cite: 1]
+CIAN='\e[36m'[cite: 1]
+MAGENTA='\e[35m'[cite: 1]
+ROJO='\e[31m'[cite: 1]
+ROJO_BRILLANTE='\e[91m'[cite: 1]
+AZUL_BRILLANTE='\e[94m'[cite: 1]
+BLANCO='\e[97m'[cite: 1]
 
 # Definir función pintar propia
 pintar() { 
     local COLOR="$1" 
     local MENSAJE="$2" 
-    echo -e "${COLOR}${MENSAJE}${RESET}"
+    echo -e "${COLOR}${MENSAJE}${RESET}"[cite: 1]
 }
 
-# Definir mostrar_logo propia para CRON
+# Definir mostrar_logo
 mostrar_logo() {
-    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"
-    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
-    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v1.0${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"[cite: 1]
+    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"[cite: 1]
+    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"[cite: 1]
+    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"[cite: 1]
+    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"[cite: 1]
+    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v2.0${RESET}"
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"[cite: 1]
 }
 
-# Definir fzf_estilo propia
+# Definir fzf_estilo
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
@@ -61,16 +58,16 @@ fzf_estilo() {
         --border=rounded \
         --prompt="➤ $prompt_text: " \
         --header="$header_text" \
-        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"[cite: 1]
 }
 
 # --- CONFIGURACIÓN ---
-CRON_CONFIG_DIR="/etc/stk/cron"
-CRON_CONFIG_FILE="$CRON_CONFIG_DIR/tasks.json"
-CRON_LOG_FILE="/var/log/stk_cron.log"
-CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
-CRON_STK_ID="# STK-AUTO-MAINTENANCE"
-STK_AUTO_WRAPPER="/usr/local/bin/stk_auto_wrapper.sh"
+CRON_CONFIG_DIR="/etc/stk/cron"[cite: 1]
+CRON_CONFIG_FILE="$CRON_CONFIG_DIR/tasks.json"[cite: 1]
+CRON_LOG_FILE="/var/log/stk_cron.log"[cite: 1]
+CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"[cite: 1]
+CRON_STK_ID="# STK-AUTO-MAINTENANCE"[cite: 1]
+STK_AUTO_WRAPPER="/usr/local/bin/stk_auto_wrapper.sh"[cite: 1]
 
 # --- DECLARACIÓN DE TAREAS DISPONIBLES ---
 declare -A TAREAS_DISPONIBLES=(
@@ -79,22 +76,20 @@ declare -A TAREAS_DISPONIBLES=(
     ["auditoria"]="🔍 Auditoría de seguridad"
     ["servicios"]="📊 Reporte de servicios"
     ["ufw"]="🛡️ Auditoría UFW"
-)
+)[cite: 1]
 
-declare -a TAREAS_SELECCIONADAS=()
+declare -a TAREAS_SELECCIONADAS=()[cite: 1]
 
 # ============================================================================
 #                   FUNCIONES DE INICIALIZACIÓN
 # ============================================================================
 
 inicializar_estructura() {
-    # Crear directorio de configuración
     if [ ! -d "$CRON_CONFIG_DIR" ]; then
-        mkdir -p "$CRON_CONFIG_DIR"
-        chmod 755 "$CRON_CONFIG_DIR"
+        mkdir -p "$CRON_CONFIG_DIR"[cite: 1]
+        chmod 755 "$CRON_CONFIG_DIR"[cite: 1]
     fi
     
-    # Crear archivo de configuración inicial
     if [ ! -f "$CRON_CONFIG_FILE" ]; then
         cat > "$CRON_CONFIG_FILE" << 'EOF'
 {
@@ -109,41 +104,33 @@ inicializar_estructura() {
     "tareas": []
 }
 EOF
-        chmod 600 "$CRON_CONFIG_FILE"
+        chmod 600 "$CRON_CONFIG_FILE"[cite: 1]
     fi
     
-    # Crear archivos de log
     for log in "$CRON_LOG_FILE" "$CRON_RESUMEN_FILE"; do
         if [ ! -f "$log" ]; then
-            touch "$log"
-            chmod 640 "$log"
+            touch "$log"[cite: 1]
+            chmod 640 "$log"[cite: 1]
         fi
     done
     
-    # Crear wrapper para CRON
-    crear_wrapper_cron
+    crear_wrapper_cron[cite: 1]
 }
 
 # ============================================================================
-#                   FUNCIONES DE LOG
+#                   FUNCIONES DE LOG Y WRAPPER
 # ============================================================================
 
 log_cron() {
-    local NIVEL="${1:-INFO}"
-    local MENSAJE="${2}"
-    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')
+    local NIVEL="${1:-INFO}"[cite: 1]
+    local MENSAJE="${2}"[cite: 1]
+    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')[cite: 1]
     
-    echo "[$FECHA] [$NIVEL] [root] - $MENSAJE" >> "$CRON_LOG_FILE"
-    
-    # También registrar en el log principal de STK
+    echo "[$FECHA] [$NIVEL] [root] - $MENSAJE" >> "$CRON_LOG_FILE"[cite: 1]
     if declare -f registrar_log >/dev/null 2>&1; then
-        registrar_log "$NIVEL" "[CRON] $MENSAJE"
+        registrar_log "$NIVEL" "[CRON] $MENSAJE"[cite: 1]
     fi
 }
-
-# ============================================================================
-#                   CREACIÓN DEL WRAPPER PARA CRON
-# ============================================================================
 
 crear_wrapper_cron() {
     cat << 'EOF' > "$STK_AUTO_WRAPPER"
@@ -152,17 +139,14 @@ crear_wrapper_cron() {
 # Generado automáticamente - No modificar manualmente
 # ==============================================================================
 
-# Cargar entorno
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
 
-# Cargar rutas pasadas dinámicamente o por defecto
 CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-# Directorio del script STK
 STK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "$STK_DIR/stk2.sh" ]; then
     for dir in "/opt/STK" "/usr/local/STK" "$HOME/STK"; do
@@ -185,7 +169,6 @@ if [ ! -f "$CRON_CONFIG_FILE" ]; then
     exit 1
 fi
 
-# Obtener lista de tareas
 if command -v jq &>/dev/null; then
     TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 else
@@ -316,259 +299,242 @@ fi
 exit 0
 EOF
 
-    chmod +x "$STK_AUTO_WRAPPER"
-    log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"
+    chmod +x "$STK_AUTO_WRAPPER"[cite: 1]
+    log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"[cite: 1]
 }
 
 # ============================================================================
-#                   FUNCIONES DE ESTADO
+#                   FUNCIONES DE CONSULTA DE ESTADO
 # ============================================================================
 
 verificar_cron_stk() {
-    crontab -l 2>/dev/null | grep -q "$CRON_STK_ID"
+    crontab -l 2>/dev/null | grep -q "$CRON_STK_ID"[cite: 1]
 }
 
 obtener_frecuencia_descripcion() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
+            jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"[cite: 1]
         else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"[cite: 1]
         fi
     else
-        echo "No configurada"
+        echo "No configurada"[cite: 1]
     fi
 }
 
 obtener_tareas_configuradas() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.tareas[] | .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
+            jq -r '.tareas[] | .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"[cite: 1]
         else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"[cite: 1]
         fi
     else
-        echo "Ninguna"
+        echo "Ninguna"[cite: 1]
     fi
 }
 
 obtener_ultima_ejecucion() {
     if [ -f "$CRON_LOG_FILE" ]; then
         local ultima_linea
-        ultima_linea=$(grep -E "INICIO|FIN" "$CRON_LOG_FILE" 2>/dev/null | tail -1)
+        ultima_linea=$(grep -E "INICIO|FIN" "$CRON_LOG_FILE" 2>/dev/null | tail -1)[cite: 1]
         if [ -n "$ultima_linea" ]; then
-            echo "$ultima_linea" | sed 's/^\[//' | cut -d']' -f1
+            echo "$ultima_linea" | sed 's/^\[//' | cut -d']' -f1[cite: 1]
         else
-            echo "Sin registros"
+            echo "Sin registros"[cite: 1]
         fi
     else
-        echo "Sin registros"
+        echo "Sin registros"[cite: 1]
     fi
 }
 
 # ============================================================================
-#                   FUNCIONES DE SELECCIÓN DE TAREAS
+#             NUEVO FLUJO GUIADO SECUENCIAL (TAREA -> FRECUENCIA)
 # ============================================================================
 
-seleccionar_tareas() {
-    local modo="$1"
+programar_nueva_tarea() {
+    TAREAS_SELECCIONADAS=()
+    
+    # ------------------------------------------------------------------------
+    # PASO 1: SELECCIÓN DE TAREAS
+    # ------------------------------------------------------------------------
     clear
     mostrar_logo
     echo ""
-    pintar "$CIAN" "--- SELECCIÓN DE TAREAS A PROGRAMAR ---"
+    pintar "$CIAN" "--- PASO 1: SELECCIONAR LA TAREA A PROGRAMAR ---"
     echo ""
 
-    # Si es modo completo, seleccionar todas
-    if [[ "$modo" == "completo" ]]; then
-        TAREAS_SELECCIONADAS=()
-        for key in "${!TAREAS_DISPONIBLES[@]}"; do
-            TAREAS_SELECCIONADAS+=("$key:${TAREAS_DISPONIBLES[$key]}")
-        done
-        pintar "$VERDE_BRILLANTE" "✅ Modo completo: todas las tareas seleccionadas"
+    local opciones_p1="1. Modo Completo (Todas las tareas)
+2. Actualización del sistema
+3. Limpieza del sistema
+4. Auditoría de seguridad
+5. Reporte de servicios
+6. Auditoría UFW
+7. Selección Múltiple Personalizada
+8. Cancelar"
+
+    local opc_p1=""
+    if command -v fzf &>/dev/null; then
+        local sel
+        sel=$(echo -e "$opciones_p1" | fzf_estilo "Paso 1/2: Elija la tarea" "PASO 1: SELECCIÓN DE TAREA")
+        [ -z "$sel" ] && return
+        opc_p1=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
+    else
+        echo -e "$opciones_p1"
         echo ""
-        echo -e "${AMARILLO}Tareas seleccionadas:${RESET}"
-        for tarea in "${TAREAS_SELECCIONADAS[@]}"; do
-            echo -e "  ${VERDE}•${RESET} ${tarea#*:}"
-        done
-        echo ""
-        read -p "Presione Enter para continuar..."
-        return
+        echo -ne "${AMARILLO}Seleccione opción (1-8): ${RESET}"
+        read -r opc_p1
     fi
 
-    # Para selección individual por modo
-    local tarea_id=""
-    case "$modo" in
-        "actualizacion") tarea_id="actualizacion" ;;
-        "limpieza") tarea_id="limpieza" ;;
-        "auditoria") tarea_id="auditoria" ;;
-        "servicios") tarea_id="servicios" ;;
-        "ufw") tarea_id="ufw" ;;
-        *)
-            # Si no es un modo específico, usar selector interactivo
-            TAREAS_SELECCIONADAS=()
-            # Construir lista para fzf
+    case "$opc_p1" in
+        1)
+            for key in "${!TAREAS_DISPONIBLES[@]}"; do
+                TAREAS_SELECCIONADAS+=("$key:${TAREAS_DISPONIBLES[$key]}")
+            done
+            ;;
+        2) TAREAS_SELECCIONADAS+=("actualizacion:${TAREAS_DISPONIBLES[actualizacion]}") ;;
+        3) TAREAS_SELECCIONADAS+=("limpieza:${TAREAS_DISPONIBLES[limpieza]}") ;;
+        4) TAREAS_SELECCIONADAS+=("auditoria:${TAREAS_DISPONIBLES[auditoria]}") ;;
+        5) TAREAS_SELECCIONADAS+=("servicios:${TAREAS_DISPONIBLES[servicios]}") ;;
+        6) TAREAS_SELECCIONADAS+=("ufw:${TAREAS_DISPONIBLES[ufw]}") ;;
+        7)
             local fzf_input=""
             for key in "${!TAREAS_DISPONIBLES[@]}"; do
                 fzf_input+="[ ] $key: ${TAREAS_DISPONIBLES[$key]}\n"
             done
-
             if ! command -v fzf &>/dev/null; then
-                pintar "$ROJO" "❌ fzf no está instalado. Usando selección manual."
-                echo ""
                 for key in "${!TAREAS_DISPONIBLES[@]}"; do
                     echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
                 done
-                echo ""
-                echo -e "${AMARILLO}Ingresa los IDs de las tareas separados por espacio:${RESET}"
+                echo -ne "${AMARILLO}IDs separados por espacio: ${RESET}"
                 read -r tareas_input
-                
-                # Convertir la entrada en array correctamente
                 IFS=' ' read -ra tareas_array <<< "$tareas_input"
-                for tarea_id in "${tareas_array[@]}"; do
-                    if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
-                        TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+                for t_id in "${tareas_array[@]}"; do
+                    if [[ -n "${TAREAS_DISPONIBLES[$t_id]}" ]]; then
+                        TAREAS_SELECCIONADAS+=("$t_id:${TAREAS_DISPONIBLES[$t_id]}")
                     fi
                 done
             else
                 local seleccionadas
-                seleccionadas=$(echo -e "$fzf_input" | fzf --ansi \
-                    --height=18 \
-                    --reverse \
-                    --border=rounded \
-                    --prompt="➤ Seleccione tareas (TAB para múltiple): " \
-                    --header="SELECCIONE LAS TAREAS A AUTOMATIZAR" \
-                    --multi)
-
-                if [ -z "$seleccionadas" ]; then
-                    pintar "$AMARILLO" "No se seleccionó ninguna tarea. Cancelando."
-                    sleep 2
-                    return
-                fi
-
-                TAREAS_SELECCIONADAS=()
+                seleccionadas=$(echo -e "$fzf_input" | fzf --ansi --height=18 --reverse --border=rounded \
+                    --prompt="➤ Marque con TAB: " --header="SELECCIONE CON TAB Y ENTER" --multi)
+                
+                [ -z "$seleccionadas" ] && return
+                
                 while IFS= read -r line; do
-                    # Extrae la clave entre [ ] key:
-                    local tarea_id=$(echo "$line" | awk -F'[' '{print $2}' | awk -F']' '{print $2}' | awk -F':' '{print $1}' | tr -d ' ')
-                    if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
-                        TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+                    local t_id=$(echo "$line" | awk -F'[' '{print $2}' | awk -F']' '{print $2}' | awk -F':' '{print $1}' | tr -d ' ')
+                    if [[ -n "${TAREAS_DISPONIBLES[$t_id]}" ]]; then
+                        TAREAS_SELECCIONADAS+=("$t_id:${TAREAS_DISPONIBLES[$t_id]}")
                     fi
                 done <<< "$seleccionadas"
             fi
             ;;
+        *) return ;;
     esac
 
-    # Si se seleccionó un modo específico, agregar esa tarea
-    if [[ -n "$tarea_id" ]]; then
-        TAREAS_SELECCIONADAS=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+    if [ ${#TAREAS_SELECCIONADAS[@]} -eq 0 ]; then
+        pintar "$ROJO" "❌ No se seleccionó ninguna tarea."
+        sleep 2
+        return
     fi
 
-    if [ ${#TAREAS_SELECCIONADAS[@]} -gt 0 ]; then
-        echo ""
-        pintar "$VERDE_BRILLANTE" "✅ Tareas seleccionadas:"
-        for tarea in "${TAREAS_SELECCIONADAS[@]}"; do
-            echo -e "   ${VERDE}•${RESET} ${tarea#*:}"
-        done
-        echo ""
-    else
-        pintar "$ROJO" "❌ No se seleccionó ninguna tarea válida."
-    fi
-    read -p "Presione Enter para confirmar..."
-}
-
-# ============================================================================
-#                   FUNCIONES DE CONFIGURACIÓN DE FRECUENCIA
-# ============================================================================
-
-configurar_frecuencia() {
-    local tipo="$1"
+    # ------------------------------------------------------------------------
+    # PASO 2: SELECCIÓN DE FRECUENCIA / PERÍODO
+    # ------------------------------------------------------------------------
     clear
     mostrar_logo
     echo ""
-    pintar "$CIAN" "--- CONFIGURAR FRECUENCIA DE EJECUCIÓN ---"
+    pintar "$CIAN" "--- PASO 2: SELECCIONAR EL PERÍODO / FRECUENCIA ---"
+    echo ""
+    pintar "$VERDE_BRILLANTE" "Tareas seleccionadas para programar:"
+    for tarea in "${TAREAS_SELECCIONADAS[@]}"; do
+        echo -e "   ${VERDE}•${RESET} ${tarea#*:}"
+    done
     echo ""
 
-    if [ ${#TAREAS_SELECCIONADAS[@]} -eq 0 ]; then
-        pintar "$ROJO" "❌ No hay tareas seleccionadas. Primero selecciona las tareas."
-        read -p "Presione Enter..."
-        return
+    local opciones_p2="1. Al iniciar el sistema (Boot)
+2. Diaria (Hora configurable)
+3. Semanal (Día y Hora configurable)
+4. Personalizada (Sintaxis Cron libre)
+5. Cancelar"
+
+    local opc_p2=""
+    if command -v fzf &>/dev/null; then
+        local sel2
+        sel2=$(echo -e "$opciones_p2" | fzf_estilo "Paso 2/2: Elija período" "PASO 2: CONFIGURAR FRECUENCIA")
+        [ -z "$sel2" ] && return
+        opc_p2=$(echo "$sel2" | awk -F'.' '{print $1}' | tr -d ' ')
+    else
+        echo -e "$opciones_p2"
+        echo ""
+        echo -ne "${AMARILLO}Seleccione frecuencia (1-5): ${RESET}"
+        read -r opc_p2
     fi
 
     local cron_line=""
     local descripcion_freq=""
 
-    case "$tipo" in
-        "boot")
-            echo -e "${AMARILLO}⏰ Al iniciar el sistema [5 minutos después de arrancar]${RESET}"
+    case "$opc_p2" in
+        1)
             cron_line="@reboot sleep 300"
             descripcion_freq="Al iniciar el sistema"
             ;;
-        "diaria")
-            echo -e "${AMARILLO}⏰ Ejecución diaria${RESET}"
+        2)
             echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
             if [[ ! "$hora" =~ ^[0-9]+$ ]] || [ "$hora" -lt 0 ] || [ "$hora" -gt 23 ]; then
-                pintar "$ROJO" "❌ Hora inválida. Usando 3:00 AM"
                 hora=3
             fi
             cron_line="0 $hora * * *"
             descripcion_freq="Diaria a las ${hora}:00"
             ;;
-        "semanal")
-            echo -e "${AMARILLO}⏰ Ejecución semanal${RESET}"
-            echo -e "${CIAN}Días disponibles:${RESET}"
-            echo "  0=Dom  1=Lun  2=Mar  3=Mié  4=Jue  5=Vie  6=Sáb"
+        3)
+            echo -e "${CIAN}Días: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb${RESET}"
             echo -ne "${CIAN}Ingrese el día 0-6 [1]: ${RESET}"
             read -r dia
             dia=${dia:-1}
-            if [[ ! "$dia" =~ ^[0-6]$ ]]; then
-                pintar "$ROJO" "❌ Día inválido. Usando Lunes 1"
-                dia=1
-            fi
-            echo -ne "${CIAN}Ingrese la hora [0-23] [3]: ${RESET}"
+            [[ ! "$dia" =~ ^[0-6]$ ]] && dia=1
+            echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
             if [[ ! "$hora" =~ ^[0-9]+$ ]] || [ "$hora" -lt 0 ] || [ "$hora" -gt 23 ]; then
-                pintar "$ROJO" "❌ Hora inválida. Usando 3:00 AM"
                 hora=3
             fi
             cron_line="0 $hora * * $dia"
-            descripcion_freq="Semanal dia $dia a las ${hora}:00"
+            descripcion_freq="Semanal día $dia a las ${hora}:00"
             ;;
-        "custom")
-            echo -e "${AMARILLO}⏰ Configuración personalizada${RESET}"
-            echo -e "${CIAN}Formato cron: ${BLANCO}Minuto Hora Dia Mes DiaSemana${RESET}"
-            echo -e "${CIAN}Ejemplos:${RESET}"
-            echo "  ${AMARILLO}0 12 * * *${RESET}  → Todos los días a las 12:00"
-            echo "  ${AMARILLO}*/30 * * * *${RESET} → Cada 30 minutos"
-            echo "  ${AMARILLO}0 9 * * 1-5${RESET}  → De lunes a viernes a las 9:00"
-            echo ""
-            echo -ne "${AMARILLO}Ingrese el schedule cron: ${RESET}"
+        4)
+            echo -e "${CIAN}Formato: Minuto Hora Día Mes DíaSemana (Ej: 0 12 * * *)${RESET}"
+            echo -ne "${AMARILLO}Ingrese expresión Cron: ${RESET}"
             read -r custom_schedule
             if [ -z "$custom_schedule" ]; then
-                pintar "$ROJO" "❌ Schedule vacío. Cancelando."
+                pintar "$ROJO" "❌ Formato vacío. Operación cancelada."
                 sleep 2
                 return
             fi
             cron_line="$custom_schedule"
             descripcion_freq="Personalizado: $custom_schedule"
             ;;
+        *) return ;;
     esac
 
-    # Mostrar resumen y confirmar
+    # ------------------------------------------------------------------------
+    # CONFIRMACIÓN Y ACTIVACIÓN
+    # ------------------------------------------------------------------------
     echo ""
     pintar "$CIAN" "═══════════════════════════════════════════════"
-    pintar "$VERDE_BRILLANTE" "📋 RESUMEN DE CONFIGURACIÓN"
+    pintar "$VERDE_BRILLANTE" "📋 CONFIRMACIÓN DE RESUMEN"
     pintar "$CIAN" "═══════════════════════════════════════════════"
     echo -e "${AMARILLO}Frecuencia:${RESET} ${AZUL}$descripcion_freq${RESET}"
     echo -e "${AMARILLO}Schedule:${RESET}   ${AZUL}$cron_line${RESET}"
-    echo ""
-    echo -e "${AMARILLO}Tareas programadas:${RESET}"
+    echo -e "${AMARILLO}Tareas:${RESET}"
     for tarea in "${TAREAS_SELECCIONADAS[@]}"; do
         echo -e "   ${VERDE}•${RESET} ${tarea#*:}"
     done
     echo ""
-    echo -ne "${ROJO_BRILLANTE}¿Confirmar y activar tarea? s/N: ${RESET}"
+    echo -ne "${ROJO_BRILLANTE}¿Confirmar y programar en CRON? s/N: ${RESET}"
     read -r confirm
 
     if [[ "$confirm" =~ ^[sS]$ ]]; then
@@ -578,10 +544,6 @@ configurar_frecuencia() {
         read -p "Presione Enter..."
     fi
 }
-
-# ============================================================================
-#                   FUNCIONES DE ACTIVACIÓN
-# ============================================================================
 
 guardar_configuracion_cron() {
     local cron_line="$1"
@@ -628,10 +590,7 @@ activar_tarea_cron() {
 
     local cron_full="$cron_line $STK_AUTO_WRAPPER"
 
-    # Eliminar tarea existente
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
-
-    # Añadir nueva tarea
     (crontab -l 2>/dev/null; echo "$cron_full $CRON_STK_ID") | crontab -
 
     if [ $? -eq 0 ]; then
@@ -643,10 +602,6 @@ activar_tarea_cron() {
         read -p "Presione Enter..."
     fi
 }
-
-# ============================================================================
-#                   RESUMEN FINAL
-# ============================================================================
 
 mostrar_resumen_final() {
     local cron_line="$1"
@@ -678,14 +633,11 @@ mostrar_resumen_final() {
     echo ""
     echo -e "${CIAN}═══════════════════════════════════════════════════════════════${RESET}"
     
-    log_cron "INFO" "Tarea CRON activada: $descripcion ($cron_line)"
-    
-    echo ""
     read -p "Presione Enter para volver al menú..."
 }
 
 # ============================================================================
-#                   FUNCIONES DE INFORMACIÓN
+#                   FUNCIONES DE INFORMACIÓN Y GESTIÓN
 # ============================================================================
 
 ver_configuracion_cron() {
@@ -820,7 +772,6 @@ desactivar_cron() {
 # ============================================================================
 
 gestionar_tareas_auto() {
-    # Inicializar estructura al primer uso
     inicializar_estructura
     
     while true; do
@@ -832,7 +783,6 @@ gestionar_tareas_auto() {
         pintar "$MAGENTA" "═══════════════════════════════════════════════"
         echo ""
 
-        # Mostrar estado actual
         if verificar_cron_stk; then
             local config_actual=$(obtener_frecuencia_descripcion)
             local tareas_activas=$(obtener_tareas_configuradas)
@@ -847,22 +797,12 @@ gestionar_tareas_auto() {
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         echo ""
 
-        # Opciones limpias para FZF (sin marcos de texto)
-        local opciones_fzf="1. Modo Auto Completo
-2. Actualización del sistema
-3. Limpieza del sistema
-4. Auditoría de seguridad
-5. Reporte de servicios
-6. Auditoría UFW
-7. Al iniciar el sistema (Boot)
-8. Diaria (hora configurable)
-9. Semanal (día configurable)
-10. Personalizado (cron libre)
-11. Ver configuración actual
-12. Ver logs de ejecución
-13. Ver resumen última ejecución
-14. Desactivar tarea automática
-15. Volver"
+        local opciones_fzf="1. Programar/Automatizar Tareas (Paso a Paso)
+2. Ver configuración actual
+3. Ver logs de ejecución
+4. Ver resumen última ejecución
+5. Desactivar tarea automática
+6. Volver"
 
         local opcion_num=""
 
@@ -872,48 +812,29 @@ gestionar_tareas_auto() {
             if [ $? -ne 0 ] || [ -z "$sel" ]; then
                 break
             fi
-            # Extraer solo el número de la opción elegida
             opcion_num=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
         else
-            echo -e " 1. Modo Auto Completo"
-            echo -e " 2. Actualización del sistema"
-            echo -e " 3. Limpieza del sistema"
-            echo -e " 4. Auditoría de seguridad"
-            echo -e " 5. Reporte de servicios"
-            echo -e " 6. Auditoría UFW"
-            echo -e " 7. Al iniciar el sistema"
-            echo -e " 8. Diaria"
-            echo -e " 9. Semanal"
-            echo -e "10. Personalizado"
-            echo -e "11. Ver configuración"
-            echo -e "12. Ver logs"
-            echo -e "13. Ver resumen"
-            echo -e "14. Desactivar tarea"
-            echo -e "15. Volver"
+            echo -e " 1. Programar/Automatizar Tareas (Paso a Paso)"
+            echo -e " 2. Ver configuración"
+            echo -e " 3. Ver logs"
+            echo -e " 4. Ver resumen"
+            echo -e " 5. Desactivar tarea"
+            echo -e " 6. Volver"
             echo ""
-            echo -ne "${AMARILLO}Seleccione una opción (1-15): ${RESET}"
+            echo -ne "${AMARILLO}Seleccione una opción (1-6): ${RESET}"
             read -r opcion_num
         fi
 
-        if [ "$opcion_num" == "15" ]; then
+        if [ "$opcion_num" == "6" ]; then
             break
         fi
 
         case "$opcion_num" in
-            1)  seleccionar_tareas "completo" ;;
-            2)  seleccionar_tareas "actualizacion" ;;
-            3)  seleccionar_tareas "limpieza" ;;
-            4)  seleccionar_tareas "auditoria" ;;
-            5)  seleccionar_tareas "servicios" ;;
-            6)  seleccionar_tareas "ufw" ;;
-            7)  configurar_frecuencia "boot" ;;
-            8)  configurar_frecuencia "diaria" ;;
-            9)  configurar_frecuencia "semanal" ;;
-            10) configurar_frecuencia "custom" ;;
-            11) ver_configuracion_cron ;;
-            12) ver_logs_cron ;;
-            13) ver_resumen_cron ;;
-            14) desactivar_cron ;;
+            1) programar_nueva_tarea ;;
+            2) ver_configuracion_cron ;;
+            3) ver_logs_cron ;;
+            4) ver_resumen_cron ;;
+            5) desactivar_cron ;;
         esac
     done
 }
