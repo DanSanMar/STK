@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.4 Test Gestor UFW"
+V="5.9.5 Test CRON"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -27,6 +27,8 @@ LOG_WARN="WARN"
 LOG_ERR="ERROR"
 
 DATE=$(date +"%d/%m/%Y")
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 registrar_log() {
     local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
@@ -102,13 +104,28 @@ rotar_logs() {
 ver_logs() {
     clear
     mostrar_logo
+    
     if [ -f "$LOG_FILE" ]; then
-        pintar "$CIAN" "--- Últimas 20 entradas de la bitácora ---"
+        pintar "$CIAN" "--- Últimas 20 entradas de la bitácora STK ---"
+        echo -e "${AMARILLO}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
         tail -n 20 "$LOG_FILE" | awk '
             /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
             /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
             /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
         '
+        
+        # === NUEVO: Mostrar también logs del CRON ===
+        local CRON_LOG="/var/log/stk_cron.log"
+        if [ -f "$CRON_LOG" ] && [ -s "$CRON_LOG" ]; then
+            echo ""
+            echo -e "${CIAN}--- Últimas 10 entradas del CRON ---${RESET}"
+            echo -e "${AMARILLO}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+            tail -n 10 "$CRON_LOG" | awk '
+                /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
+                /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
+                /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
+            '
+        fi
     else
         pintar "$ROJO" "Aún no hay registros."
     fi
@@ -464,7 +481,8 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
-5. ❌ | SALIR           | Control+C"            
+5. 📅 | TAREAS AUTO     | Programar tareas automáticas con CRON
+6. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
         seleccion=$(echo -e "$opciones" | fzf_menu_principal)
@@ -537,7 +555,18 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 done
                 ;;
 
-            5) salir ;;
+            5) 
+                # Gestor de tareas automatizadas
+                if [ -f "$SCRIPT_DIR/stk_cron.sh" ]; then
+                    bash "$SCRIPT_DIR/stk_cron.sh"
+                else
+                    echo -e "${ROJO}❌ Error: No se encuentra stk_cron.sh${RESET}"
+                    echo -e "${AMARILLO}El gestor de tareas debe estar en: $SCRIPT_DIR/stk_cron.sh${RESET}"
+                    read -p "Presione Enter..."
+                fi
+                ;;
+
+            6) salir ;;
         esac
     done
 }
@@ -2458,6 +2487,210 @@ hacer_backup() {
         esac
     done
 }
+
+# ==============================================================================
+#                 MODO AUTOMÁTICO PARA CRON (Flags de ejecución)
+# ==============================================================================
+
+# Función de log para el wrapper
+log_cron_exec() {
+    local nivel="${1:-INFO}"
+    local mensaje="${2}"
+    local fecha=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$fecha] [$nivel] - $mensaje" >> /var/log/stk_cron.log
+}
+
+# ==============================================================================
+#                 FUNCIONES DE EJECUCIÓN AUTOMÁTICA
+# ==============================================================================
+
+ejecutar_auto_actualizacion() {
+    log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
+    Actualizar_sistema
+    if [ $? -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Actualización completada"
+    else
+        log_cron_exec "ERROR" "❌ Actualización falló"
+    fi
+}
+
+ejecutar_auto_limpieza() {
+    log_cron_exec "INFO" "▶ Inicio: Limpieza del sistema"
+    super_limpieza
+    if [ $? -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Limpieza completada"
+    else
+        log_cron_exec "ERROR" "❌ Limpieza falló"
+    fi
+}
+
+ejecutar_auto_auditoria() {
+    log_cron_exec "INFO" "▶ Inicio: Auditoría de seguridad"
+    auditoria_seguridad_auto
+    if [ $? -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Auditoría completada"
+    else
+        log_cron_exec "ERROR" "❌ Auditoría falló"
+    fi
+}
+
+ejecutar_auto_servicios() {
+    log_cron_exec "INFO" "▶ Inicio: Reporte de servicios"
+    gestionar_servicios_auto
+    if [ $? -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Reporte de servicios generado"
+    else
+        log_cron_exec "ERROR" "❌ Reporte de servicios falló"
+    fi
+}
+
+ejecutar_auto_ufw() {
+    log_cron_exec "INFO" "▶ Inicio: Auditoría UFW"
+    auditoria_ufw_auto
+    if [ $? -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Auditoría UFW completada"
+    else
+        log_cron_exec "ERROR" "❌ Auditoría UFW falló"
+    fi
+}
+
+# ==============================================================================
+#                 VERSIONES AUTOMÁTICAS (Sin interacción)
+# ==============================================================================
+
+auditoria_seguridad_auto() {
+    echo "🔍 AUDITORÍA DE SEGURIDAD (RESUMEN)"
+    echo "----------------------------------------"
+    
+    local total_checks=0
+    local checks_passed=0
+    local alertas=()
+    
+    # 1. UID 0
+    ((total_checks++))
+    if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd 2>/dev/null | wc -l) -eq 1 ]; then
+        ((checks_passed++))
+    else
+        alertas+=("Múltiples usuarios con UID 0")
+    fi
+    
+    # 2. Cuentas sin contraseña
+    ((total_checks++))
+    if [ -z "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
+        ((checks_passed++))
+    else
+        alertas+=("Cuentas inactivas o sin contraseña")
+    fi
+    
+    # 3. Firewall
+    ((total_checks++))
+    if comprobar_firewall; then
+        ((checks_passed++))
+    else
+        alertas+=("Firewall inactivo o sin reglas")
+    fi
+    
+    # 4. SSH
+    ((total_checks++))
+    if command -v ss &>/dev/null; then
+        if ! ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
+            ((checks_passed++))
+        else
+            alertas+=("SSH expuesto en puerto 22")
+        fi
+    else
+        ((checks_passed++))
+    fi
+    
+    # 5. MAC (SELinux/AppArmor)
+    ((total_checks++))
+    if command -v getenforce &>/dev/null && [ "$(getenforce 2>/dev/null)" == "Enforcing" ]; then
+        ((checks_passed++))
+    elif command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
+        ((checks_passed++))
+    else
+        alertas+=("Sin módulo MAC activo")
+    fi
+    
+    local score=$(( (checks_passed * 100) / total_checks ))
+    echo "📊 Puntuación: ${score}% (${checks_passed}/${total_checks})"
+    
+    if [ ${#alertas[@]} -gt 0 ]; then
+        echo "⚠️ Alertas detectadas:"
+        for alt in "${alertas[@]}"; do
+            echo "  • $alt"
+        done
+    else
+        echo "✅ No se detectaron alertas de seguridad."
+    fi
+}
+
+gestionar_servicios_auto() {
+    echo "📊 REPORTE DE SERVICIOS (Systemd)"
+    echo "----------------------------------------"
+    
+    local failed_services
+    failed_services=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+    
+    if [ -n "$failed_services" ]; then
+        local count=$(echo "$failed_services" | wc -l)
+        echo "⚠️ Servicios fallidos detectados: $count"
+        echo "$failed_services" | while read -r svc; do
+            echo "  • $svc"
+        done
+    else
+        echo "✅ Todos los servicios operan correctamente."
+    fi
+}
+
+auditoria_ufw_auto() {
+    echo "🛡️ AUDITORÍA UFW"
+    echo "----------------------------------------"
+    
+    if ! command -v ufw &>/dev/null; then
+        echo "❌ UFW no está instalado en el sistema."
+        return 1
+    fi
+    
+    echo "📋 Estado de UFW:"
+    ufw status verbose 2>/dev/null | head -20
+    
+    if [ -f "/var/log/ufw.log" ]; then
+        echo ""
+        echo "📊 Estadísticas:"
+        local block_count=$(grep -c "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -1)
+        echo "  • Bloqueos totales: $block_count"
+        echo ""
+        echo "🔍 Últimos bloqueos:"
+        grep "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -5 | while read -r line; do
+            echo "  • $line"
+        done
+    else
+        echo "  ℹ️ No se encontró el log de UFW."
+    fi
+}
+
+# ==============================================================================
+#                 FLAGS DE EJECUCIÓN AUTOMÁTICA
+# ==============================================================================
+
+# Verificar flags al inicio del script
+if [[ "$1" == "--auto-actualizacion" ]]; then
+    ejecutar_auto_actualizacion
+    exit 0
+elif [[ "$1" == "--auto-limpieza" ]]; then
+    ejecutar_auto_limpieza
+    exit 0
+elif [[ "$1" == "--auto-auditoria" ]]; then
+    ejecutar_auto_auditoria
+    exit 0
+elif [[ "$1" == "--auto-servicios" ]]; then
+    ejecutar_auto_servicios
+    exit 0
+elif [[ "$1" == "--auto-ufw" ]]; then
+    ejecutar_auto_ufw
+    exit 0
+fi
 
 # --- EJECUCIÓN ---
 rotar_logs "silencioso"
