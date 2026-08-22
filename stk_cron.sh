@@ -400,53 +400,72 @@ seleccionar_tareas() {
         return
     fi
 
-    # Construir lista para fzf
-    local fzf_input=""
-    for key in "${!TAREAS_DISPONIBLES[@]}"; do
-        fzf_input+="[ ] $key: ${TAREAS_DISPONIBLES[$key]}\n"
-    done
+    # Para selección individual por modo
+    local tarea_id=""
+    case "$modo" in
+        "actualizacion") tarea_id="actualizacion" ;;
+        "limpieza") tarea_id="limpieza" ;;
+        "auditoria") tarea_id="auditoria" ;;
+        "servicios") tarea_id="servicios" ;;
+        "ufw") tarea_id="ufw" ;;
+        *)
+            # Si no es un modo específico, usar selector interactivo
+            TAREAS_SELECCIONADAS=()
+            # Construir lista para fzf
+            local fzf_input=""
+            for key in "${!TAREAS_DISPONIBLES[@]}"; do
+                fzf_input+="[ ] $key: ${TAREAS_DISPONIBLES[$key]}\n"
+            done
 
-    if ! command -v fzf &>/dev/null; then
-        pintar "$ROJO" "❌ fzf no está instalado. Usando selección manual."
-        echo ""
-        for key in "${!TAREAS_DISPONIBLES[@]}"; do
-            echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
-        done
-        echo ""
-        echo -e "${AMARILLO}Ingresa los IDs de las tareas (separados por espacio):${RESET}"
-        read -r -a tareas_input
-        
-        TAREAS_SELECCIONADAS=()
-        for tarea_id in "${tareas_input[@]}"; do
-            if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
-                TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+            if ! command -v fzf &>/dev/null; then
+                pintar "$ROJO" "❌ fzf no está instalado. Usando selección manual."
+                echo ""
+                for key in "${!TAREAS_DISPONIBLES[@]}"; do
+                    echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
+                done
+                echo ""
+                echo -e "${AMARILLO}Ingresa los IDs de las tareas (separados por espacio):${RESET}"
+                read -r tareas_input
+                
+                # Convertir la entrada en array correctamente
+                IFS=' ' read -ra tareas_array <<< "$tareas_input"
+                for tarea_id in "${tareas_array[@]}"; do
+                    if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
+                        TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+                    fi
+                done
+            else
+                local seleccionadas
+                seleccionadas=$(echo -e "$fzf_input" | fzf --ansi \
+                    --height=18 \
+                    --reverse \
+                    --border=rounded \
+                    --prompt="➤ Seleccione tareas (TAB para múltiple): " \
+                    --header="SELECCIONE LAS TAREAS A AUTOMATIZAR" \
+                    --multi \
+                    --delimiter=" " \
+                    --with-nth=2..)
+
+                if [ -z "$seleccionadas" ]; then
+                    pintar "$AMARILLO" "No se seleccionó ninguna tarea. Cancelando."
+                    sleep 2
+                    return
+                fi
+
+                TAREAS_SELECCIONADAS=()
+                while IFS= read -r line; do
+                    local tarea_id=$(echo "$line" | awk '{print $2}' | cut -d: -f1)
+                    if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
+                        TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
+                    fi
+                done <<< "$seleccionadas"
             fi
-        done
-    else
-        local seleccionadas
-        seleccionadas=$(echo -e "$fzf_input" | fzf --ansi \
-            --height=18 \
-            --reverse \
-            --border=rounded \
-            --prompt="➤ Seleccione tareas (TAB para múltiple): " \
-            --header="SELECCIONE LAS TAREAS A AUTOMATIZAR" \
-            --multi \
-            --delimiter=" " \
-            --with-nth=2..)
+            ;;
+    esac
 
-        if [ -z "$seleccionadas" ]; then
-            pintar "$AMARILLO" "No se seleccionó ninguna tarea. Cancelando."
-            sleep 2
-            return
-        fi
-
-        TAREAS_SELECCIONADAS=()
-        while IFS= read -r line; do
-            local tarea_id=$(echo "$line" | awk '{print $2}' | cut -d: -f1)
-            if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
-                TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
-            fi
-        done <<< "$seleccionadas"
+    # Si se seleccionó un modo específico, agregar esa tarea
+    if [[ -n "$tarea_id" ]]; then
+        TAREAS_SELECCIONADAS=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
     fi
 
     if [ ${#TAREAS_SELECCIONADAS[@]} -gt 0 ]; then
