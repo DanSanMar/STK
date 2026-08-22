@@ -209,8 +209,17 @@ install_tools() {
             "zypper") zypper install -y "$pkg" ;;
         esac
     done
-}
 
+    # Habilitar e iniciar el demonio de Cron si se instaló crontab
+    if [[ " ${tools_to_install[*]} " =~ " crontab " ]]; then
+        case "$Package" in
+            "apt")    systemctl enable --now cron &>/dev/null ;;
+            "pacman") systemctl enable --now cronie &>/dev/null ;;
+            "dnf")    systemctl enable --now crond &>/dev/null ;;
+            "zypper") systemctl enable --now cron &>/dev/null ;;
+        esac
+    fi
+}
 mostrar_instrucciones() {
     clear
     local pkg_upper
@@ -250,6 +259,12 @@ get_package_name() {
     case "$tool" in
         "xsltproc"|"fzf")
             echo "$tool"
+            ;;
+        "crontab")
+            case "$Package" in
+                apt) echo "cron" ;;
+                *)   echo "cronie" ;;
+            esac
             ;;
         "host") 
             case "$Package" in
@@ -332,7 +347,7 @@ salir() {
 }
 
 # --- DEFINICIÓN DE DEPENDENCIAS ---
-dependencies=(fzf xsltproc host tput free curl wget tar hostname js jq rsync)
+dependencies=(fzf xsltproc host tput free curl wget tar hostname js jq rsync crontab)
 
 check_dependencies() {
     missing_tools=()
