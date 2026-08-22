@@ -505,7 +505,7 @@ configurar_frecuencia() {
 
     case "$tipo" in
         "boot")
-            echo -e "${AMARILLO}⏰ Al iniciar el sistema (5 minutos después de arrancar)${RESET}"
+            echo -e "${AMARILLO}⏰ Al iniciar el sistema [5 minutos después de arrancar]${RESET}"
             cron_line="@reboot sleep 300"
             descripcion_freq="Al iniciar el sistema"
             ;;
@@ -532,7 +532,7 @@ configurar_frecuencia() {
                 pintar "$ROJO" "❌ Día inválido. Usando Lunes (1)"
                 dia=1
             fi
-            echo -ne "${CIAN}Ingrese la hora (0-23) [3]: ${RESET}"
+            echo -ne "${CIAN}Ingrese la hora [0-23] [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
             if [[ ! "$hora" =~ ^[0-9]+$ ]] || [ "$hora" -lt 0 ] || [ "$hora" -gt 23 ]; then
