@@ -539,7 +539,7 @@ configurar_frecuencia() {
                 hora=3
             fi
             cron_line="0 $hora * * $dia"
-            descripcion_freq="Semanal (día $dia a las ${hora}:00)"
+            descripcion_freq="Semanal día $dia a las ${hora}:00"
             ;;
         "custom")
             echo -e "${AMARILLO}⏰ Configuración personalizada${RESET}"
