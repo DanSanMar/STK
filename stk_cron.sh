@@ -3,7 +3,7 @@
 #                 GESTOR DE TAREAS AUTOMATIZADAS (CRON)
 # ==============================================================================
 # STK - Módulo de programación automática de tareas
-# Versión: 2.0 (Flujo corregido y guiado por pasos)
+# Versión: 2.0 (Flujo guiado por pasos: 1. Tarea -> 2. Período)
 # ==============================================================================
 
 # --- DETECCIÓN DE DIRECTORIO Y CARGA DE CONFIGURACIÓN ---
@@ -12,40 +12,40 @@ STK2_SCRIPT="$SCRIPT_DIR/stk2.sh"
 
 # Verificar que existe stk2.sh
 if [ ! -f "$STK2_SCRIPT" ]; then
-    echo -e "\033[91m❌ Error: No se encuentra stk2.sh en el mismo directorio\033[0m"[cite: 1]
-    echo -e "\033[33mEjecuta este script desde el directorio donde está stk2.sh\033[0m"[cite: 1]
+    echo -e "\033[91m❌ Error: No se encuentra stk2.sh en el mismo directorio\033[0m"
+    echo -e "\033[33mEjecuta este script desde el directorio donde está stk2.sh\033[0m"
     exit 1
 fi
 
 # Definir colores propios
-RESET='\e[0m'[cite: 1]
-VERDE_BRILLANTE='\e[92m'[cite: 1]
-VERDE='\e[32m'[cite: 1]
-AMARILLO='\e[33m'[cite: 1]
-AZUL='\e[34m'[cite: 1]
-CIAN='\e[36m'[cite: 1]
-MAGENTA='\e[35m'[cite: 1]
-ROJO='\e[31m'[cite: 1]
-ROJO_BRILLANTE='\e[91m'[cite: 1]
-AZUL_BRILLANTE='\e[94m'[cite: 1]
-BLANCO='\e[97m'[cite: 1]
+RESET='\e[0m'
+VERDE_BRILLANTE='\e[92m'
+VERDE='\e[32m'
+AMARILLO='\e[33m'
+AZUL='\e[34m'
+CIAN='\e[36m'
+MAGENTA='\e[35m'
+ROJO='\e[31m'
+ROJO_BRILLANTE='\e[91m'
+AZUL_BRILLANTE='\e[94m'
+BLANCO='\e[97m'
 
 # Definir función pintar propia
 pintar() { 
     local COLOR="$1" 
     local MENSAJE="$2" 
-    echo -e "${COLOR}${MENSAJE}${RESET}"[cite: 1]
+    echo -e "${COLOR}${MENSAJE}${RESET}"
 }
 
 # Definir mostrar_logo
 mostrar_logo() {
-    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"[cite: 1]
-    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"[cite: 1]
-    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"[cite: 1]
-    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"[cite: 1]
-    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"[cite: 1]
+    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"
+    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"
+    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
+    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
+    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
     echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v2.0${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"[cite: 1]
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
 # Definir fzf_estilo
@@ -58,16 +58,16 @@ fzf_estilo() {
         --border=rounded \
         --prompt="➤ $prompt_text: " \
         --header="$header_text" \
-        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"[cite: 1]
+        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
 }
 
 # --- CONFIGURACIÓN ---
-CRON_CONFIG_DIR="/etc/stk/cron"[cite: 1]
-CRON_CONFIG_FILE="$CRON_CONFIG_DIR/tasks.json"[cite: 1]
-CRON_LOG_FILE="/var/log/stk_cron.log"[cite: 1]
-CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"[cite: 1]
-CRON_STK_ID="# STK-AUTO-MAINTENANCE"[cite: 1]
-STK_AUTO_WRAPPER="/usr/local/bin/stk_auto_wrapper.sh"[cite: 1]
+CRON_CONFIG_DIR="/etc/stk/cron"
+CRON_CONFIG_FILE="$CRON_CONFIG_DIR/tasks.json"
+CRON_LOG_FILE="/var/log/stk_cron.log"
+CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
+CRON_STK_ID="# STK-AUTO-MAINTENANCE"
+STK_AUTO_WRAPPER="/usr/local/bin/stk_auto_wrapper.sh"
 
 # --- DECLARACIÓN DE TAREAS DISPONIBLES ---
 declare -A TAREAS_DISPONIBLES=(
@@ -76,9 +76,9 @@ declare -A TAREAS_DISPONIBLES=(
     ["auditoria"]="🔍 Auditoría de seguridad"
     ["servicios"]="📊 Reporte de servicios"
     ["ufw"]="🛡️ Auditoría UFW"
-)[cite: 1]
+)
 
-declare -a TAREAS_SELECCIONADAS=()[cite: 1]
+declare -a TAREAS_SELECCIONADAS=()
 
 # ============================================================================
 #                   FUNCIONES DE INICIALIZACIÓN
@@ -86,8 +86,8 @@ declare -a TAREAS_SELECCIONADAS=()[cite: 1]
 
 inicializar_estructura() {
     if [ ! -d "$CRON_CONFIG_DIR" ]; then
-        mkdir -p "$CRON_CONFIG_DIR"[cite: 1]
-        chmod 755 "$CRON_CONFIG_DIR"[cite: 1]
+        mkdir -p "$CRON_CONFIG_DIR"
+        chmod 755 "$CRON_CONFIG_DIR"
     fi
     
     if [ ! -f "$CRON_CONFIG_FILE" ]; then
@@ -104,17 +104,17 @@ inicializar_estructura() {
     "tareas": []
 }
 EOF
-        chmod 600 "$CRON_CONFIG_FILE"[cite: 1]
+        chmod 600 "$CRON_CONFIG_FILE"
     fi
     
     for log in "$CRON_LOG_FILE" "$CRON_RESUMEN_FILE"; do
         if [ ! -f "$log" ]; then
-            touch "$log"[cite: 1]
-            chmod 640 "$log"[cite: 1]
+            touch "$log"
+            chmod 640 "$log"
         fi
     done
     
-    crear_wrapper_cron[cite: 1]
+    crear_wrapper_cron
 }
 
 # ============================================================================
@@ -122,13 +122,13 @@ EOF
 # ============================================================================
 
 log_cron() {
-    local NIVEL="${1:-INFO}"[cite: 1]
-    local MENSAJE="${2}"[cite: 1]
-    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')[cite: 1]
+    local NIVEL="${1:-INFO}"
+    local MENSAJE="${2}"
+    local FECHA=$(date '+%Y-%m-%d %H:%M:%S')
     
-    echo "[$FECHA] [$NIVEL] [root] - $MENSAJE" >> "$CRON_LOG_FILE"[cite: 1]
+    echo "[$FECHA] [$NIVEL] [root] - $MENSAJE" >> "$CRON_LOG_FILE"
     if declare -f registrar_log >/dev/null 2>&1; then
-        registrar_log "$NIVEL" "[CRON] $MENSAJE"[cite: 1]
+        registrar_log "$NIVEL" "[CRON] $MENSAJE"
     fi
 }
 
@@ -299,8 +299,8 @@ fi
 exit 0
 EOF
 
-    chmod +x "$STK_AUTO_WRAPPER"[cite: 1]
-    log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"[cite: 1]
+    chmod +x "$STK_AUTO_WRAPPER"
+    log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"
 }
 
 # ============================================================================
@@ -308,44 +308,44 @@ EOF
 # ============================================================================
 
 verificar_cron_stk() {
-    crontab -l 2>/dev/null | grep -q "$CRON_STK_ID"[cite: 1]
+    crontab -l 2>/dev/null | grep -q "$CRON_STK_ID"
 }
 
 obtener_frecuencia_descripcion() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"[cite: 1]
+            jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
         else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"[cite: 1]
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
         fi
     else
-        echo "No configurada"[cite: 1]
+        echo "No configurada"
     fi
 }
 
 obtener_tareas_configuradas() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.tareas[] | .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"[cite: 1]
+            jq -r '.tareas[] | .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
         else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"[cite: 1]
+            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | tr '\n' ', ' | sed 's/, $//' || echo "Ninguna"
         fi
     else
-        echo "Ninguna"[cite: 1]
+        echo "Ninguna"
     fi
 }
 
 obtener_ultima_ejecucion() {
     if [ -f "$CRON_LOG_FILE" ]; then
         local ultima_linea
-        ultima_linea=$(grep -E "INICIO|FIN" "$CRON_LOG_FILE" 2>/dev/null | tail -1)[cite: 1]
+        ultima_linea=$(grep -E "INICIO|FIN" "$CRON_LOG_FILE" 2>/dev/null | tail -1)
         if [ -n "$ultima_linea" ]; then
-            echo "$ultima_linea" | sed 's/^\[//' | cut -d']' -f1[cite: 1]
+            echo "$ultima_linea" | sed 's/^\[//' | cut -d']' -f1
         else
-            echo "Sin registros"[cite: 1]
+            echo "Sin registros"
         fi
     else
-        echo "Sin registros"[cite: 1]
+        echo "Sin registros"
     fi
 }
 
