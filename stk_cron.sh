@@ -642,6 +642,139 @@ activar_tarea_cron() {
         read -p "Presione Enter..."
     fi
 }
+# ============================================================================
+#                 NUEVAS FUNCIONES DE EDICIÓN Y ELIMINACIÓN
+# ============================================================================
+
+eliminar_tarea_especifica() {
+    local id_a_eliminar="$1"
+
+    if [ ! -f "$CRON_CONFIG_FILE" ] || ! command -v jq &>/dev/null; then
+        pintar "$ROJO" "❌ Se requiere 'jq' y un archivo de configuración válido."
+        read -p "Presione Enter..."
+        return 1
+    fi
+
+    # Contar cuántas tareas quedarán
+    local total_restantes
+    total_restantes=$(jq --arg id "$id_a_eliminar" '[.tareas[] | select(.id != $id)] | length' "$CRON_CONFIG_FILE")
+
+    local tmp_json=$(mktemp)
+
+    if [ "$total_restantes" -eq 0 ]; then
+        # Si no quedan tareas, desactivamos el CRON completamente
+        crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
+        jq --arg id "$id_a_eliminar" \
+           '.tareas = [] | .configuracion.activado = false' \
+           "$CRON_CONFIG_FILE" > "$tmp_json"
+        
+        pintar "$AMARILLO" "⚠️ Al no quedar tareas, el programador automátiico se ha desactivado."
+    else
+        # Eliminar solo la tarea seleccionada manteniendo la configuración de cron
+        jq --arg id "$id_a_eliminar" \
+           '.tareas = [.tareas[] | select(.id != $id)]' \
+           "$CRON_CONFIG_FILE" > "$tmp_json"
+    fi
+
+    if [ $? -eq 0 ]; then
+        mv "$tmp_json" "$CRON_CONFIG_FILE"
+        chmod 600 "$CRON_CONFIG_FILE"
+        log_cron "INFO" "Tarea eliminada individualmente: $id_a_eliminar"
+        pintar "$VERDE_BRILLANTE" "✔ Tarea '$id_a_eliminar' eliminada correctamente."
+    else
+        rm -f "$tmp_json"
+        pintar "$ROJO" "❌ Error al actualizar el archivo JSON."
+    fi
+    sleep 2
+}
+
+gestionar_tareas_individuales() {
+    while true; do
+        clear
+        mostrar_logo
+        echo ""
+        pintar "$CIAN" "--- GESTIÓN INDIVIDUAL DE TAREAS ---"
+        echo ""
+
+        if [ ! -f "$CRON_CONFIG_FILE" ] || ! command -v jq &>/dev/null; then
+            pintar "$ROJO" "❌ No hay configuración activa o falta la herramienta 'jq'."
+            read -p "Presione Enter..."
+            return
+        fi
+
+        # Extraer tareas actuales en formato clave:valor
+        local tareas_raw
+        tareas_raw=$(jq -r '.tareas[] | .id + ":" + .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null)
+
+        if [ -z "$tareas_raw" ]; then
+            pintar "$AMARILLO" "⚠️ No hay tareas activas en la lista."
+            read -p "Presione Enter..."
+            return
+        fi
+
+        echo -e "${AMARILLO}Seleccione una tarea para administrar:${RESET}"
+        echo ""
+
+        local lista_opciones=""
+        local i=1
+        declare -A mapa_tareas
+
+        while IFS= read -r linea; do
+            [ -z "$linea" ] && continue
+            local t_id="${linea%%:*}"
+            local t_desc="${linea#*:}"
+            mapa_tareas[$i]="$t_id:$t_desc"
+            lista_opciones+="$i. $t_desc ($t_id)\n"
+            ((i++))
+        done <<< "$tareas_raw"
+
+        lista_opciones+="$i. Volver"
+
+        local seleccion=""
+        if command -v fzf &>/dev/null; then
+            local sel
+            sel=$(echo -e "$lista_opciones" | fzf_estilo "Seleccione Tarea" "TAREAS ACTIVAS")
+            [ -z "$sel" ] && break
+            seleccion=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
+        else
+            echo -e "$lista_opciones"
+            echo ""
+            echo -ne "${AMARILLO}Opción (1-$i): ${RESET}"
+            read -r seleccion
+        fi
+
+        if [ "$seleccion" -eq "$i" ] || [ -z "$seleccion" ]; then
+            break
+        fi
+
+        local tarea_elegida="${mapa_tareas[$seleccion]}"
+        local sel_id="${tarea_elegida%%:*}"
+        local sel_desc="${tarea_elegida#*:}"
+
+        # Submenú de acción para la tarea seleccionada
+        clear
+        mostrar_logo
+        echo ""
+        pintar "$VERDE_BRILLANTE" "Tarea: $sel_desc ($sel_id)"
+        echo ""
+        echo -e "1. 🗑️ Eliminar esta tarea"
+        echo -e "2. ↩ Volver"
+        echo ""
+        echo -ne "${AMARILLO}Seleccione acción: ${RESET}"
+        read -r accion
+
+        case "$accion" in
+            1)
+                echo -ne "${ROJO_BRILLANTE}¿Eliminar '$sel_desc' de la programación? s/N: ${RESET}"
+                read -r conf_elim
+                if [[ "$conf_elim" =~ ^[sS]$ ]]; then
+                    eliminar_tarea_especifica "$sel_id"
+                fi
+                ;;
+            *) ;;
+        esac
+    done
+}
 
 mostrar_resumen_final() {
     local cron_line="$1"
@@ -852,12 +985,13 @@ gestionar_tareas_auto() {
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         echo ""
 
-        local opciones_fzf="1. Programar/Automatizar Tareas (Paso a Paso)
-2. Ver configuración actual
-3. Ver logs de ejecución
-4. Ver resumen última ejecución
-5. Desactivar tarea automática
-6. Volver"
+        local opciones_fzf="1. Programar/Añadir Tareas (Paso a Paso)
+2. Gestionar/Eliminar tareas individuales
+3. Ver configuración actual
+4. Ver logs de ejecución
+5. Ver resumen última ejecución
+6. Desactivar TODAS las tareas
+7. Volver"
 
         local opcion_num=""
 
@@ -886,10 +1020,12 @@ gestionar_tareas_auto() {
 
         case "$opcion_num" in
             1) programar_nueva_tarea ;;
-            2) ver_configuracion_cron ;;
-            3) ver_logs_cron ;;
-            4) ver_resumen_cron ;;
-            5) desactivar_cron ;;
+            2) gestionar_tareas_individuales ;;
+            3) ver_configuracion_cron ;;
+            4) ver_logs_cron ;;
+            5) ver_resumen_cron ;;
+            6) desactivar_cron ;;
+            7) break ;;
         esac
     done
 }
