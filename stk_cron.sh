@@ -424,7 +424,7 @@ seleccionar_tareas() {
                     echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
                 done
                 echo ""
-                echo -e "${AMARILLO}Ingresa los IDs de las tareas (separados por espacio):${RESET}"
+                echo -e "${AMARILLO}Ingresa los IDs de las tareas separados por espacio-:${RESET}"
                 read -r tareas_input
                 
                 # Convertir la entrada en array correctamente
