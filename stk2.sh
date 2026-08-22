@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.2 Auto en test"
+V="5.9.3 Auto en test"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -373,7 +373,7 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
         fi
 
         if ! command -v fzf &>/dev/null; then
-            echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH.${RESET}"
+            echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH. Si lo has instalado con Git puede haber problemas con la ruta y el uso de sudo. Puedes instalarlo de forma automatica para solucionarlo y tener ambos sin problema.${RESET}"
             registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
