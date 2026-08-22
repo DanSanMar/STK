@@ -437,9 +437,7 @@ seleccionar_tareas() {
                     --border=rounded \
                     --prompt="➤ Seleccione tareas (TAB para múltiple): " \
                     --header="SELECCIONE LAS TAREAS A AUTOMATIZAR" \
-                    --multi \
-                    --delimiter=" " \
-                    --with-nth=2..)
+                    --multi)
 
                 if [ -z "$seleccionadas" ]; then
                     pintar "$AMARILLO" "No se seleccionó ninguna tarea. Cancelando."
@@ -449,7 +447,8 @@ seleccionar_tareas() {
 
                 TAREAS_SELECCIONADAS=()
                 while IFS= read -r line; do
-                    local tarea_id=$(echo "$line" | sed -n 's/.*\[ \] \([^:]*\):.*/\1/p')
+                    # Extrae la clave entre [ ] key:
+                    local tarea_id=$(echo "$line" | awk -F'[' '{print $2}' | awk -F']' '{print $2}' | awk -F':' '{print $1}' | tr -d ' ')
                     if [[ -n "${TAREAS_DISPONIBLES[$tarea_id]}" ]]; then
                         TAREAS_SELECCIONADAS+=("$tarea_id:${TAREAS_DISPONIBLES[$tarea_id]}")
                     fi
@@ -848,48 +847,59 @@ gestionar_tareas_auto() {
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         echo ""
 
-        # Menú principal
-        local opciones="
-╔══════════════════════════════════════════════════════════════╗
-║  📌 CONFIGURAR TAREAS                                       ║
-║    1. 🤖 Modo Auto Completo                                 ║
-║    2. 🔄 Actualización del sistema                          ║
-║    3. 🧹 Limpieza del sistema                               ║
-║    4. 🔍 Auditoría de seguridad                             ║
-║    5. 📊 Reporte de servicios                               ║
-║    6. 🛡️ Auditoría UFW                                     ║
-║                                                             ║
-║  ⏰ FRECUENCIA DE EJECUCIÓN                                 ║
-║    7. 🚀 Al iniciar el sistema                              ║
-║    8. 📅 Diaria (hora configurable)                         ║
-║    9. 📆 Semanal (día configurable)                         ║
-║   10. ⚙️ Personalizado (cron libre)                         ║
-║                                                             ║
-║  📋 INFORMACIÓN                                             ║
-║   11. 📖 Ver configuración actual                           ║
-║   12. 📄 Ver logs de ejecución                              ║
-║   13. 📊 Ver resumen última ejecución                       ║
-║                                                             ║
-║   14. 🛑 Desactivar tarea automática                        ║
-║   15. ↩ Volver                                              ║
-╚══════════════════════════════════════════════════════════════╝"
+        # Opciones limpias para FZF (sin marcos de texto)
+        local opciones_fzf="1. Modo Auto Completo
+2. Actualización del sistema
+3. Limpieza del sistema
+4. Auditoría de seguridad
+5. Reporte de servicios
+6. Auditoría UFW
+7. Al iniciar el sistema (Boot)
+8. Diaria (hora configurable)
+9. Semanal (día configurable)
+10. Personalizado (cron libre)
+11. Ver configuración actual
+12. Ver logs de ejecución
+13. Ver resumen última ejecución
+14. Desactivar tarea automática
+15. Volver"
+
+        local opcion_num=""
 
         if command -v fzf &>/dev/null; then
             local sel
-            sel=$(echo -e "$opciones" | fzf_estilo "Seleccione" "G E S T O R  D E  T A R E A S")
-            if [ $? -ne 0 ] || [ -z "$sel" ] || [[ "${sel:0:2}" == "15" ]]; then
+            sel=$(echo -e "$opciones_fzf" | fzf_estilo "Seleccione una opción" "G E S T O R  D E  T A R E A S")
+            if [ $? -ne 0 ] || [ -z "$sel" ]; then
                 break
             fi
+            # Extraer solo el número de la opción elegida
+            opcion_num=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
         else
-            echo -e "$opciones"
+            echo -e " 1. Modo Auto Completo"
+            echo -e " 2. Actualización del sistema"
+            echo -e " 3. Limpieza del sistema"
+            echo -e " 4. Auditoría de seguridad"
+            echo -e " 5. Reporte de servicios"
+            echo -e " 6. Auditoría UFW"
+            echo -e " 7. Al iniciar el sistema"
+            echo -e " 8. Diaria"
+            echo -e " 9. Semanal"
+            echo -e "10. Personalizado"
+            echo -e "11. Ver configuración"
+            echo -e "12. Ver logs"
+            echo -e "13. Ver resumen"
+            echo -e "14. Desactivar tarea"
+            echo -e "15. Volver"
+            echo ""
             echo -ne "${AMARILLO}Seleccione una opción (1-15): ${RESET}"
-            read -r sel
-            if [ -z "$sel" ] || [ "$sel" == "15" ]; then
-                break
-            fi
+            read -r opcion_num
         fi
 
-        case ${sel:0:2} in
+        if [ "$opcion_num" == "15" ]; then
+            break
+        fi
+
+        case "$opcion_num" in
             1)  seleccionar_tareas "completo" ;;
             2)  seleccionar_tareas "actualizacion" ;;
             3)  seleccionar_tareas "limpieza" ;;
