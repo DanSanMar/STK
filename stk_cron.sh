@@ -146,7 +146,8 @@ log_cron() {
 # ============================================================================
 
 crear_wrapper_cron() {
-    local wrapper_content='#!/bin/bash
+    cat << 'EOF' > "$STK_AUTO_WRAPPER"
+#!/bin/bash
 # STK - Wrapper para tareas automáticas CRON
 # Generado automáticamente - No modificar manualmente
 # ==============================================================================
@@ -156,8 +157,13 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
 
+# Cargar rutas pasadas dinámicamente o por defecto
+CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
+CRON_LOG_FILE="/var/log/stk_cron.log"
+CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
+
 # Directorio del script STK
-STK_DIR="'"$SCRIPT_DIR"'"
+STK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "$STK_DIR/stk2.sh" ]; then
     for dir in "/opt/STK" "/usr/local/STK" "$HOME/STK"; do
         if [ -f "$dir/stk2.sh" ]; then
@@ -168,49 +174,43 @@ if [ ! -f "$STK_DIR/stk2.sh" ]; then
 fi
 
 if [ ! -f "$STK_DIR/stk2.sh" ]; then
-    echo "[$(date)] [ERROR] - No se encuentra stk2.sh" >> '"$CRON_LOG_FILE"'
+    echo "[$(date)] [ERROR] - No se encuentra stk2.sh" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
 cd "$STK_DIR"
 
-# Cargar configuración
-CONFIG_FILE="'"$CRON_CONFIG_FILE"'"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "[$(date)] [ERROR] - No hay configuración de tareas" >> '"$CRON_LOG_FILE"'
+if [ ! -f "$CRON_CONFIG_FILE" ]; then
+    echo "[$(date)] [ERROR] - No hay configuración de tareas" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
 # Obtener lista de tareas
 if command -v jq &>/dev/null; then
-    TAREAS=$(jq -r ".tareas[] | .id" "$CONFIG_FILE" 2>/dev/null | tr "\n" " ")
+    TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 else
-    TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
+    TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
 fi
 
 if [ -z "$TAREAS" ]; then
-    echo "[$(date)] [ERROR] - No hay tareas configuradas" >> '"$CRON_LOG_FILE"'
+    echo "[$(date)] [ERROR] - No hay tareas configuradas" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
-# Variables para el resumen
 FECHA_INICIO=$(date "+%Y-%m-%d %H:%M:%S")
 T_INICIO=$(date +%s)
 RESULTADOS=()
 TAREAS_EJECUTADAS=()
 
-# Registrar inicio
-echo "" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] 🚀 INICIO EJECUCIÓN AUTOMÁTICA" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] 📋 Tareas: $TAREAS" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> '"$CRON_LOG_FILE"'
+echo "" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] 🚀 INICIO EJECUCIÓN AUTOMÁTICA" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] 📋 Tareas: $TAREAS" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
 
-# Ejecutar tareas
 for tarea in $TAREAS; do
     TAREAS_EJECUTADAS+=("$tarea")
-    
-    echo "[$(date)] [INFO] ▶ Ejecutando: $tarea" >> '"$CRON_LOG_FILE"'
+    echo "[$(date)] [INFO] ▶ Ejecutando: $tarea" >> "$CRON_LOG_FILE"
     
     LOG_TEMP=$(mktemp)
     
@@ -219,80 +219,76 @@ for tarea in $TAREAS; do
             bash "$STK_DIR/stk2.sh" --auto-actualizacion > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ ACTUALIZACIÓN: Completada")
-                echo "[$(date)] [INFO] ✅ Actualización exitosa" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [INFO] ✅ Actualización exitosa" >> "$CRON_LOG_FILE"
             else
                 RESULTADOS+=("❌ ACTUALIZACIÓN: Falló")
-                echo "[$(date)] [ERROR] ❌ Actualización falló" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [ERROR] ❌ Actualización falló" >> "$CRON_LOG_FILE"
             fi
             ;;
         "limpieza")
             bash "$STK_DIR/stk2.sh" --auto-limpieza > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ LIMPIEZA: Completada")
-                echo "[$(date)] [INFO] ✅ Limpieza exitosa" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [INFO] ✅ Limpieza exitosa" >> "$CRON_LOG_FILE"
             else
                 RESULTADOS+=("❌ LIMPIEZA: Falló")
-                echo "[$(date)] [ERROR] ❌ Limpieza falló" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [ERROR] ❌ Limpieza falló" >> "$CRON_LOG_FILE"
             fi
             ;;
         "auditoria")
             bash "$STK_DIR/stk2.sh" --auto-auditoria > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ AUDITORÍA: Completada")
-                echo "[$(date)] [INFO] ✅ Auditoría exitosa" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [INFO] ✅ Auditoría exitosa" >> "$CRON_LOG_FILE"
             else
                 RESULTADOS+=("❌ AUDITORÍA: Falló")
-                echo "[$(date)] [ERROR] ❌ Auditoría falló" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [ERROR] ❌ Auditoría falló" >> "$CRON_LOG_FILE"
             fi
             ;;
         "servicios")
             bash "$STK_DIR/stk2.sh" --auto-servicios > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ SERVICIOS: Reporte generado")
-                echo "[$(date)] [INFO] ✅ Reporte de servicios generado" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [INFO] ✅ Reporte de servicios generado" >> "$CRON_LOG_FILE"
             else
                 RESULTADOS+=("❌ SERVICIOS: Falló")
-                echo "[$(date)] [ERROR] ❌ Reporte de servicios falló" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [ERROR] ❌ Reporte de servicios falló" >> "$CRON_LOG_FILE"
             fi
             ;;
         "ufw")
             bash "$STK_DIR/stk2.sh" --auto-ufw > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ UFW: Auditoría completada")
-                echo "[$(date)] [INFO] ✅ Auditoría UFW exitosa" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [INFO] ✅ Auditoría UFW exitosa" >> "$CRON_LOG_FILE"
             else
                 RESULTADOS+=("❌ UFW: Falló")
-                echo "[$(date)] [ERROR] ❌ Auditoría UFW falló" >> '"$CRON_LOG_FILE"'
+                echo "[$(date)] [ERROR] ❌ Auditoría UFW falló" >> "$CRON_LOG_FILE"
             fi
             ;;
         *)
             RESULTADOS+=("❌ TAREA DESCONOCIDA: $tarea")
-            echo "[$(date)] [ERROR] ❌ Tarea desconocida: $tarea" >> '"$CRON_LOG_FILE"'
+            echo "[$(date)] [ERROR] ❌ Tarea desconocida: $tarea" >> "$CRON_LOG_FILE"
             ;;
     esac
     
-    # Guardar salida detallada
     if [ -s "$LOG_TEMP" ]; then
         cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
     fi
     rm -f "$LOG_TEMP"
 done
 
-# Calcular tiempo total
 T_FIN=$(date +%s)
 DURACION=$((T_FIN - T_INICIO))
 
-# Generar resumen en el log
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] 📊 RESUMEN FINAL" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] ⏱️  Tiempo: ${DURACION}s" >> '"$CRON_LOG_FILE"'
+echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] 📊 RESUMEN FINAL" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] ⏱️  Tiempo: ${DURACION}s" >> "$CRON_LOG_FILE"
 for resultado in "${RESULTADOS[@]}"; do
-    echo "[$(date)] [INFO]    $resultado" >> '"$CRON_LOG_FILE"'
+    echo "[$(date)] [INFO]    $resultado" >> "$CRON_LOG_FILE"
 done
-echo "[$(date)] [INFO] 🏁 FIN EJECUCIÓN" >> '"$CRON_LOG_FILE"'
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> '"$CRON_LOG_FILE"'
+echo "[$(date)] [INFO] 🏁 FIN EJECUCIÓN" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
 
-# Guardar resumen en archivo específico
 {
     echo "═══════════════════════════════════════════════════════════════"
     echo "📊 RESUMEN EJECUCIÓN - $(date "+%Y-%m-%d %H:%M:%S")"
@@ -304,24 +300,22 @@ echo "[$(date)] [INFO] ═══════════════════
         echo "  $resultado"
     done
     echo "═══════════════════════════════════════════════════════════════"
-} >> "'"$CRON_RESUMEN_FILE"'"
+} >> "$CRON_RESUMEN_FILE"
 
-# Actualizar configuración
-if command -v jq &>/dev/null && [ -f "$CONFIG_FILE" ]; then
+if command -v jq &>/dev/null && [ -f "$CRON_CONFIG_FILE" ]; then
     tmp_json=$(mktemp)
-    jq --arg fecha "$(date "+%Y-%m-%d %H:%M:%S")" ".configuracion.ultima_ejecucion = \$fecha" "$CONFIG_FILE" > "$tmp_json" 2>/dev/null
+    jq --arg fecha "$(date "+%Y-%m-%d %H:%M:%S")" ".configuracion.ultima_ejecucion = \$fecha" "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null
     if [ $? -eq 0 ]; then
-        mv "$tmp_json" "$CONFIG_FILE"
-        chmod 600 "$CONFIG_FILE"
+        mv "$tmp_json" "$CRON_CONFIG_FILE"
+        chmod 600 "$CRON_CONFIG_FILE"
     else
         rm -f "$tmp_json"
     fi
 fi
 
 exit 0
-'
+EOF
 
-    echo "$wrapper_content" > "$STK_AUTO_WRAPPER"
     chmod +x "$STK_AUTO_WRAPPER"
     log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"
 }
@@ -425,7 +419,7 @@ seleccionar_tareas() {
                     echo -e "${CIAN}${key}${RESET}: ${TAREAS_DISPONIBLES[$key]}"
                 done
                 echo ""
-                echo -e "${AMARILLO}Ingresa los IDs de las tareas separados por espacio-:${RESET}"
+                echo -e "${AMARILLO}Ingresa los IDs de las tareas separados por espacio:${RESET}"
                 read -r tareas_input
                 
                 # Convertir la entrada en array correctamente
