@@ -827,19 +827,26 @@ ver_configuracion_cron() {
             local activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE")
             local fecha_act=$(jq -r '.configuracion.fecha_activacion // "N/A"' "$CRON_CONFIG_FILE")
             local ult_ejec=$(jq -r '.configuracion.ultima_ejecucion // "Nunca"' "$CRON_CONFIG_FILE")
+            local total_tareas=$(jq -r '.tareas | length' "$CRON_CONFIG_FILE" 2>/dev/null || echo 0)
 
-            if [ "$activado" == "true" ]; then
-                echo -e "Estado:          ${VERDE_BRILLANTE}ACTIVO${RESET}"
+            if [ "$activado" == "true" ] && [ "$total_tareas" -gt 0 ]; then
+                echo -e "Estado general:   ${VERDE_BRILLANTE}ACTIVO${RESET}"
             else
-                echo -e "Estado:          ${ROJO}INACTIVO${RESET}"
+                echo -e "Estado general:   ${ROJO}INACTIVO${RESET}"
             fi
-            echo -e "Frecuencia:      ${AZUL}$desc${RESET}"
-            echo -e "Cron Expression: ${AZUL}$schedule${RESET}"
-            echo -e "Activado el:     ${AZUL}$fecha_act${RESET}"
-            echo -e "Última ejecución:${AZUL}$ult_ejec${RESET}"
+
+            echo -e "Frecuencia global:${AZUL}$desc${RESET}"
+            echo -e "Cron Expression:  ${AZUL}$schedule${RESET}"
+            echo -e "Activado el:      ${AZUL}$fecha_act${RESET}"
+            echo -e "Última ejecución: ${AZUL}$ult_ejec${RESET}"
             echo ""
-            echo -e "${AMARILLO}Tareas seleccionadas:${RESET}"
-            jq -r '.tareas[] | "  • " + .descripcion + " (ID: " + .id + ")"' "$CRON_CONFIG_FILE"
+            echo -e "${AMARILLO}Tareas actualmente registradas ($total_tareas):${RESET}"
+            
+            if [ "$total_tareas" -gt 0 ]; then
+                jq -r '.tareas[] | "  • " + .descripcion + " (ID: " + .id + ")"' "$CRON_CONFIG_FILE"
+            else
+                echo -e "  ${ROJO}(Ninguna tarea en la lista)${RESET}"
+            fi
         else
             grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" | sed 's/^/  • /'
         fi
@@ -913,41 +920,61 @@ desactivar_cron() {
     clear
     mostrar_logo
     echo ""
-    pintar "$CIAN" "--- DESACTIVAR TAREA AUTOMÁTICA ---"
+    pintar "$CIAN" "--- DESACTIVAR TAREAS AUTOMÁTICAS ---"
     echo ""
 
-    if ! verificar_cron_stk; then
-        pintar "$AMARILLO" "⚠️ No hay una tarea automática activa."
+    if ! verificar_cron_stk && [ ! -f "$CRON_CONFIG_FILE" ]; then
+        pintar "$AMARILLO" "⚠️ No hay tareas automáticas activas."
         read -p "Presione Enter..."
         return
     fi
 
     local config_actual
     config_actual=$(obtener_frecuencia_descripcion)
-    echo -e "${AMARILLO}Tarea actual:${RESET} $config_actual"
+    echo -e "${AMARILLO}Configuración actual:${RESET} $config_actual"
     echo ""
-    echo -ne "${ROJO_BRILLANTE}¿Desactivar la tarea automática? (s/N): ${RESET}"
+    echo -ne "${ROJO_BRILLANTE}¿Desactivar y eliminar TODAS las tareas programadas? (s/N): ${RESET}"
     read -r confirm
 
     if [[ "$confirm" =~ ^[sS]$ ]]; then
+        # 1. Eliminar entrada en crontab
         crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
         
+        # 2. Resetear el archivo JSON adecuadamente
         if [ -f "$CRON_CONFIG_FILE" ]; then
             if command -v jq &>/dev/null; then
                 local tmp_json=$(mktemp)
-                if jq '.configuracion.activado = false' "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null; then
+                jq '.configuracion.activado = false | 
+                    .configuracion.schedule = null | 
+                    .configuracion.descripcion = "Ninguna" | 
+                    .tareas = []' "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null
+                
+                if [ $? -eq 0 ]; then
                     mv "$tmp_json" "$CRON_CONFIG_FILE"
                     chmod 600 "$CRON_CONFIG_FILE"
                 else
                     rm -f "$tmp_json"
                 fi
             else
-                sed -i 's/"activado": true/"activado": false/' "$CRON_CONFIG_FILE"
+                cat > "$CRON_CONFIG_FILE" << EOF
+{
+    "version": "1.0",
+    "configuracion": {
+        "schedule": null,
+        "descripcion": "Ninguna",
+        "activado": false,
+        "fecha_activacion": null,
+        "ultima_ejecucion": null
+    },
+    "tareas": []
+}
+EOF
+                chmod 600 "$CRON_CONFIG_FILE"
             fi
         fi
         
-        pintar "$VERDE_BRILLANTE" "✔ Tarea automática desactivada con éxito."
-        log_cron "WARN" "Tarea CRON desactivada"
+        pintar "$VERDE_BRILLANTE" "✔ Todas las tareas automáticas han sido desactivadas."
+        log_cron "WARN" "Todas las tareas CRON fueron desactivadas"
     else
         pintar "$AZUL" "Operación cancelada."
     fi
