@@ -1,10 +1,4 @@
 ﻿<div align="center">
- <img width="500" height="300" alt="image" src=https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png />
- </div>
-
-# 🛠️ STK - System Tool Kit (v5.9.4) Estamos probando y afinando para sacar la V.6
-
-<div align="center">
 
 <!-- BANNER PRINCIPAL -->
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
@@ -19,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v5.9.4)
+# 🛠️ STK - System Tool Kit (v5.9.4) casi tenemos la 6...
 
 </div>
 
