@@ -169,7 +169,10 @@ if [ ! -f "$CRON_CONFIG_FILE" ]; then
     exit 1
 fi
 
-if command -v jq &>/dev/null; then
+TAREA_ARG="$1"
+if [ -n "$TAREA_ARG" ]; then
+    TAREAS="$TAREA_ARG"
+elif command -v jq &>/dev/null; then
     TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 else
     TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
@@ -554,29 +557,22 @@ guardar_configuracion_cron() {
     shift 2
     local tareas=("$@")
 
-    # Construir el array JSON con las nuevas tareas seleccionadas
+    # Crear objetos JSON donde cada tarea incluye su propia frecuencia y schedule
     local json_nuevas_tareas="["
     for i in "${!tareas[@]}"; do
         local tarea_id="${tareas[$i]%%:*}"
         local tarea_desc="${tareas[$i]#*:}"
         
         if [ $i -gt 0 ]; then json_nuevas_tareas+=","; fi
-        json_nuevas_tareas+="{\"id\":\"$tarea_id\",\"descripcion\":\"$tarea_desc\"}"
+        json_nuevas_tareas+="{\"id\":\"$tarea_id\",\"descripcion\":\"$tarea_desc\",\"schedule\":\"$cron_line\",\"frecuencia\":\"$descripcion\"}"
     done
     json_nuevas_tareas+="]"
 
-    # Si el archivo JSON ya existe y contiene jq, fusionamos las tareas evitando duplicados por ID
     if [ -f "$CRON_CONFIG_FILE" ] && command -v jq &>/dev/null; then
-        local tmp_json
-        tmp_json=$(mktemp)
-        
-        jq --arg schedule "$cron_line" \
-           --arg desc "$descripcion" \
-           --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" \
+        local tmp_json=$(mktemp)
+        jq --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" \
            --argjson nuevas "$json_nuevas_tareas" \
-           '.configuracion.schedule = $schedule |
-            .configuracion.descripcion = $desc |
-            .configuracion.activado = true |
+           '.configuracion.activado = true |
             .configuracion.fecha_activacion = $fecha |
             .tareas = ( (.tareas + $nuevas) | unique_by(.id) )' \
            "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null
@@ -584,20 +580,16 @@ guardar_configuracion_cron() {
         if [ $? -eq 0 ]; then
             mv "$tmp_json" "$CRON_CONFIG_FILE"
             chmod 600 "$CRON_CONFIG_FILE"
-            log_cron "INFO" "Configuración actualizada y fusionada: $descripcion ($cron_line)"
             return 0
         else
             rm -f "$tmp_json"
         fi
     fi
 
-    # Respaldo fallback (creación inicial si el archivo no existía)
     cat > "$CRON_CONFIG_FILE" << EOF
 {
-    "version": "1.0",
+    "version": "2.0",
     "configuracion": {
-        "schedule": "$cron_line",
-        "descripcion": "$descripcion",
         "activado": true,
         "fecha_activacion": "$(date '+%Y-%m-%d %H:%M:%S')",
         "ultima_ejecucion": "Pendiente"
@@ -606,7 +598,6 @@ guardar_configuracion_cron() {
 }
 EOF
     chmod 600 "$CRON_CONFIG_FILE"
-    log_cron "INFO" "Configuración guardada: $descripcion ($cron_line)"
 }
 
 activar_tarea_cron() {
@@ -619,26 +610,27 @@ activar_tarea_cron() {
 
     guardar_configuracion_cron "$cron_line" "$descripcion" "${TAREAS_SELECCIONADAS[@]}"
 
-    local cron_full="$cron_line $STK_AUTO_WRAPPER"
-
+    # Limpiar entradas antiguas del script en crontab
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
-    (crontab -l 2>/dev/null; echo "$cron_full $CRON_STK_ID") | crontab -
+
+    # Generar entradas de crontab independientes para cada tarea según su schedule
+    if command -v jq &>/dev/null && [ -f "$CRON_CONFIG_FILE" ]; then
+        local lineas_cron=""
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            local t_id=$(echo "$item" | cut -d'|' -f1)
+            local t_sched=$(echo "$item" | cut -d'|' -f2)
+            lineas_cron+="${t_sched} ${STK_AUTO_WRAPPER} ${t_id} ${CRON_STK_ID}\n"
+        done < <(jq -r '.tareas[] | .id + "|" + .schedule' "$CRON_CONFIG_FILE" 2>/dev/null)
+
+        (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
+    fi
 
     if [ $? -eq 0 ]; then
-        log_cron "INFO" "Tarea CRON activada: $descripcion ($cron_line)"
-        
-        # Recuperar todas las tareas acumuladas para mostrarlas correctamente en el resumen
-        if command -v jq &>/dev/null && [ -f "$CRON_CONFIG_FILE" ]; then
-            TAREAS_SELECCIONADAS=()
-            while IFS= read -r line; do
-                [ -n "$line" ] && TAREAS_SELECCIONADAS+=("$line")
-            done < <(jq -r '.tareas[] | .id + ":" + .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null)
-        fi
-
+        log_cron "INFO" "Tareas CRON sincronizadas correctamente en crontab"
         mostrar_resumen_final "$cron_line" "$descripcion"
     else
-        pintar "$ROJO" "❌ Error al activar la tarea automática."
-        log_cron "ERROR" "Error al activar CRON"
+        pintar "$ROJO" "❌ Error al activar las tareas en CRON."
         read -p "Presione Enter..."
     fi
 }
@@ -822,8 +814,6 @@ ver_configuracion_cron() {
     
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            local schedule=$(jq -r '.configuracion.schedule // "No definido"' "$CRON_CONFIG_FILE")
-            local desc=$(jq -r '.configuracion.descripcion // "Sin descripción"' "$CRON_CONFIG_FILE")
             local activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE")
             local fecha_act=$(jq -r '.configuracion.fecha_activacion // "N/A"' "$CRON_CONFIG_FILE")
             local ult_ejec=$(jq -r '.configuracion.ultima_ejecucion // "Nunca"' "$CRON_CONFIG_FILE")
@@ -835,20 +825,16 @@ ver_configuracion_cron() {
                 echo -e "Estado general:   ${ROJO}INACTIVO${RESET}"
             fi
 
-            echo -e "Frecuencia global:${AZUL}$desc${RESET}"
-            echo -e "Cron Expression:  ${AZUL}$schedule${RESET}"
             echo -e "Activado el:      ${AZUL}$fecha_act${RESET}"
             echo -e "Última ejecución: ${AZUL}$ult_ejec${RESET}"
             echo ""
-            echo -e "${AMARILLO}Tareas actualmente registradas ($total_tareas):${RESET}"
+            echo -e "${AMARILLO}Tareas programadas ($total_tareas):${RESET}"
             
             if [ "$total_tareas" -gt 0 ]; then
-                jq -r '.tareas[] | "  • " + .descripcion + " (ID: " + .id + ")"' "$CRON_CONFIG_FILE"
+                jq -r '.tareas[] | "  • " + .descripcion + "\n    ↳ Frecuencia: " + .frecuencia + " (" + .schedule + ")"' "$CRON_CONFIG_FILE"
             else
-                echo -e "  ${ROJO}(Ninguna tarea en la lista)${RESET}"
+                echo -e "  ${ROJO}(Ninguna tarea programada)${RESET}"
             fi
-        else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" | sed 's/^/  • /'
         fi
     else
         pintar "$ROJO" "❌ No hay configuración activa."
