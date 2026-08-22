@@ -20,22 +20,48 @@ if [ ! -f "$STK2_SCRIPT" ]; then
     exit 1
 fi
 
-# Cargar funciones y colores de stk2.sh
-if [ -f "$STK2_SCRIPT" ]; then
-    source "$STK2_SCRIPT"
-else
-    # Fallback de colores si no se puede cargar
-    RESET='\e[0m'
-    VERDE_BRILLANTE='\e[92m'
-    VERDE='\e[32m'
-    AMARILLO='\e[33m'
-    AZUL='\e[34m'
-    CIAN='\e[36m'
-    MAGENTA='\e[35m'
-    ROJO='\e[31m'
-    ROJO_BRILLANTE='\e[91m'
-    BLANCO='\e[97m'
-fi
+# Definir colores propios (sin sourcear stk2.sh)
+RESET='\e[0m'
+VERDE_BRILLANTE='\e[92m'
+VERDE='\e[32m'
+AMARILLO='\e[33m'
+AZUL='\e[34m'
+CIAN='\e[36m'
+MAGENTA='\e[35m'
+ROJO='\e[31m'
+ROJO_BRILLANTE='\e[91m'
+BLANCO='\e[97m'
+
+# Definir función pintar propia
+pintar() { 
+    local COLOR="$1" 
+    local MENSAJE="$2" 
+    echo -e "${COLOR}${MENSAJE}${RESET}"
+}
+
+# Definir mostrar_logo propia para CRON
+mostrar_logo() {
+    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"
+    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"
+    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
+    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
+    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
+    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v1.0${RESET}"
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+}
+
+# Definir fzf_estilo propia
+fzf_estilo() {
+    local prompt_text="$1"
+    local header_text="$2"
+    fzf --ansi \
+        --height=15 \
+        --reverse \
+        --border=rounded \
+        --prompt="➤ $prompt_text: " \
+        --header="$header_text" \
+        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+}
 
 # --- CONFIGURACIÓN ---
 CRON_CONFIG_DIR="/etc/stk/cron"
