@@ -660,12 +660,31 @@ eliminar_tarea_especifica() {
            '.tareas = [] | .configuracion.activado = false' \
            "$CRON_CONFIG_FILE" > "$tmp_json"
         
-        pintar "$AMARILLO" "⚠️ Al no quedar tareas, el programador automátiico se ha desactivado."
+        pintar "$AMARILLO" "⚠️ Al no quedar tareas, el programador automático se ha desactivado."
     else
         # Eliminar solo la tarea seleccionada manteniendo la configuración de cron
         jq --arg id "$id_a_eliminar" \
            '.tareas = [.tareas[] | select(.id != $id)]' \
            "$CRON_CONFIG_FILE" > "$tmp_json"
+           
+        # --- AÑADIR ESTA REGENERACIÓN DE CRONTAB ---
+        mv "$tmp_json" "$CRON_CONFIG_FILE"
+        chmod 600 "$CRON_CONFIG_FILE"
+
+        crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
+        local lineas_cron=""
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            local t_id=$(echo "$item" | cut -d'|' -f1)
+            local t_sched=$(echo "$item" | cut -d'|' -f2)
+            lineas_cron+="${t_sched} ${STK_AUTO_WRAPPER} ${t_id} ${CRON_STK_ID}\n"
+        done < <(jq -r '.tareas[] | .id + "|" + .schedule' "$CRON_CONFIG_FILE" 2>/dev/null)
+
+        (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
+        log_cron "INFO" "Tarea eliminada e índex de crontab actualizado: $id_a_eliminar"
+        pintar "$VERDE_BRILLANTE" "✔ Tarea '$id_a_eliminar' eliminada correctamente."
+        sleep 2
+        return 0
     fi
 
     if [ $? -eq 0 ]; then
@@ -1016,18 +1035,21 @@ gestionar_tareas_auto() {
             fi
             opcion_num=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
         else
-            echo -e " 1. Programar/Automatizar Tareas (Paso a Paso)"
-            echo -e " 2. Ver configuración"
-            echo -e " 3. Ver logs"
-            echo -e " 4. Ver resumen"
-            echo -e " 5. Desactivar tarea"
-            echo -e " 6. Volver"
+            echo -e " 1. Programar/Añadir Tareas (Paso a Paso)"
+            echo -e " 2. Gestionar/Eliminar tareas individuales"
+            echo -e " 3. Ver configuración actual"
+            echo -e " 4. Ver logs de ejecución"
+            echo -e " 5. Ver resumen última ejecución"
+            echo -e " 6. Desactivar TODAS las tareas"
+            echo -e " 7. Volver"
             echo ""
-            echo -ne "${AMARILLO}Seleccione una opción (1-6): ${RESET}"
+            echo -ne "${AMARILLO}Seleccione una opción (1-7): ${RESET}"
             read -r opcion_num
         fi
 
-        if [ "$opcion_num" == "6" ]; then
+        # Eliminar la condición previa "if [ "$opcion_num" == "6" ]; then break; fi"
+
+        if [ "$opcion_num" == "7" ]; then
             break
         fi
 
