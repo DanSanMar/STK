@@ -528,7 +528,7 @@ configurar_frecuencia() {
             read -r dia
             dia=${dia:-1}
             if [[ ! "$dia" =~ ^[0-6]$ ]]; then
-                pintar "$ROJO" "❌ Día inválido. Usando Lunes (1)"
+                pintar "$ROJO" "❌ Día inválido. Usando Lunes 1"
                 dia=1
             fi
             echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
