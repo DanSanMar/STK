@@ -554,16 +554,44 @@ guardar_configuracion_cron() {
     shift 2
     local tareas=("$@")
 
-    local json_tareas="["
+    # Construir el array JSON con las nuevas tareas seleccionadas
+    local json_nuevas_tareas="["
     for i in "${!tareas[@]}"; do
         local tarea_id="${tareas[$i]%%:*}"
         local tarea_desc="${tareas[$i]#*:}"
         
-        if [ $i -gt 0 ]; then json_tareas+=","; fi
-        json_tareas+="{\"id\":\"$tarea_id\",\"descripcion\":\"$tarea_desc\"}"
+        if [ $i -gt 0 ]; then json_nuevas_tareas+=","; fi
+        json_nuevas_tareas+="{\"id\":\"$tarea_id\",\"descripcion\":\"$tarea_desc\"}"
     done
-    json_tareas+="]"
+    json_nuevas_tareas+="]"
 
+    # Si el archivo JSON ya existe y contiene jq, fusionamos las tareas evitando duplicados por ID
+    if [ -f "$CRON_CONFIG_FILE" ] && command -v jq &>/dev/null; then
+        local tmp_json
+        tmp_json=$(mktemp)
+        
+        jq --arg schedule "$cron_line" \
+           --arg desc "$descripcion" \
+           --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" \
+           --argjson nuevas "$json_nuevas_tareas" \
+           '.configuracion.schedule = $schedule |
+            .configuracion.descripcion = $desc |
+            .configuracion.activado = true |
+            .configuracion.fecha_activacion = $fecha |
+            .tareas = ( (.tareas + $nuevas) | unique_by(.id) )' \
+           "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            mv "$tmp_json" "$CRON_CONFIG_FILE"
+            chmod 600 "$CRON_CONFIG_FILE"
+            log_cron "INFO" "Configuración actualizada y fusionada: $descripcion ($cron_line)"
+            return 0
+        else
+            rm -f "$tmp_json"
+        fi
+    fi
+
+    # Respaldo fallback (creación inicial si el archivo no existía)
     cat > "$CRON_CONFIG_FILE" << EOF
 {
     "version": "1.0",
@@ -574,7 +602,7 @@ guardar_configuracion_cron() {
         "fecha_activacion": "$(date '+%Y-%m-%d %H:%M:%S')",
         "ultima_ejecucion": "Pendiente"
     },
-    "tareas": $json_tareas
+    "tareas": $json_nuevas_tareas
 }
 EOF
     chmod 600 "$CRON_CONFIG_FILE"
@@ -598,6 +626,15 @@ activar_tarea_cron() {
 
     if [ $? -eq 0 ]; then
         log_cron "INFO" "Tarea CRON activada: $descripcion ($cron_line)"
+        
+        # Recuperar todas las tareas acumuladas para mostrarlas correctamente en el resumen
+        if command -v jq &>/dev/null && [ -f "$CRON_CONFIG_FILE" ]; then
+            TAREAS_SELECCIONADAS=()
+            while IFS= read -r line; do
+                [ -n "$line" ] && TAREAS_SELECCIONADAS+=("$line")
+            done < <(jq -r '.tareas[] | .id + ":" + .descripcion' "$CRON_CONFIG_FILE" 2>/dev/null)
+        fi
+
         mostrar_resumen_final "$cron_line" "$descripcion"
     else
         pintar "$ROJO" "❌ Error al activar la tarea automática."
