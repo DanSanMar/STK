@@ -504,13 +504,13 @@ configurar_frecuencia() {
 
     case "$tipo" in
         "boot")
-            echo -e "${AMARILLO}⏰ Al iniciar el sistema 5 minutos después de arrancar${RESET}"
+            echo -e "${AMARILLO}⏰ Al iniciar el sistema (5 minutos después de arrancar)${RESET}"
             cron_line="@reboot sleep 300"
             descripcion_freq="Al iniciar el sistema"
             ;;
         "diaria")
             echo -e "${AMARILLO}⏰ Ejecución diaria${RESET}"
-            echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
+            echo -ne "${CIAN}Ingrese la hora (0-23) [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
             if [[ ! "$hora" =~ ^[0-9]+$ ]] || [ "$hora" -lt 0 ] || [ "$hora" -gt 23 ]; then
@@ -524,14 +524,14 @@ configurar_frecuencia() {
             echo -e "${AMARILLO}⏰ Ejecución semanal${RESET}"
             echo -e "${CIAN}Días disponibles:${RESET}"
             echo "  0=Dom  1=Lun  2=Mar  3=Mié  4=Jue  5=Vie  6=Sáb"
-            echo -ne "${CIAN}Ingrese el día 0-6 [1]: ${RESET}"
+            echo -ne "${CIAN}Ingrese el día (0-6) [1]: ${RESET}"
             read -r dia
             dia=${dia:-1}
             if [[ ! "$dia" =~ ^[0-6]$ ]]; then
-                pintar "$ROJO" "❌ Día inválido. Usando Lunes 1"
+                pintar "$ROJO" "❌ Día inválido. Usando Lunes (1)"
                 dia=1
             fi
-            echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
+            echo -ne "${CIAN}Ingrese la hora (0-23) [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
             if [[ ! "$hora" =~ ^[0-9]+$ ]] || [ "$hora" -lt 0 ] || [ "$hora" -gt 23 ]; then
@@ -539,7 +539,7 @@ configurar_frecuencia() {
                 hora=3
             fi
             cron_line="0 $hora * * $dia"
-            descripcion_freq="Semanal día $dia a las ${hora}:00"
+            descripcion_freq="Semanal dia $dia a las ${hora}:00"
             ;;
         "custom")
             echo -e "${AMARILLO}⏰ Configuración personalizada${RESET}"
@@ -574,7 +574,7 @@ configurar_frecuencia() {
         echo -e "   ${VERDE}•${RESET} ${tarea#*:}"
     done
     echo ""
-    echo -ne "${ROJO_BRILLANTE}¿Confirmar y activar tarea? (s/N): ${RESET}"
+    echo -ne "${ROJO_BRILLANTE}¿Confirmar y activar tarea? s/N: ${RESET}"
     read -r confirm
 
     if [[ "$confirm" =~ ^[sS]$ ]]; then
