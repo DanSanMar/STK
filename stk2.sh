@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.3 Auto en test"
+V="5.9.4 Test Gestor UFW"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -427,6 +427,13 @@ fzf_estilo() {
         --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
 }
 
+ejecutar_stop4me() {
+  # Obtiene el directorio donde vive ESTE script (garantiza que funcione sin importar desde dónde lo ejecutes)
+  local DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  # Ejecuta el archivo pasándole argumentos
+  bash "$DIR/stop4me.sh"
+}
 # LÓGICA FZF menú principal
 
 fzf_menu_principal() {
@@ -476,12 +483,13 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. Gestor de Firewall UFW\n5. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) monitor_rendimiento ;;
                         2) mostrar_info_red ;;
                         3) auditoria_seguridad ;;
+                        4) ejecutar_stop4me ;;
                     esac
                 done
                 ;;
