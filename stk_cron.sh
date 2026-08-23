@@ -169,9 +169,9 @@ CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-# Ruta ABSOLUTA de stk2.sh (definida al crear el wrapper)
-STK2_SCRIPT="$STK2_ABSOLUTE"
-STK_DIR="$STK_DIR_ABSOLUTE"
+# Ruta ABSOLUTA de stk2.sh (inyectada automáticamente)
+STK2_SCRIPT="@@STK2_PATH@@"
+STK_DIR="@@STK_DIR_PATH@@"
 
 # Verificar que stk2.sh existe
 if [ ! -f "$STK2_SCRIPT" ]; then
@@ -318,11 +318,14 @@ echo "[$(date)] [INFO] ═══════════════════
 exit 0
 EOF
 
+    # Reemplazar marcadores por rutas reales absolutas
+    sed -i "s|@@STK2_PATH@@|$STK2_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
+    sed -i "s|@@STK_DIR_PATH@@|$STK_DIR_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
+
     chmod +x "$STK_AUTO_WRAPPER"
     log_cron "INFO" "Wrapper CRON creado en: $STK_AUTO_WRAPPER"
     log_cron "INFO" "STK2_SCRIPT = $STK2_ABSOLUTE"
 }
-
 
 # ============================================================================
 #                   FUNCIONES DE CONSULTA DE ESTADO
