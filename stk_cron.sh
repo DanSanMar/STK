@@ -3,7 +3,7 @@
 #                 GESTOR DE TAREAS AUTOMATIZADAS (CRON)
 # ==============================================================================
 # STK - Módulo de programación automática de tareas
-# Versión: 2.0 (Flujo guiado por pasos: 1. Tarea -> 2. Período)
+# Versión: 3 Tests de notificaciones
 # ==============================================================================
 
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
@@ -54,7 +54,7 @@ mostrar_logo() {
     echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
     echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v2.0${RESET}"
+    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v3.0${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
@@ -206,6 +206,36 @@ if [ -z "$TAREAS" ]; then
     exit 1
 fi
 
+enviar_notificacion_hibrida() {
+    local titulo="$1"
+    local mensaje="$2"
+    local enviado_wall=false
+
+    # 1. Intentar enviar por wall a terminales/TTYs activas
+    if who | grep -qE 'pts/|tty'; then
+        echo -e "\n════════════════════════════════════════" | wall 2>/dev/null
+        echo -e "🔔 [STK NOTIFICACIÓN]: $titulo" | wall 2>/dev/null
+        echo -e "$mensaje" | wall 2>/dev/null
+        echo -e "════════════════════════════════════════\n" | wall 2>/dev/null
+        enviado_wall=true
+    fi
+
+    # 2. Fallback: Si no hay terminal abierta o como refuerzo gráfico
+    local usuario_activo
+    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9])' | awk '{print $1}' | head -n 1)
+
+    if [ -n "$usuario_activo" ]; then
+        local user_id
+        user_id=$(id -u "$usuario_activo" 2>/dev/null)
+
+        if [ -n "$user_id" ] && command -v notify-send &>/dev/null; then
+            sudo -u "$usuario_activo" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+                notify-send -u normal -a "STK Task Manager" "$titulo" "$mensaje" 2>/dev/null
+        fi
+    fi
+}
+
 # Iniciar ejecución
 FECHA_INICIO=$(date "+%Y-%m-%d %H:%M:%S")
 T_INICIO=$(date +%s)
@@ -283,10 +313,21 @@ for tarea in $TAREAS; do
             ;;
     esac
     
+    # --- REGISTRO DETALLADO DE CADA TAREA ---
     if [ -s "$LOG_TEMP" ]; then
+        # 1. Guarda la ejecución completa en el log histórico individual
         cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
+        
+        # 2. Vuelca los detalles de la ejecución en el resumen final acumulado
+        {
+            echo "--- INFORME DETALLADO: ${tarea^^} ---"
+            cat "$LOG_TEMP"
+            echo "-------------------------------------"
+            echo ""
+        } >> "$CRON_RESUMEN_FILE"
     fi
     rm -f "$LOG_TEMP"
+    
 done
 
 T_FIN=$(date +%s)
@@ -314,6 +355,12 @@ echo "[$(date)] [INFO] ═══════════════════
     done
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
+
+# Construir texto corto para la notificación
+RESUMEN_TEXTO=$(printf '%s\n' "${RESULTADOS[@]}")
+
+# Lanzar notificación híbrida
+enviar_notificacion_hibrida "Tareas Automáticas Finalizadas" "$RESUMEN_TEXTO"
 
 exit 0
 EOF
