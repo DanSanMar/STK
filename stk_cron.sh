@@ -183,27 +183,65 @@ fi
 
 enviar_notificacion_hibrida() {
     local titulo="$1"
-    local mensaje="$2"
+    local resumen="$2"
 
-    # 1. Enviar por terminales activas vía wall
-    if who | grep -qE 'pts/|tty'; then
-        echo -e "\n════════════════════════════════════════\n🔔 [STK]: $titulo\n$mensaje\n════════════════════════════════════════\n" | wall 2>/dev/null
+    # Detectar el usuario activo en la sesión gráfica
+    local usuario_activo
+    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
+
+    [ -z "$usuario_activo" ] && return 0
+
+    local user_id
+    user_id=$(id -u "$usuario_activo" 2>/dev/null)
+    local user_home
+    user_home=$(eval echo "~$usuario_activo")
+
+    # Detectar la terminal predeterminada o instalada en el sistema
+    local term_bin=""
+    local term_args=""
+
+    # 1. Probar x-terminal-emulator (Debian/Ubuntu/Mint) o gio/xdg-terminal-exec
+    if command -v x-terminal-emulator &>/dev/null; then
+        term_bin="x-terminal-emulator"
+        term_args="-e"
+    # 2. Terminales populares y modernas (Ghostty, Kitty, Alacritty, WezTerm)
+    elif command -v ghostty &>/dev/null; then
+        term_bin="ghostty"
+        term_args="-e"
+    elif command -v kitty &>/dev/null; then
+        term_bin="kitty"
+        term_args="-e"
+    elif command -v alacritty &>/dev/null; then
+        term_bin="alacritty"
+        term_args="-e"
+    elif command -v wezterm &>/dev/null; then
+        term_bin="wezterm"
+        term_args="start --"
+    # 3. Terminales de escritorio convencionales (GNOME, Arch/KDE, XFCE, Fedora)
+    elif command -v gnome-terminal &>/dev/null; then
+        term_bin="gnome-terminal"
+        term_args="--"
+    elif command -v konsole &>/dev/null; then
+        term_bin="konsole"
+        term_args="-e"
+    elif command -v xfce4-terminal &>/dev/null; then
+        term_bin="xfce4-terminal"
+        term_args="-x"
+    elif command -v xterm &>/dev/null; then
+        term_bin="xterm"
+        term_args="-e"
     fi
 
-    # 2. Enviar a todas las sesiones gráficas activas (UIDs >= 1000)
-    for user_dir in /run/user/*; do
-        local uid="${user_dir##*/}"
-        if [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -ge 1000 ]; then
-            local usuario
-            usuario=$(id -nu "$uid" 2>/dev/null)
-            if [ -n "$usuario" ] && command -v notify-send &>/dev/null; then
-                sudo -u "$usuario" \
-                    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-                    DISPLAY=:0 \
-                    notify-send -u normal -a "STK Task Manager" "$titulo" "$mensaje" 2>/dev/null
-            fi
-        fi
-    done
+    # Si se detectó una terminal y existe el log de resumen, lanzar la ventana
+    if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
+        local cmd_mostrar="clear; cat $CRON_RESUMEN_FILE; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
+
+        sudo -u "$usuario_activo" \
+            DISPLAY="${DISPLAY:-:0}" \
+            XAUTHORITY="$user_home/.Xauthority" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+            $term_bin $term_args bash -c "$cmd_mostrar" 2>/dev/null &
+    fi
 }
 
 T_INICIO=$(date +%s)
