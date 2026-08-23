@@ -185,7 +185,6 @@ enviar_notificacion_hibrida() {
     local titulo="$1"
     local resumen="$2"
 
-    # Detectar el usuario activo en la sesión gráfica
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
 
@@ -196,48 +195,42 @@ enviar_notificacion_hibrida() {
     local user_home
     user_home=$(eval echo "~$usuario_activo")
 
-    # Detectar la terminal predeterminada o instalada en el sistema
+    # Detectar emulador de terminal
     local term_bin=""
     local term_args=""
 
-    if command -v x-terminal-emulator &>/dev/null; then
-        term_bin="x-terminal-emulator"
-        term_args="-e"
-    elif command -v ghostty &>/dev/null; then
-        term_bin="ghostty"
-        term_args="-e"
-    elif command -v kitty &>/dev/null; then
-        term_bin="kitty"
-        term_args="-e"
-    elif command -v alacritty &>/dev/null; then
-        term_bin="alacritty"
-        term_args="-e"
-    elif command -v wezterm &>/dev/null; then
-        term_bin="wezterm"
-        term_args="start --"
-    elif command -v gnome-terminal &>/dev/null; then
-        term_bin="gnome-terminal"
-        term_args="--"
-    elif command -v konsole &>/dev/null; then
-        term_bin="konsole"
-        term_args="-e"
-    elif command -v xfce4-terminal &>/dev/null; then
-        term_bin="xfce4-terminal"
-        term_args="-x"
-    elif command -v xterm &>/dev/null; then
-        term_bin="xterm"
-        term_args="-e"
+    if command -v x-terminal-emulator &>/dev/null; then term_bin="x-terminal-emulator"; term_args="-e";
+    elif command -v ghostty &>/dev/null; then term_bin="ghostty"; term_args="-e";
+    elif command -v kitty &>/dev/null; then term_bin="kitty"; term_args="-e";
+    elif command -v alacritty &>/dev/null; then term_bin="alacritty"; term_args="-e";
+    elif command -v wezterm &>/dev/null; then term_bin="wezterm"; term_args="start --";
+    elif command -v gnome-terminal &>/dev/null; then term_bin="gnome-terminal"; term_args="--";
+    elif command -v konsole &>/dev/null; then term_bin="konsole"; term_args="-e";
+    elif command -v xfce4-terminal &>/dev/null; then term_bin="xfce4-terminal"; term_args="-x";
+    elif command -v xterm &>/dev/null; then term_bin="xterm"; term_args="-e";
     fi
 
-    # Si se detectó terminal y existe el resumen
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
-        # Crear copia temporal legible por el usuario normal
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
-        cp "$CRON_RESUMEN_FILE" "$tmp_resumen"
+        
+        # --- OPCIÓN DE ACORTADO: Extraer solo la ÚLTIMA ejecución del log histórico ---
+        tac "$CRON_RESUMEN_FILE" | sed -n '/═══════════════════════════════════════════════════════════════/q; p' | tac > "$tmp_resumen"
+        
+        # Si prefieres acortar simplemente por número de líneas (ej. últimas 25 líneas), reemplaza la línea de arriba por:
+        # tail -n 25 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
+
         chown "$usuario_activo:" "$tmp_resumen"
         chmod 644 "$tmp_resumen"
 
-        local cmd_mostrar="clear; bat $tmp_resumen; rm -f $tmp_resumen; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
+        # Detectar bat / batcat / cat
+        local viewer="cat"
+        if command -v bat &>/dev/null; then
+            viewer="bat --paging=never --style=plain"
+        elif command -v batcat &>/dev/null; then
+            viewer="batcat --paging=never --style=plain"
+        fi
+
+        local cmd_mostrar="clear; $viewer $tmp_resumen; rm -f $tmp_resumen; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
 
         sudo -u "$usuario_activo" \
             DISPLAY="${DISPLAY:-:0}" \
