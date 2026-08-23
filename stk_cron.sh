@@ -3,7 +3,7 @@
 #                 GESTOR DE TAREAS AUTOMATIZADAS (CRON)
 # ==============================================================================
 # STK - Módulo de programación automática de tareas
-# Versión: 3 Tests de notificaciones
+# Versión: 4 Tests generales tras integración completa a un solo script
 # ==============================================================================
 
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
@@ -54,7 +54,7 @@ mostrar_logo() {
     echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
     echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v3.0${RESET}"
+    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v4.0${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
