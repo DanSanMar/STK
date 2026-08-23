@@ -6,15 +6,25 @@
 # Versión: 2.0 (Flujo guiado por pasos: 1. Tarea -> 2. Período)
 # ==============================================================================
 
-# --- DETECCIÓN DE DIRECTORIO Y CARGA DE CONFIGURACIÓN ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 STK2_SCRIPT="$SCRIPT_DIR/stk2.sh"
 
-# Verificar que existe stk2.sh
+# Si no está en su carpeta, buscar stk2.sh en todo el sistema del usuario
 if [ ! -f "$STK2_SCRIPT" ]; then
-    echo -e "\033[91m❌ Error: No se encuentra stk2.sh en el mismo directorio\033[0m"
-    echo -e "\033[33mEjecuta este script desde el directorio donde está stk2.sh\033[0m"
-    exit 1
+    STK2_SCRIPT=$(find /home /root -maxdepth 4 -name "stk2.sh" 2>/dev/null | head -n 1)
+    if [ -n "$STK2_SCRIPT" ]; then
+        SCRIPT_DIR="$(dirname "$STK2_SCRIPT")"
+    else
+        echo -e "\033[91m❌ Error: No se pudo localizar stk2.sh en el sistema.\033[0m"
+        exit 1
+    fi
 fi
 
 # Definir colores propios
@@ -132,9 +142,9 @@ log_cron() {
     fi
 }
 crear_wrapper_cron() {
-    # Obtener la ruta absoluta de stk2.sh
-    local STK2_ABSOLUTE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stk2.sh"
-    local STK_DIR_ABSOLUTE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # Rutas detectadas dinámicamente
+    local STK2_ABSOLUTE="$STK2_SCRIPT"
+    local STK_DIR_ABSOLUTE="$SCRIPT_DIR"
     
     # Verificar que stk2.sh existe
     if [ ! -f "$STK2_ABSOLUTE" ]; then
