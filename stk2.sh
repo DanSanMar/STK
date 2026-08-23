@@ -2521,52 +2521,43 @@ log_cron_exec() {
 
 ejecutar_auto_actualizacion() {
     log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
+    echo "🔄 INICIANDO ACTUALIZACIÓN DEL SISTEMA..."
     Actualizar_sistema
     if [ $? -eq 0 ]; then
         log_cron_exec "INFO" "✅ Actualización completada"
+        echo "✅ Actualización completada correctamente."
     else
         log_cron_exec "ERROR" "❌ Actualización falló"
+        echo "❌ Error al ejecutar la actualización."
     fi
 }
 
 ejecutar_auto_limpieza() {
     log_cron_exec "INFO" "▶ Inicio: Limpieza del sistema"
+    echo "🧹 INICIANDO LIMPIEZA DEL SISTEMA..."
     super_limpieza
     if [ $? -eq 0 ]; then
         log_cron_exec "INFO" "✅ Limpieza completada"
+        echo "✅ Limpieza completada correctamente."
     else
         log_cron_exec "ERROR" "❌ Limpieza falló"
+        echo "❌ Error al ejecutar la limpieza."
     fi
 }
 
 ejecutar_auto_auditoria() {
     log_cron_exec "INFO" "▶ Inicio: Auditoría de seguridad"
     auditoria_seguridad_auto
-    if [ $? -eq 0 ]; then
-        log_cron_exec "INFO" "✅ Auditoría completada"
-    else
-        log_cron_exec "ERROR" "❌ Auditoría falló"
-    fi
 }
 
 ejecutar_auto_servicios() {
     log_cron_exec "INFO" "▶ Inicio: Reporte de servicios"
     gestionar_servicios_auto
-    if [ $? -eq 0 ]; then
-        log_cron_exec "INFO" "✅ Reporte de servicios generado"
-    else
-        log_cron_exec "ERROR" "❌ Reporte de servicios falló"
-    fi
 }
 
 ejecutar_auto_ufw() {
     log_cron_exec "INFO" "▶ Inicio: Auditoría UFW"
     auditoria_ufw_auto
-    if [ $? -eq 0 ]; then
-        log_cron_exec "INFO" "✅ Auditoría UFW completada"
-    else
-        log_cron_exec "ERROR" "❌ Auditoría UFW falló"
-    fi
 }
 
 # ==============================================================================

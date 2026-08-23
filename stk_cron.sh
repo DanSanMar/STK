@@ -142,11 +142,9 @@ log_cron() {
     fi
 }
 crear_wrapper_cron() {
-    # Rutas detectadas dinámicamente
     local STK2_ABSOLUTE="$STK2_SCRIPT"
     local STK_DIR_ABSOLUTE="$SCRIPT_DIR"
     
-    # Verificar que stk2.sh existe
     if [ ! -f "$STK2_ABSOLUTE" ]; then
         log_cron "ERROR" "No se encuentra stk2.sh en $STK2_ABSOLUTE"
         return 1
@@ -155,43 +153,25 @@ crear_wrapper_cron() {
     cat << 'EOF' > "$STK_AUTO_WRAPPER"
 #!/bin/bash
 # STK - Wrapper para tareas automáticas CRON
-# Generado automáticamente - No modificar manualmente
-# ==============================================================================
-
-# Variables de entorno para CRON
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
 export LANG="es_ES.UTF-8"
 
-# Configuración de logs
 CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-# Ruta ABSOLUTA de stk2.sh (inyectada automáticamente)
 STK2_SCRIPT="@@STK2_PATH@@"
 STK_DIR="@@STK_DIR_PATH@@"
 
-# Verificar que stk2.sh existe
 if [ ! -f "$STK2_SCRIPT" ]; then
     echo "[$(date)] [ERROR] - No se encuentra stk2.sh en $STK2_SCRIPT" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
-# Cambiar al directorio de STK
-cd "$STK_DIR" || {
-    echo "[$(date)] [ERROR] - No se puede acceder a $STK_DIR" >> "$CRON_LOG_FILE"
-    exit 1
-}
+cd "$STK_DIR" || exit 1
 
-# Verificar configuración
-if [ ! -f "$CRON_CONFIG_FILE" ]; then
-    echo "[$(date)] [ERROR] - No hay configuración de tareas" >> "$CRON_LOG_FILE"
-    exit 1
-fi
-
-# Obtener el ID de la tarea (argumento pasado desde crontab)
 TAREA_ARG="$1"
 if [ -n "$TAREA_ARG" ]; then
     TAREAS="$TAREA_ARG"
@@ -201,148 +181,73 @@ else
     TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
 fi
 
-if [ -z "$TAREAS" ]; then
-    echo "[$(date)] [ERROR] - No hay tareas configuradas" >> "$CRON_LOG_FILE"
-    exit 1
-fi
-
 enviar_notificacion_hibrida() {
     local titulo="$1"
     local mensaje="$2"
-    local enviado_wall=false
 
-    # 1. Intentar enviar por wall a terminales/TTYs activas
+    # 1. Enviar por terminales activas vía wall
     if who | grep -qE 'pts/|tty'; then
-        echo -e "\n════════════════════════════════════════" | wall 2>/dev/null
-        echo -e "🔔 [STK NOTIFICACIÓN]: $titulo" | wall 2>/dev/null
-        echo -e "$mensaje" | wall 2>/dev/null
-        echo -e "════════════════════════════════════════\n" | wall 2>/dev/null
-        enviado_wall=true
+        echo -e "\n════════════════════════════════════════\n🔔 [STK]: $titulo\n$mensaje\n════════════════════════════════════════\n" | wall 2>/dev/null
     fi
 
-    # 2. Fallback: Si no hay terminal abierta o como refuerzo gráfico
-    local usuario_activo
-    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9])' | awk '{print $1}' | head -n 1)
-
-    if [ -n "$usuario_activo" ]; then
-        local user_id
-        user_id=$(id -u "$usuario_activo" 2>/dev/null)
-
-        if [ -n "$user_id" ] && command -v notify-send &>/dev/null; then
-            sudo -u "$usuario_activo" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
-                notify-send -u normal -a "STK Task Manager" "$titulo" "$mensaje" 2>/dev/null
+    # 2. Enviar a todas las sesiones gráficas activas (UIDs >= 1000)
+    for user_dir in /run/user/*; do
+        local uid="${user_dir##*/}"
+        if [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -ge 1000 ]; then
+            local usuario
+            usuario=$(id -nu "$uid" 2>/dev/null)
+            if [ -n "$usuario" ] && command -v notify-send &>/dev/null; then
+                sudo -u "$usuario" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+                    DISPLAY=:0 \
+                    notify-send -u normal -a "STK Task Manager" "$titulo" "$mensaje" 2>/dev/null
+            fi
         fi
-    fi
+    done
 }
 
-# Iniciar ejecución
-FECHA_INICIO=$(date "+%Y-%m-%d %H:%M:%S")
 T_INICIO=$(date +%s)
 RESULTADOS=()
-TAREAS_EJECUTADAS=()
+DETALLES_INFORME=""
 
-echo "" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] 🚀 INICIO EJECUCIÓN AUTOMÁTICA" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] 📋 Tarea: $TAREA_ARG" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] 📂 Directorio: $STK_DIR" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
-
-# Ejecutar la tarea específica
 for tarea in $TAREAS; do
-    TAREAS_EJECUTADAS+=("$tarea")
-    echo "[$(date)] [INFO] ▶ Ejecutando: $tarea" >> "$CRON_LOG_FILE"
-    
     LOG_TEMP=$(mktemp)
     
     case "$tarea" in
         "actualizacion")
             bash "$STK2_SCRIPT" --auto-actualizacion > "$LOG_TEMP" 2>&1
-            if [ $? -eq 0 ]; then
-                RESULTADOS+=("✅ ACTUALIZACIÓN: Completada")
-                echo "[$(date)] [INFO] ✅ Actualización exitosa" >> "$CRON_LOG_FILE"
-            else
-                RESULTADOS+=("❌ ACTUALIZACIÓN: Falló")
-                echo "[$(date)] [ERROR] ❌ Actualización falló" >> "$CRON_LOG_FILE"
-            fi
+            [ $? -eq 0 ] && RESULTADOS+=("✅ ACTUALIZACIÓN: Completada") || RESULTADOS+=("❌ ACTUALIZACIÓN: Falló")
             ;;
         "limpieza")
             bash "$STK2_SCRIPT" --auto-limpieza > "$LOG_TEMP" 2>&1
-            if [ $? -eq 0 ]; then
-                RESULTADOS+=("✅ LIMPIEZA: Completada")
-                echo "[$(date)] [INFO] ✅ Limpieza exitosa" >> "$CRON_LOG_FILE"
-            else
-                RESULTADOS+=("❌ LIMPIEZA: Falló")
-                echo "[$(date)] [ERROR] ❌ Limpieza falló" >> "$CRON_LOG_FILE"
-            fi
+            [ $? -eq 0 ] && RESULTADOS+=("✅ LIMPIEZA: Completada") || RESULTADOS+=("❌ LIMPIEZA: Falló")
             ;;
         "auditoria")
             bash "$STK2_SCRIPT" --auto-auditoria > "$LOG_TEMP" 2>&1
-            if [ $? -eq 0 ]; then
-                RESULTADOS+=("✅ AUDITORÍA: Completada")
-                echo "[$(date)] [INFO] ✅ Auditoría exitosa" >> "$CRON_LOG_FILE"
-            else
-                RESULTADOS+=("❌ AUDITORÍA: Falló")
-                echo "[$(date)] [ERROR] ❌ Auditoría falló" >> "$CRON_LOG_FILE"
-            fi
+            [ $? -eq 0 ] && RESULTADOS+=("✅ AUDITORÍA: Completada") || RESULTADOS+=("❌ AUDITORÍA: Falló")
             ;;
         "servicios")
             bash "$STK2_SCRIPT" --auto-servicios > "$LOG_TEMP" 2>&1
-            if [ $? -eq 0 ]; then
-                RESULTADOS+=("✅ SERVICIOS: Reporte generado")
-                echo "[$(date)] [INFO] ✅ Reporte de servicios generado" >> "$CRON_LOG_FILE"
-            else
-                RESULTADOS+=("❌ SERVICIOS: Falló")
-                echo "[$(date)] [ERROR] ❌ Reporte de servicios falló" >> "$CRON_LOG_FILE"
-            fi
+            [ $? -eq 0 ] && RESULTADOS+=("✅ SERVICIOS: Reporte generado") || RESULTADOS+=("❌ SERVICIOS: Falló")
             ;;
         "ufw")
             bash "$STK2_SCRIPT" --auto-ufw > "$LOG_TEMP" 2>&1
-            if [ $? -eq 0 ]; then
-                RESULTADOS+=("✅ UFW: Auditoría completada")
-                echo "[$(date)] [INFO] ✅ Auditoría UFW exitosa" >> "$CRON_LOG_FILE"
-            else
-                RESULTADOS+=("❌ UFW: Falló")
-                echo "[$(date)] [ERROR] ❌ Auditoría UFW falló" >> "$CRON_LOG_FILE"
-            fi
-            ;;
-        *)
-            RESULTADOS+=("❌ TAREA DESCONOCIDA: $tarea")
-            echo "[$(date)] [ERROR] ❌ Tarea desconocida: $tarea" >> "$CRON_LOG_FILE"
+            [ $? -eq 0 ] && RESULTADOS+=("✅ UFW: Auditoría completada") || RESULTADOS+=("❌ UFW: Falló")
             ;;
     esac
     
-    # --- REGISTRO DETALLADO DE CADA TAREA ---
+    # Capturar log individual e integrarlo al informe general
     if [ -s "$LOG_TEMP" ]; then
-        # 1. Guarda la ejecución completa en el log histórico individual
         cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
-        
-        # 2. Vuelca los detalles de la ejecución en el resumen final acumulado
-        {
-            echo "--- INFORME DETALLADO: ${tarea^^} ---"
-            cat "$LOG_TEMP"
-            echo "-------------------------------------"
-            echo ""
-        } >> "$CRON_RESUMEN_FILE"
+        DETALLES_INFORME+="$(cat "$LOG_TEMP")\n\n"
     fi
     rm -f "$LOG_TEMP"
-    
 done
 
 T_FIN=$(date +%s)
 DURACION=$((T_FIN - T_INICIO))
 
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] 📊 RESUMEN FINAL" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] ⏱️  Tiempo: ${DURACION}s" >> "$CRON_LOG_FILE"
-for resultado in "${RESULTADOS[@]}"; do
-    echo "[$(date)] [INFO]    $resultado" >> "$CRON_LOG_FILE"
-done
-echo "[$(date)] [INFO] 🏁 FIN EJECUCIÓN" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
-
-# Guardar resumen
+# Guardar informe en el Log de Resumen de ejecuciones
 {
     echo "═══════════════════════════════════════════════════════════════"
     echo "📊 RESUMEN EJECUCIÓN - $(date "+%Y-%m-%d %H:%M:%S")"
@@ -353,25 +258,21 @@ echo "[$(date)] [INFO] ═══════════════════
     for resultado in "${RESULTADOS[@]}"; do
         echo "  $resultado"
     done
+    echo ""
+    echo "--- DETALLES DE LA EJECUCIÓN ---"
+    echo -e "$DETALLES_INFORME"
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
-# Construir texto corto para la notificación
 RESUMEN_TEXTO=$(printf '%s\n' "${RESULTADOS[@]}")
-
-# Lanzar notificación híbrida
 enviar_notificacion_hibrida "Tareas Automáticas Finalizadas" "$RESUMEN_TEXTO"
 
 exit 0
 EOF
 
-    # Reemplazar marcadores por rutas reales absolutas
     sed -i "s|@@STK2_PATH@@|$STK2_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
     sed -i "s|@@STK_DIR_PATH@@|$STK_DIR_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
-
     chmod +x "$STK_AUTO_WRAPPER"
-    log_cron "INFO" "Wrapper CRON creado en: $STK_AUTO_WRAPPER"
-    log_cron "INFO" "STK2_SCRIPT = $STK2_ABSOLUTE"
 }
 
 # ============================================================================
