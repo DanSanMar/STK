@@ -141,18 +141,13 @@ log_cron() {
         registrar_log "$NIVEL" "[CRON] $MENSAJE"
     fi
 }
+# CREAR WRAPPER 
 crear_wrapper_cron() {
-    local STK2_ABSOLUTE="$STK2_SCRIPT"
-    local STK_DIR_ABSOLUTE="$SCRIPT_DIR"
-    
-    if [ ! -f "$STK2_ABSOLUTE" ]; then
-        log_cron "ERROR" "No se encuentra stk2.sh en $STK2_ABSOLUTE"
-        return 1
-    fi
-    
     cat << 'EOF' > "$STK_AUTO_WRAPPER"
 #!/bin/bash
-# STK - Wrapper para tareas automáticas CRON
+# ==============================================================================
+#           STK - WRAPPER Y EJECUTOR DE TAREAS AUTOMÁTICAS (CRON)
+# ==============================================================================
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
@@ -162,15 +157,274 @@ CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-STK2_SCRIPT="@@STK2_PATH@@"
-STK_DIR="@@STK_DIR_PATH@@"
+# --- FUNCIÓN DE LOGGING ÚNICA ---
+log_cron_exec() {
+    local nivel="${1:-INFO}"
+    local mensaje="${2}"
+    local fecha=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$fecha] [$nivel] [root] - $mensaje" >> "$CRON_LOG_FILE"
+}
 
-if [ ! -f "$STK2_SCRIPT" ]; then
-    echo "[$(date)] [ERROR] - No se encuentra stk2.sh en $STK2_SCRIPT" >> "$CRON_LOG_FILE"
-    exit 1
-fi
+# ==============================================================================
+#                 SUBRUTINAS TÉCNICAS (ACTUALIZACIÓN Y LIMPIEZA)
+# ==============================================================================
 
-cd "$STK_DIR" || exit 1
+Actualizar_sistema() {
+    local status=0
+    if command -v pacman &>/dev/null; then
+        echo "📦 Sincronizando repositorios y sistema (PACMAN)..."
+        pacman -Syu --noconfirm || status=1
+    elif command -v apt-get &>/dev/null; then
+        echo "📦 Sincronizando repositorios y sistema (APT)..."
+        apt-get update -y && apt-get upgrade -y || status=1
+    fi
+
+    if command -v flatpak &>/dev/null; then
+        echo "📦 Actualizando paquetes Flatpak..."
+        flatpak update -y || true
+    fi
+
+    return $status
+}
+
+super_limpieza() {
+    local status=0
+    if command -v pacman &>/dev/null; then
+        echo "🧹 Limpiando caché de paquetes y huérfanos (PACMAN)..."
+        pacman -Sc --noconfirm &>/dev/null || true
+        local huerfanos=$(pacman -Qtdq 2>/dev/null)
+        if [ -n "$huerfanos" ]; then
+            pacman -Rns $huerfanos --noconfirm || status=1
+        fi
+    elif command -v apt-get &>/dev/null; then
+        echo "🧹 Limpiando caché y paquetes no requeridos (APT)..."
+        apt-get autoremove -y && apt-get clean || status=1
+    fi
+
+    # Limpieza de logs journalctl > 7 días
+    if command -v journalctl &>/dev/null; then
+        journalctl --vacuum-time=7d &>/dev/null || true
+    fi
+
+    return $status
+}
+
+# ==============================================================================
+#                 VERSIONES AUTOMÁTICAS (Sin interacción)
+# ==============================================================================
+
+ejecutar_auto_actualizacion() {
+    log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
+    echo "🔄 INICIANDO ACTUALIZACIÓN DEL SISTEMA..."
+    Actualizar_sistema
+    local res=$?
+    if [ $res -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Actualización completada"
+        echo "✅ Actualización completada correctamente."
+    else
+        log_cron_exec "ERROR" "❌ Actualización falló"
+        echo "❌ Error al ejecutar la actualización."
+    fi
+    return $res
+}
+
+ejecutar_auto_limpieza() {
+    log_cron_exec "INFO" "▶ Inicio: Limpieza del sistema"
+    echo "🧹 INICIANDO LIMPIEZA DEL SISTEMA..."
+    super_limpieza
+    local res=$?
+    if [ $res -eq 0 ]; then
+        log_cron_exec "INFO" "✅ Limpieza completada"
+        echo "✅ Limpieza completada correctamente."
+    else
+        log_cron_exec "ERROR" "❌ Limpieza falló"
+        echo "❌ Error al ejecutar la limpieza."
+    fi
+    return $res
+}
+
+ejecutar_auto_auditoria() {
+    log_cron_exec "INFO" "▶ Inicio: Auditoría de seguridad"
+    echo "🔍 AUDITORÍA DE SEGURIDAD (RESUMEN)"
+    echo "----------------------------------------"
+    
+    local total_checks=0
+    local checks_passed=0
+    local alertas=()
+    
+    # 1. UID 0
+    ((total_checks++))
+    if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd 2>/dev/null | wc -l) -eq 1 ]; then
+        ((checks_passed++))
+    else
+        alertas+=("Múltiples usuarios con UID 0")
+    fi
+    
+    # 2. Cuentas sin contraseña
+    ((total_checks++))
+    if [ -z "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
+        ((checks_passed++))
+    else
+        alertas+=("Cuentas inactivas o sin contraseña")
+    fi
+    
+    # 3. Firewall
+    ((total_checks++))
+    if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
+        ((checks_passed++))
+    else
+        alertas+=("Firewall inactivo o sin reglas")
+    fi
+    
+    # 4. SSH
+    ((total_checks++))
+    if command -v ss &>/dev/null; then
+        if ! ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
+            ((checks_passed++))
+        else
+            alertas+=("SSH expuesto en puerto 22")
+        fi
+    else
+        ((checks_passed++))
+    fi
+    
+    # 5. MAC (SELinux/AppArmor)
+    ((total_checks++))
+    if command -v getenforce &>/dev/null && [ "$(getenforce 2>/dev/null)" == "Enforcing" ]; then
+        ((checks_passed++))
+    elif command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
+        ((checks_passed++))
+    else
+        alertas+=("Sin módulo MAC activo")
+    fi
+    
+    local score=$(( (checks_passed * 100) / total_checks ))
+    echo "📊 Puntuación: ${score}% (${checks_passed}/${total_checks})"
+    
+    if [ ${#alertas[@]} -gt 0 ]; then
+        echo "⚠️ Alertas detectadas:"
+        for alt in "${alertas[@]}"; do
+            echo "  • $alt"
+        done
+    else
+        echo "✅ No se detectaron alertas de seguridad."
+    fi
+    return 0
+}
+
+ejecutar_auto_servicios() {
+    log_cron_exec "INFO" "▶ Inicio: Reporte de servicios"
+    echo "📊 REPORTE DE SERVICIOS (Systemd)"
+    echo "----------------------------------------"
+    
+    local failed_services
+    failed_services=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+    
+    if [ -n "$failed_services" ]; then
+        local count=$(echo "$failed_services" | wc -l)
+        echo "⚠️ Servicios fallidos detectados: $count"
+        echo "$failed_services" | while read -r svc; do
+            echo "  • $svc"
+        done
+        return 1
+    else
+        echo "✅ Todos los servicios operan correctamente."
+        return 0
+    fi
+}
+
+ejecutar_auto_ufw() {
+    log_cron_exec "INFO" "▶ Inicio: Auditoría UFW"
+    echo "🛡️ AUDITORÍA UFW"
+    echo "----------------------------------------"
+    
+    if ! command -v ufw &>/dev/null; then
+        echo "❌ UFW no está instalado en el sistema."
+        return 1
+    fi
+    
+    echo "📋 Estado de UFW:"
+    ufw status verbose 2>/dev/null | head -20
+    
+    if [ -f "/var/log/ufw.log" ]; then
+        echo ""
+        echo "📊 Estadísticas:"
+        local block_count=$(grep -c "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -1)
+        echo "  • Bloqueos totales: $block_count"
+        echo ""
+        echo "🔍 Últimos bloqueos:"
+        grep "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -5 | while read -r line; do
+            echo "  • $line"
+        done
+    else
+        echo "  ℹ️ No se encontró el log de UFW."
+    fi
+    return 0
+}
+
+# ==============================================================================
+#                 SISTEMA DE NOTIFICACIÓN EN TERMINAL
+# ==============================================================================
+
+enviar_notificacion_hibrida() {
+    local usuario_activo
+    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
+    [ -z "$usuario_activo" ] && usuario_activo=$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)
+    [ -z "$usuario_activo" ] && return 1
+
+    local user_id user_home display_val xauth_val term_bin term_args
+    user_id=$(id -u "$usuario_activo" 2>/dev/null)
+    user_home=$(eval echo "~$usuario_activo")
+    display_val="${DISPLAY:-:0}"
+    xauth_val="$user_home/.Xauthority"
+
+    [ ! -f "$xauth_val" ] && xauth_val=$(find "/run/user/${user_id}" -name ".Xauthority" 2>/dev/null | head -n 1)
+
+    if command -v ghostty &>/dev/null; then term_bin="ghostty"; term_args="-e";
+    elif command -v kitty &>/dev/null; then term_bin="kitty"; term_args="-e";
+    elif command -v alacritty &>/dev/null; then term_bin="alacritty"; term_args="-e";
+    elif command -v gnome-terminal &>/dev/null; then term_bin="gnome-terminal"; term_args="--";
+    elif command -v konsole &>/dev/null; then term_bin="konsole"; term_args="-e";
+    elif command -v xfce4-terminal &>/dev/null; then term_bin="xfce4-terminal"; term_args="-x";
+    elif command -v xterm &>/dev/null; then term_bin="xterm"; term_args="-e";
+    fi
+
+    if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
+        local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
+        tac "$CRON_RESUMEN_FILE" | sed -n '/═══════════════════════════════════════════════════════════════/q; p' | tac > "$tmp_resumen"
+
+        local viewer="cat"
+        if command -v bat &>/dev/null; then viewer="bat --paging=never --style=plain";
+        elif command -v batcat &>/dev/null; then viewer="batcat --paging=never --style=plain"; fi
+
+        local runner_script="/tmp/stk_run_term_${user_id}.sh"
+        cat << TRUNNER > "$runner_script"
+#!/bin/bash
+clear
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " ⚠️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+$viewer "$tmp_resumen"
+echo ""
+rm -f "$tmp_resumen" "$runner_script"
+read -p "Presiona ENTER para cerrar este informe..."
+TRUNNER
+        chmod 777 "$runner_script"
+        chown "$usuario_activo:" "$tmp_resumen" 2>/dev/null
+
+        sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null
+        sudo -u "$usuario_activo" \
+            DISPLAY="$display_val" \
+            XAUTHORITY="$xauth_val" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+            $term_bin $term_args bash "$runner_script" &
+    fi
+}
+
+# ==============================================================================
+#                 FLUJO PRINCIPAL DE EJECUCIÓN
+# ==============================================================================
 
 TAREA_ARG="$1"
 if [ -n "$TAREA_ARG" ]; then
@@ -181,96 +435,28 @@ else
     TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
 fi
 
-enviar_notificacion_hibrida() {
-    local titulo="$1"
-    local resumen="$2"
-
-    local usuario_activo
-    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
-
-    [ -z "$usuario_activo" ] && return 0
-
-    local user_id
-    user_id=$(id -u "$usuario_activo" 2>/dev/null)
-    local user_home
-    user_home=$(eval echo "~$usuario_activo")
-
-    # Detectar emulador de terminal
-    local term_bin=""
-    local term_args=""
-
-    if command -v x-terminal-emulator &>/dev/null; then term_bin="x-terminal-emulator"; term_args="-e";
-    elif command -v ghostty &>/dev/null; then term_bin="ghostty"; term_args="-e";
-    elif command -v kitty &>/dev/null; then term_bin="kitty"; term_args="-e";
-    elif command -v alacritty &>/dev/null; then term_bin="alacritty"; term_args="-e";
-    elif command -v wezterm &>/dev/null; then term_bin="wezterm"; term_args="start --";
-    elif command -v gnome-terminal &>/dev/null; then term_bin="gnome-terminal"; term_args="--";
-    elif command -v konsole &>/dev/null; then term_bin="konsole"; term_args="-e";
-    elif command -v xfce4-terminal &>/dev/null; then term_bin="xfce4-terminal"; term_args="-x";
-    elif command -v xterm &>/dev/null; then term_bin="xterm"; term_args="-e";
-    fi
-
-    if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
-        local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
-        
-        # --- OPCIÓN DE ACORTADO: Extraer solo la ÚLTIMA ejecución del log histórico ---
-        tac "$CRON_RESUMEN_FILE" | sed -n '/═══════════════════════════════════════════════════════════════/q; p' | tac > "$tmp_resumen"
-        
-        # Si prefieres acortar simplemente por número de líneas (ej. últimas 25 líneas), reemplaza la línea de arriba por:
-        # tail -n 25 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
-
-        chown "$usuario_activo:" "$tmp_resumen"
-        chmod 644 "$tmp_resumen"
-
-        # Detectar bat / batcat / cat
-        local viewer="cat"
-        if command -v bat &>/dev/null; then
-            viewer="bat --paging=never --style=plain"
-        elif command -v batcat &>/dev/null; then
-            viewer="batcat --paging=never --style=plain"
-        fi
-
-        local cmd_mostrar="clear; $viewer $tmp_resumen; rm -f $tmp_resumen; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
-
-        sudo -u "$usuario_activo" \
-            DISPLAY="${DISPLAY:-:0}" \
-            XAUTHORITY="$user_home/.Xauthority" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
-            $term_bin $term_args bash -c "$cmd_mostrar" 2>/dev/null &
-    fi
-}
-
 T_INICIO=$(date +%s)
 RESULTADOS=()
 DETALLES_INFORME=""
 
 for tarea in $TAREAS; do
     LOG_TEMP=$(mktemp)
+    STATUS_CODE=0
     
     case "$tarea" in
-        "actualizacion")
-            bash "$STK2_SCRIPT" --auto-actualizacion > "$LOG_TEMP" 2>&1
-            [ $? -eq 0 ] && RESULTADOS+=("✅ ACTUALIZACIÓN: Completada") || RESULTADOS+=("❌ ACTUALIZACIÓN: Falló")
-            ;;
-        "limpieza")
-            bash "$STK2_SCRIPT" --auto-limpieza > "$LOG_TEMP" 2>&1
-            [ $? -eq 0 ] && RESULTADOS+=("✅ LIMPIEZA: Completada") || RESULTADOS+=("❌ LIMPIEZA: Falló")
-            ;;
-        "auditoria")
-            bash "$STK2_SCRIPT" --auto-auditoria > "$LOG_TEMP" 2>&1
-            [ $? -eq 0 ] && RESULTADOS+=("✅ AUDITORÍA: Completada") || RESULTADOS+=("❌ AUDITORÍA: Falló")
-            ;;
-        "servicios")
-            bash "$STK2_SCRIPT" --auto-servicios > "$LOG_TEMP" 2>&1
-            [ $? -eq 0 ] && RESULTADOS+=("✅ SERVICIOS: Reporte generado") || RESULTADOS+=("❌ SERVICIOS: Falló")
-            ;;
-        "ufw")
-            bash "$STK2_SCRIPT" --auto-ufw > "$LOG_TEMP" 2>&1
-            [ $? -eq 0 ] && RESULTADOS+=("✅ UFW: Auditoría completada") || RESULTADOS+=("❌ UFW: Falló")
-            ;;
+        "actualizacion") ejecutar_auto_actualizacion > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
+        "limpieza")      ejecutar_auto_limpieza > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
+        "auditoria")     ejecutar_auto_auditoria > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
+        "servicios")     ejecutar_auto_servicios > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
+        "ufw")           ejecutar_auto_ufw > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
     esac
+
+    if [ $STATUS_CODE -eq 0 ]; then
+        RESULTADOS+=("✅ ${tarea^^}: Completada")
+    else
+        RESULTADOS+=("❌ ${tarea^^}: Falló (Código $STATUS_CODE)")
+    fi
     
-    # Capturar log individual e integrarlo al informe general
     if [ -s "$LOG_TEMP" ]; then
         cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
         DETALLES_INFORME+="$(cat "$LOG_TEMP")\n\n"
@@ -298,16 +484,15 @@ DURACION=$((T_FIN - T_INICIO))
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
-RESUMEN_TEXTO=$(printf '%s\n' "${RESULTADOS[@]}")
-enviar_notificacion_hibrida "Tareas Automáticas Finalizadas" "$RESUMEN_TEXTO"
+enviar_notificacion_hibrida
 
 exit 0
 EOF
 
-    sed -i "s|@@STK2_PATH@@|$STK2_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
-    sed -i "s|@@STK_DIR_PATH@@|$STK_DIR_ABSOLUTE|g" "$STK_AUTO_WRAPPER"
     chmod +x "$STK_AUTO_WRAPPER"
 }
+
+# FIN CREAR WRAPPER
 
 # ============================================================================
 #                   FUNCIONES DE CONSULTA DE ESTADO
