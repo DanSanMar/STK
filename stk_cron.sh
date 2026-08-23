@@ -410,8 +410,9 @@ echo ""
 rm -f "$tmp_resumen" "$runner_script"
 read -p "Presiona ENTER para cerrar este informe..."
 TRUNNER
-        chmod 777 "$runner_script"
-        chown "$usuario_activo:" "$tmp_resumen" 2>/dev/null
+        # Le damos la propiedad de ambos archivos al usuario normal para que pueda borrarlos
+        chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null
+        chmod 755 "$runner_script"
 
         sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null
         sudo -u "$usuario_activo" \
