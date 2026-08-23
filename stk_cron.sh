@@ -131,44 +131,57 @@ log_cron() {
         registrar_log "$NIVEL" "[CRON] $MENSAJE"
     fi
 }
-
 crear_wrapper_cron() {
+    # Obtener la ruta absoluta de stk2.sh
+    local STK2_ABSOLUTE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stk2.sh"
+    local STK_DIR_ABSOLUTE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Verificar que stk2.sh existe
+    if [ ! -f "$STK2_ABSOLUTE" ]; then
+        log_cron "ERROR" "No se encuentra stk2.sh en $STK2_ABSOLUTE"
+        return 1
+    fi
+    
     cat << 'EOF' > "$STK_AUTO_WRAPPER"
 #!/bin/bash
 # STK - Wrapper para tareas automáticas CRON
 # Generado automáticamente - No modificar manualmente
 # ==============================================================================
 
+# Variables de entorno para CRON
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
+export LANG="es_ES.UTF-8"
 
+# Configuración de logs
 CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-STK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ ! -f "$STK_DIR/stk2.sh" ]; then
-    for dir in "/opt/STK" "/usr/local/STK" "$HOME/STK"; do
-        if [ -f "$dir/stk2.sh" ]; then
-            STK_DIR="$dir"
-            break
-        fi
-    done
-fi
+# Ruta ABSOLUTA de stk2.sh (definida al crear el wrapper)
+STK2_SCRIPT="$STK2_ABSOLUTE"
+STK_DIR="$STK_DIR_ABSOLUTE"
 
-if [ ! -f "$STK_DIR/stk2.sh" ]; then
-    echo "[$(date)] [ERROR] - No se encuentra stk2.sh" >> "$CRON_LOG_FILE"
+# Verificar que stk2.sh existe
+if [ ! -f "$STK2_SCRIPT" ]; then
+    echo "[$(date)] [ERROR] - No se encuentra stk2.sh en $STK2_SCRIPT" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
-cd "$STK_DIR"
+# Cambiar al directorio de STK
+cd "$STK_DIR" || {
+    echo "[$(date)] [ERROR] - No se puede acceder a $STK_DIR" >> "$CRON_LOG_FILE"
+    exit 1
+}
 
+# Verificar configuración
 if [ ! -f "$CRON_CONFIG_FILE" ]; then
     echo "[$(date)] [ERROR] - No hay configuración de tareas" >> "$CRON_LOG_FILE"
     exit 1
 fi
 
+# Obtener el ID de la tarea (argumento pasado desde crontab)
 TAREA_ARG="$1"
 if [ -n "$TAREA_ARG" ]; then
     TAREAS="$TAREA_ARG"
@@ -183,6 +196,7 @@ if [ -z "$TAREAS" ]; then
     exit 1
 fi
 
+# Iniciar ejecución
 FECHA_INICIO=$(date "+%Y-%m-%d %H:%M:%S")
 T_INICIO=$(date +%s)
 RESULTADOS=()
@@ -191,9 +205,11 @@ TAREAS_EJECUTADAS=()
 echo "" >> "$CRON_LOG_FILE"
 echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
 echo "[$(date)] [INFO] 🚀 INICIO EJECUCIÓN AUTOMÁTICA" >> "$CRON_LOG_FILE"
-echo "[$(date)] [INFO] 📋 Tareas: $TAREAS" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] 📋 Tarea: $TAREA_ARG" >> "$CRON_LOG_FILE"
+echo "[$(date)] [INFO] 📂 Directorio: $STK_DIR" >> "$CRON_LOG_FILE"
 echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
 
+# Ejecutar la tarea específica
 for tarea in $TAREAS; do
     TAREAS_EJECUTADAS+=("$tarea")
     echo "[$(date)] [INFO] ▶ Ejecutando: $tarea" >> "$CRON_LOG_FILE"
@@ -202,7 +218,7 @@ for tarea in $TAREAS; do
     
     case "$tarea" in
         "actualizacion")
-            bash "$STK_DIR/stk2.sh" --auto-actualizacion > "$LOG_TEMP" 2>&1
+            bash "$STK2_SCRIPT" --auto-actualizacion > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ ACTUALIZACIÓN: Completada")
                 echo "[$(date)] [INFO] ✅ Actualización exitosa" >> "$CRON_LOG_FILE"
@@ -212,7 +228,7 @@ for tarea in $TAREAS; do
             fi
             ;;
         "limpieza")
-            bash "$STK_DIR/stk2.sh" --auto-limpieza > "$LOG_TEMP" 2>&1
+            bash "$STK2_SCRIPT" --auto-limpieza > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ LIMPIEZA: Completada")
                 echo "[$(date)] [INFO] ✅ Limpieza exitosa" >> "$CRON_LOG_FILE"
@@ -222,7 +238,7 @@ for tarea in $TAREAS; do
             fi
             ;;
         "auditoria")
-            bash "$STK_DIR/stk2.sh" --auto-auditoria > "$LOG_TEMP" 2>&1
+            bash "$STK2_SCRIPT" --auto-auditoria > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ AUDITORÍA: Completada")
                 echo "[$(date)] [INFO] ✅ Auditoría exitosa" >> "$CRON_LOG_FILE"
@@ -232,7 +248,7 @@ for tarea in $TAREAS; do
             fi
             ;;
         "servicios")
-            bash "$STK_DIR/stk2.sh" --auto-servicios > "$LOG_TEMP" 2>&1
+            bash "$STK2_SCRIPT" --auto-servicios > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ SERVICIOS: Reporte generado")
                 echo "[$(date)] [INFO] ✅ Reporte de servicios generado" >> "$CRON_LOG_FILE"
@@ -242,7 +258,7 @@ for tarea in $TAREAS; do
             fi
             ;;
         "ufw")
-            bash "$STK_DIR/stk2.sh" --auto-ufw > "$LOG_TEMP" 2>&1
+            bash "$STK2_SCRIPT" --auto-ufw > "$LOG_TEMP" 2>&1
             if [ $? -eq 0 ]; then
                 RESULTADOS+=("✅ UFW: Auditoría completada")
                 echo "[$(date)] [INFO] ✅ Auditoría UFW exitosa" >> "$CRON_LOG_FILE"
@@ -275,12 +291,13 @@ done
 echo "[$(date)] [INFO] 🏁 FIN EJECUCIÓN" >> "$CRON_LOG_FILE"
 echo "[$(date)] [INFO] ═══════════════════════════════════════════" >> "$CRON_LOG_FILE"
 
+# Guardar resumen
 {
     echo "═══════════════════════════════════════════════════════════════"
     echo "📊 RESUMEN EJECUCIÓN - $(date "+%Y-%m-%d %H:%M:%S")"
     echo "═══════════════════════════════════════════════════════════════"
     echo "⏱️  Duración: ${DURACION} segundos"
-    echo "📋 Tareas: ${#RESULTADOS[@]}"
+    echo "📋 Tarea: $TAREA_ARG"
     echo ""
     for resultado in "${RESULTADOS[@]}"; do
         echo "  $resultado"
@@ -288,23 +305,14 @@ echo "[$(date)] [INFO] ═══════════════════
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
-if command -v jq &>/dev/null && [ -f "$CRON_CONFIG_FILE" ]; then
-    tmp_json=$(mktemp)
-    jq --arg fecha "$(date "+%Y-%m-%d %H:%M:%S")" ".configuracion.ultima_ejecucion = \$fecha" "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null
-    if [ $? -eq 0 ]; then
-        mv "$tmp_json" "$CRON_CONFIG_FILE"
-        chmod 600 "$CRON_CONFIG_FILE"
-    else
-        rm -f "$tmp_json"
-    fi
-fi
-
 exit 0
 EOF
 
     chmod +x "$STK_AUTO_WRAPPER"
-    log_cron "INFO" "Wrapper CRON creado: $STK_AUTO_WRAPPER"
+    log_cron "INFO" "Wrapper CRON creado en: $STK_AUTO_WRAPPER"
+    log_cron "INFO" "STK2_SCRIPT = $STK2_ABSOLUTE"
 }
+
 
 # ============================================================================
 #                   FUNCIONES DE CONSULTA DE ESTADO
@@ -483,7 +491,7 @@ programar_nueva_tarea() {
 
     case "$opc_p2" in
         1)
-            cron_line="@reboot sleep 300"
+            cron_line="@reboot sleep 300 &&"
             descripcion_freq="Al iniciar el sistema"
             ;;
         2)
