@@ -366,7 +366,7 @@ ejecutar_auto_ufw() {
 #                 SISTEMA DE NOTIFICACIÓN EN TERMINAL
 # ==============================================================================
 
-enviar_notificacion_hibrida() {
+enviar_notificacion() {
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)
@@ -391,8 +391,7 @@ enviar_notificacion_hibrida() {
 
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
-        tac "$CRON_RESUMEN_FILE" | sed -n '/═══════════════════════════════════════════════════════════════/q; p' | tac > "$tmp_resumen"
-
+        awk '/═══════════════════════════════════════════════════════════════/{p++} p==1; p==2{print; exit}' "$CRON_RESUMEN_FILE" | tail -n 50 > "$tmp_resumen"
         local viewer="cat"
         if command -v bat &>/dev/null; then viewer="bat --paging=never --style=plain";
         elif command -v batcat &>/dev/null; then viewer="batcat --paging=never --style=plain"; fi
@@ -460,7 +459,7 @@ for tarea in $TAREAS; do
     
     if [ -s "$LOG_TEMP" ]; then
         cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
-        DETALLES_INFORME+="$(cat "$LOG_TEMP")\n\n"
+        DETALLES_INFORME+="$(cat "$LOG_TEMP")$(printf '\n\n')"
     fi
     rm -f "$LOG_TEMP"
 done
@@ -485,7 +484,7 @@ DURACION=$((T_FIN - T_INICIO))
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
-enviar_notificacion_hibrida
+enviar_notificacion
 
 exit 0
 EOF
