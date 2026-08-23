@@ -391,6 +391,10 @@ enviar_notificacion() {
 
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
+        local runner_script="/tmp/stk_run_term_${user_id}.sh"
+        
+        # Eliminar archivos temporales previos para evitar "Permiso denegado"
+        rm -f "$tmp_resumen" "$runner_script"
         
         # Extrae exactamente el último bloque generado delimitado por las líneas de ═════
         awk '/═══════════════════════════════════════════════════════════════/{b=a; a=NR} END{for(i=b;i<=NR;i++) print line[i]}' line[NR]="$0" "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
@@ -405,10 +409,15 @@ enviar_notificacion() {
 #!/bin/bash
 export TERM="xterm-256color"
 clear
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " ⚠️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+if grep -q "Falló" "$tmp_resumen"; then
+    echo -e "\e[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+    echo -e "\e[91m ❌ ATENCIÓN: ALGUNAS TAREAS AUTOMÁTICAS HAN FALLADO \e[0m"
+    echo -e "\e[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+else
+    echo -e "\e[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+    echo -e "\e[92m ℹ️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON) \e[0m"
+    echo -e "\e[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+fi
 cat "$tmp_resumen"
 echo ""
 rm -f "$tmp_resumen" "$runner_script"
