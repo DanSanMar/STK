@@ -200,11 +200,9 @@ enviar_notificacion_hibrida() {
     local term_bin=""
     local term_args=""
 
-    # 1. Probar x-terminal-emulator (Debian/Ubuntu/Mint) o gio/xdg-terminal-exec
     if command -v x-terminal-emulator &>/dev/null; then
         term_bin="x-terminal-emulator"
         term_args="-e"
-    # 2. Terminales populares y modernas (Ghostty, Kitty, Alacritty, WezTerm)
     elif command -v ghostty &>/dev/null; then
         term_bin="ghostty"
         term_args="-e"
@@ -217,7 +215,6 @@ enviar_notificacion_hibrida() {
     elif command -v wezterm &>/dev/null; then
         term_bin="wezterm"
         term_args="start --"
-    # 3. Terminales de escritorio convencionales (GNOME, Arch/KDE, XFCE, Fedora)
     elif command -v gnome-terminal &>/dev/null; then
         term_bin="gnome-terminal"
         term_args="--"
@@ -232,9 +229,15 @@ enviar_notificacion_hibrida() {
         term_args="-e"
     fi
 
-    # Si se detectó una terminal y existe el log de resumen, lanzar la ventana
+    # Si se detectó terminal y existe el resumen
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
-        local cmd_mostrar="clear; cat $CRON_RESUMEN_FILE; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
+        # Crear copia temporal legible por el usuario normal
+        local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
+        cp "$CRON_RESUMEN_FILE" "$tmp_resumen"
+        chown "$usuario_activo:" "$tmp_resumen"
+        chmod 644 "$tmp_resumen"
+
+        local cmd_mostrar="clear; bat $tmp_resumen; rm -f $tmp_resumen; echo ''; read -p 'Presiona ENTER para cerrar este informe...'"
 
         sudo -u "$usuario_activo" \
             DISPLAY="${DISPLAY:-:0}" \
