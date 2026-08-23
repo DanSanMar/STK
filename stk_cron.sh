@@ -391,25 +391,31 @@ enviar_notificacion() {
 
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
-        awk '/═══════════════════════════════════════════════════════════════/{p++} p==1; p==2{print; exit}' "$CRON_RESUMEN_FILE" | tail -n 50 > "$tmp_resumen"
-        local viewer="cat"
-        if command -v bat &>/dev/null; then viewer="bat --paging=never --style=plain";
-        elif command -v batcat &>/dev/null; then viewer="batcat --paging=never --style=plain"; fi
+        
+        # Extrae exactamente el último bloque generado delimitado por las líneas de ═════
+        awk '/═══════════════════════════════════════════════════════════════/{b=a; a=NR} END{for(i=b;i<=NR;i++) print line[i]}' line[NR]="$0" "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
+        
+        # Si awk falla o devuelve archivo vacío, usa fallback con tail directo
+        if [ ! -s "$tmp_resumen" ]; then
+            tail -n 40 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
+        fi
 
         local runner_script="/tmp/stk_run_term_${user_id}.sh"
         cat << TRUNNER > "$runner_script"
 #!/bin/bash
+export TERM="xterm-256color"
 clear
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " ⚠️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-$viewer "$tmp_resumen"
+cat "$tmp_resumen"
 echo ""
 rm -f "$tmp_resumen" "$runner_script"
-read -p "Presiona ENTER para cerrar este informe..."
+echo -n "Presiona ENTER para cerrar este informe..."
+read -r
 TRUNNER
-        # Le damos la propiedad de ambos archivos al usuario normal para que pueda borrarlos
+
         chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null
         chmod 755 "$runner_script"
 
