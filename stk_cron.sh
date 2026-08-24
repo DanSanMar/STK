@@ -380,32 +380,46 @@ enviar_notificacion() {
 
     [ ! -f "$xauth_val" ] && xauth_val=$(find "/run/user/${user_id}" -name ".Xauthority" 2>/dev/null | head -n 1)
 
-    if command -v ghostty &>/dev/null; then term_bin="ghostty"; term_args="-e";
-    elif command -v kitty &>/dev/null; then term_bin="kitty"; term_args="-e";
-    elif command -v alacritty &>/dev/null; then term_bin="alacritty"; term_args="-e";
-    elif command -v gnome-terminal &>/dev/null; then term_bin="gnome-terminal"; term_args="--";
-    elif command -v konsole &>/dev/null; then term_bin="konsole"; term_args="-e";
-    elif command -v xfce4-terminal &>/dev/null; then term_bin="xfce4-terminal"; term_args="-x";
-    elif command -v xterm &>/dev/null; then term_bin="xterm"; term_args="-e";
+    # Detectar terminal disponible
+    if command -v ghostty &>/dev/null; then 
+        term_bin="ghostty"
+        # Ghostty usa --execute, NO -e
+        term_args="--execute"
+    elif command -v kitty &>/dev/null; then 
+        term_bin="kitty"
+        term_args="-e"
+    elif command -v alacritty &>/dev/null; then 
+        term_bin="alacritty"
+        term_args="-e"
+    elif command -v gnome-terminal &>/dev/null; then 
+        term_bin="gnome-terminal"
+        term_args="--"
+    elif command -v konsole &>/dev/null; then 
+        term_bin="konsole"
+        term_args="-e"
+    elif command -v xfce4-terminal &>/dev/null; then 
+        term_bin="xfce4-terminal"
+        term_args="-x"
+    elif command -v xterm &>/dev/null; then 
+        term_bin="xterm"
+        term_args="-e"
     fi
 
     if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
         local runner_script="/tmp/stk_run_term_${user_id}.sh"
         
-        # Eliminar archivos temporales previos para evitar "Permiso denegado"
+        # Eliminar archivos temporales previos
         rm -f "$tmp_resumen" "$runner_script"
         
-        # Extrae exactamente el último bloque generado delimitado por las líneas de ═════
+        # Extraer el último bloque del resumen
         awk '/═══════════════════════════════════════════════════════════════/{b=a; a=NR} END{for(i=b;i<=NR;i++) print line[i]}' line[NR]="$0" "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
         
-        # Si awk falla o devuelve archivo vacío, usa fallback con tail directo
         if [ ! -s "$tmp_resumen" ]; then
             tail -n 40 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
         fi
 
-        local runner_script="/tmp/stk_run_term_${user_id}.sh"
-        cat << TRUNNER > "$runner_script"
+        cat << 'TRUNNER' > "$runner_script"
 #!/bin/bash
 export TERM="xterm-256color"
 clear
@@ -428,12 +442,25 @@ TRUNNER
         chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null
         chmod 755 "$runner_script"
 
+        # Permitir a root mostrar en la sesión del usuario
         sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null
-        sudo -u "$usuario_activo" \
-            DISPLAY="$display_val" \
-            XAUTHORITY="$xauth_val" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
-            $term_bin $term_args bash "$runner_script" &
+
+        # ====== AQUÍ ESTÁ LA CLAVE: DETECTAR GHOSTTY ======
+        if [ "$term_bin" == "ghostty" ]; then
+            # Ghostty usa --execute
+            sudo -u "$usuario_activo" \
+                DISPLAY="$display_val" \
+                XAUTHORITY="$xauth_val" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+                $term_bin --execute bash "$runner_script" &
+        else
+            # Otros terminales
+            sudo -u "$usuario_activo" \
+                DISPLAY="$display_val" \
+                XAUTHORITY="$xauth_val" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+                $term_bin $term_args bash "$runner_script" &
+        fi
     fi
 }
 
