@@ -895,7 +895,7 @@ guardar_configuracion_cron() {
 
     cat > "$CRON_CONFIG_FILE" << EOF
 {
-    "version": "2.0",
+    "version": "1.0",
     "configuracion": {
         "activado": true,
         "fecha_activacion": "$(date '+%Y-%m-%d %H:%M:%S')",
@@ -1298,7 +1298,16 @@ EOF
 #                   MENÚ PRINCIPAL
 # ============================================================================
 logs_resumen() {
+    clear
+    mostrar_logo
+    echo ""
+    
     ver_logs_cron
+
+    clear
+    mostrar_logo
+    echo ""
+
     ver_resumen_cron
 }
 gestionar_tareas_auto() {
@@ -1334,12 +1343,18 @@ gestionar_tareas_auto() {
 5. Desactivar TODAS las tareas
 6. Volver"
 
-        local opcion_num=""
+        # Captura la selección del usuario mediante fzf_estilo
+        local seleccion
+        seleccion=$(echo "$opciones_fzf" | fzf_estilo "Selecciona una opción" "Menú de Tareas Automatizadas")
 
-             
-        if [ "$opcion_num" == "6" ]; then
+        # Si presiona ESC o se cancela, sale del bucle
+        if [ -z "$seleccion" ]; then
             break
         fi
+
+        # Extrae el número inicial del string seleccionado (ej: "1")
+        local opcion_num
+        opcion_num=$(echo "$seleccion" | awk '{print $1}' | tr -d '.')
 
         case "$opcion_num" in
             1) programar_nueva_tarea ;;
