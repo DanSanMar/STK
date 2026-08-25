@@ -367,103 +367,172 @@ ejecutar_auto_ufw() {
 # ==============================================================================
 
 enviar_notificacion() {
+    # =========================================================================
+    # 1. DETECCIÓN DEL USUARIO ACTIVO
+    # =========================================================================
     local usuario_activo
-    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11)' | awk '{print $1}' | head -n 1)
-    [ -z "$usuario_activo" ] && usuario_activo=$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)
+    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
+    [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
+    [ -z "$usuario_activo" ] && usuario_activo=$(whoami)
     [ -z "$usuario_activo" ] && return 1
 
-    local user_id user_home display_val xauth_val term_bin term_args
+    # =========================================================================
+    # 2. DETECCIÓN DEL ENTORNO GRÁFICO (Wayland vs X11)
+    # =========================================================================
+    local user_id user_home display_val xauth_val wayland_display
     user_id=$(id -u "$usuario_activo" 2>/dev/null)
     user_home=$(eval echo "~$usuario_activo")
-    display_val="${DISPLAY:-:0}"
-    xauth_val="$user_home/.Xauthority"
-
-    [ ! -f "$xauth_val" ] && xauth_val=$(find "/run/user/${user_id}" -name ".Xauthority" 2>/dev/null | head -n 1)
-
-    # Detectar terminal disponible
-    if command -v ghostty &>/dev/null; then 
-        term_bin="ghostty"
-        # Ghostty usa --execute, NO -e
-        term_args="--execute"
-    elif command -v kitty &>/dev/null; then 
-        term_bin="kitty"
-        term_args="-e"
-    elif command -v alacritty &>/dev/null; then 
-        term_bin="alacritty"
-        term_args="-e"
-    elif command -v gnome-terminal &>/dev/null; then 
-        term_bin="gnome-terminal"
-        term_args="--"
-    elif command -v konsole &>/dev/null; then 
-        term_bin="konsole"
-        term_args="-e"
-    elif command -v xfce4-terminal &>/dev/null; then 
-        term_bin="xfce4-terminal"
-        term_args="-x"
-    elif command -v xterm &>/dev/null; then 
-        term_bin="xterm"
-        term_args="-e"
+    
+    # Detectar display desde loginctl
+    local session_id=$(loginctl list-sessions --no-legend 2>/dev/null | grep "$usuario_activo" | awk '{print $1}' | head -n 1)
+    if [ -n "$session_id" ]; then
+        wayland_display=$(loginctl show-session "$session_id" -p Display --value 2>/dev/null)
+        # Limpiar si loginctl devuelve un display X11 convencional (:0)
+        [[ "$wayland_display" =~ ^:[0-9] ]] && wayland_display=""
+    fi
+    
+    # Fallback: buscar socket wayland en /run/user/
+    if [ -z "$wayland_display" ]; then
+        wayland_display=$(find "/run/user/${user_id}" -name "wayland-*" 2>/dev/null | head -n 1 | xargs -r basename)
+    fi
+    
+    if [ -n "$wayland_display" ]; then
+        display_val=""
+        xauth_val=""
+    else
+        display_val="${DISPLAY:-:0}"
+        xauth_val="$user_home/.Xauthority"
+        [ ! -f "$xauth_val" ] && xauth_val=$(find "/run/user/${user_id}" -name ".Xauthority" 2>/dev/null | head -n 1)
     fi
 
-    if [ -n "$term_bin" ] && [ -f "$CRON_RESUMEN_FILE" ]; then
+    # =========================================================================
+    # 3. DETECCIÓN DE TERMINAL DISPONIBLE
+    # =========================================================================
+    local term_bin=""
+    local term_args=""
+
+    local terminales=(
+        "ghostty:--execute"
+        "kitty:-e"
+        "alacritty:-e"
+        "gnome-terminal:--"
+        "konsole:-e"
+        "xfce4-terminal:-x"
+        "xterm:-e"
+        "urxvt:-e"
+        "st:-e"
+        "terminator:-x"
+        "tilix:-e"
+        "wezterm:start --"
+    )
+
+    for term_entry in "${terminales[@]}"; do
+        local term_name="${term_entry%%:*}"
+        local term_flag="${term_entry##*:}"
+        
+        if command -v "$term_name" &>/dev/null; then
+            term_bin="$term_name"
+            term_args="$term_flag"
+            break
+        fi
+    done
+
+    [ -z "$term_bin" ] && return 1
+
+    # =========================================================================
+    # 4. PREPARACIÓN DEL CONTENIDO Y SCRIPT TEMPORAL
+    # =========================================================================
+    if [ -f "$CRON_RESUMEN_FILE" ]; then
         local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
         local runner_script="/tmp/stk_run_term_${user_id}.sh"
         
-        # Eliminar archivos temporales previos
         rm -f "$tmp_resumen" "$runner_script"
         
-        # Extraer el último bloque del resumen
-        awk '/═══════════════════════════════════════════════════════════════/{b=a; a=NR} END{for(i=b;i<=NR;i++) print line[i]}' line[NR]="$0" "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
+        # Extraer el ÚLTIMO bloque del resumen
+        awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
         
         if [ ! -s "$tmp_resumen" ]; then
             tail -n 40 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
         fi
 
-        cat << 'TRUNNER' > "$runner_script"
+        # NOTA: Sin comillas en TRUNNER para permitir la expansión de $tmp_resumen
+        cat << TRUNNER > "$runner_script"
 #!/bin/bash
 export TERM="xterm-256color"
 clear
-if grep -q "Falló" "$tmp_resumen"; then
-    echo -e "\e[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
-    echo -e "\e[91m ❌ ATENCIÓN: ALGUNAS TAREAS AUTOMÁTICAS HAN FALLADO \e[0m"
-    echo -e "\e[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+
+if grep -qi "fall[óo]" "$tmp_resumen" 2>/dev/null; then
+    echo -e "\033[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo -e "\033[91m ❌ ATENCIÓN: ALGUNAS TAREAS AUTOMÁTICAS HAN FALLADO \033[0m"
+    echo -e "\033[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 else
-    echo -e "\e[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
-    echo -e "\e[92m ℹ️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON) \e[0m"
-    echo -e "\e[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
+    echo -e "\033[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo -e "\033[92m ℹ️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON) \033[0m"
+    echo -e "\033[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 fi
-cat "$tmp_resumen"
+
+cat "$tmp_resumen" 2>/dev/null || echo "No se pudo leer el resumen"
+
+rm -f "$tmp_resumen" "\$0" 2>/dev/null
+
 echo ""
-rm -f "$tmp_resumen" "$runner_script"
 echo -n "Presiona ENTER para cerrar este informe..."
 read -r
 TRUNNER
 
-        chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null
-        chmod 755 "$runner_script"
+        chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null || true
+        chmod 755 "$runner_script" 2>/dev/null || true
 
-        # Permitir a root mostrar en la sesión del usuario
-        sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null
-
-        # ====== AQUÍ ESTÁ LA CLAVE: DETECTAR GHOSTTY ======
-        if [ "$term_bin" == "ghostty" ]; then
-            # Ghostty usa --execute
-            sudo -u "$usuario_activo" \
-                DISPLAY="$display_val" \
-                XAUTHORITY="$xauth_val" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
-                $term_bin --execute bash "$runner_script" &
+        # =========================================================================
+        # 5. CONFIGURACIÓN DEL ENTORNO DE EJECUCIÓN
+        # =========================================================================
+        local env_vars="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${user_id}/bus"
+        
+        if [ -n "$wayland_display" ]; then
+            env_vars="$env_vars WAYLAND_DISPLAY=$wayland_display"
+            [ "$term_bin" = "ghostty" ] && env_vars="$env_vars GDK_BACKEND=wayland"
         else
-            # Otros terminales
-            sudo -u "$usuario_activo" \
-                DISPLAY="$display_val" \
-                XAUTHORITY="$xauth_val" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
-                $term_bin $term_args bash "$runner_script" &
+            env_vars="$env_vars DISPLAY=$display_val"
+            [ -n "$xauth_val" ] && env_vars="$env_vars XAUTHORITY=$xauth_val"
+            sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null || true
         fi
-    fi
-}
 
+        # =========================================================================
+        # 6. EJECUCIÓN DEL COMANDO
+        # =========================================================================
+        local cmd_exec=""
+
+        case "$term_bin" in
+            ghostty)
+                if [ -n "$wayland_display" ]; then
+                    cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args --app-id=stk-notify bash $runner_script"
+                else
+                    cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash $runner_script"
+                fi
+                ;;
+            gnome-terminal|wezterm)
+                cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash -c '$runner_script'"
+                ;;
+            *)
+                cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash $runner_script"
+                ;;
+        esac
+
+        eval "nohup $cmd_exec > /dev/null 2>&1 & disown"
+
+        # =========================================================================
+        # 7. LOG DE DEPURACIÓN
+        # =========================================================================
+        if [ "${STK_DEBUG:-0}" -eq 1 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') [NOTIFY] Usuario: $usuario_activo, Terminal: $term_bin, Wayland: ${wayland_display:-no}" >> /tmp/stk_notify_debug.log
+            echo "  Comando: $cmd_exec" >> /tmp/stk_notify_debug.log
+        fi
+
+        return 0
+    fi
+    
+    return 1
+}
 # ==============================================================================
 #                 FLUJO PRINCIPAL DE EJECUCIÓN
 # ==============================================================================
@@ -599,11 +668,11 @@ programar_nueva_tarea() {
     echo ""
 
     local opciones_p1="1. Modo Completo (Todas las tareas)
-2. Actualización del sistema
-3. Limpieza del sistema
+2. Actualización 
+3. Limpieza 
 4. Auditoría de seguridad
 5. Reporte de servicios
-6. Auditoría UFW
+6. Auditoría Firewall UFW
 7. Selección Múltiple Personalizada
 8. Cancelar"
 
@@ -689,11 +758,12 @@ programar_nueva_tarea() {
     done
     echo ""
 
-    local opciones_p2="1. Al iniciar el sistema (Boot)
-2. Diaria (Hora configurable)
-3. Semanal (Día y Hora configurable)
-4. Personalizada (Sintaxis Cron libre)
-5. Cancelar"
+    local opciones_p2="1. Arranque (Boot+300)
+2. Arranque (Boot+600)
+3. Diaria (Hora configurable)
+4. Semanal (Día y Hora configurable)
+5. Personalizada (Sintaxis Cron libre)
+6. Cancelar"
 
     local opc_p2=""
     if command -v fzf &>/dev/null; then
@@ -704,7 +774,7 @@ programar_nueva_tarea() {
     else
         echo -e "$opciones_p2"
         echo ""
-        echo -ne "${AMARILLO}Seleccione frecuencia (1-5): ${RESET}"
+        echo -ne "${AMARILLO}Seleccione frecuencia (1-6): ${RESET}"
         read -r opc_p2
     fi
 
@@ -714,9 +784,16 @@ programar_nueva_tarea() {
     case "$opc_p2" in
         1)
             cron_line="@reboot sleep 300 &&"
-            descripcion_freq="Al iniciar el sistema"
+            descripcion_freq="Al iniciar el sistema + 5 minutos"
             ;;
         2)
+            cron_line="@reboot sleep 600 &&"
+            descripcion_freq="Al iniciar el sistema + 10 minutos"
+            ;;
+
+
+
+        3)
             echo -ne "${CIAN}Ingrese la hora 0-23 [3]: ${RESET}"
             read -r hora
             hora=${hora:-3}
@@ -726,7 +803,7 @@ programar_nueva_tarea() {
             cron_line="0 $hora * * *"
             descripcion_freq="Diaria a las ${hora}:00"
             ;;
-        3)
+        4)
             echo -e "${CIAN}Días: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb${RESET}"
             echo -ne "${CIAN}Ingrese el día 0-6 [1]: ${RESET}"
             read -r dia
@@ -741,7 +818,7 @@ programar_nueva_tarea() {
             cron_line="0 $hora * * $dia"
             descripcion_freq="Semanal día $dia a las ${hora}:00"
             ;;
-        4)
+        5)
             echo -e "${CIAN}Formato: Minuto Hora Día Mes DíaSemana (Ej: 0 12 * * *)${RESET}"
             echo -ne "${AMARILLO}Ingrese expresión Cron: ${RESET}"
             read -r custom_schedule
