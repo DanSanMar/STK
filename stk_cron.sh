@@ -54,7 +54,7 @@ mostrar_logo() {
     echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
     echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
     echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v4.0${RESET}"
+    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v4.5${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
@@ -63,7 +63,7 @@ fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
     fzf --ansi \
-        --height=15 \
+        --height=18 \
         --reverse \
         --border=rounded \
         --prompt="➤ $prompt_text: " \
@@ -103,7 +103,7 @@ inicializar_estructura() {
     if [ ! -f "$CRON_CONFIG_FILE" ]; then
         cat > "$CRON_CONFIG_FILE" << 'EOF'
 {
-    "version": "1.0",
+    "version": "4.5",
     "configuracion": {
         "schedule": null,
         "descripcion": null,
@@ -1297,7 +1297,10 @@ EOF
 # ============================================================================
 #                   MENÚ PRINCIPAL
 # ============================================================================
-
+logs_resumen() {
+    ver_logs_cron
+    ver_resumen_cron
+}
 gestionar_tareas_auto() {
     inicializar_estructura
     
@@ -1324,39 +1327,17 @@ gestionar_tareas_auto() {
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         echo ""
 
-        local opciones_fzf="1. Programar/Añadir Tareas (Paso a Paso)
-2. Gestionar/Eliminar tareas individuales
-3. Ver configuración actual
-4. Ver logs de ejecución
-5. Ver resumen última ejecución
-6. Desactivar TODAS las tareas
-7. Volver"
+        local opciones_fzf="1. Programar Tareas
+2. Gestionar/Eliminar tareas 
+3. Configuración actual
+4. Ver Logs/Resumen
+5. Desactivar TODAS las tareas
+6. Volver"
 
         local opcion_num=""
 
-        if command -v fzf &>/dev/null; then
-            local sel
-            sel=$(echo -e "$opciones_fzf" | fzf_estilo "Seleccione una opción" "G E S T O R  D E  T A R E A S")
-            if [ $? -ne 0 ] || [ -z "$sel" ]; then
-                break
-            fi
-            opcion_num=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
-        else
-            echo -e " 1. Programar/Añadir Tareas (Paso a Paso)"
-            echo -e " 2. Gestionar/Eliminar tareas individuales"
-            echo -e " 3. Ver configuración actual"
-            echo -e " 4. Ver logs de ejecución"
-            echo -e " 5. Ver resumen última ejecución"
-            echo -e " 6. Desactivar TODAS las tareas"
-            echo -e " 7. Volver"
-            echo ""
-            echo -ne "${AMARILLO}Seleccione una opción (1-7): ${RESET}"
-            read -r opcion_num
-        fi
-
-        # Eliminar la condición previa "if [ "$opcion_num" == "6" ]; then break; fi"
-
-        if [ "$opcion_num" == "7" ]; then
+             
+        if [ "$opcion_num" == "6" ]; then
             break
         fi
 
@@ -1364,10 +1345,9 @@ gestionar_tareas_auto() {
             1) programar_nueva_tarea ;;
             2) gestionar_tareas_individuales ;;
             3) ver_configuracion_cron ;;
-            4) ver_logs_cron ;;
-            5) ver_resumen_cron ;;
-            6) desactivar_cron ;;
-            7) break ;;
+            4) logs_resumen ;;
+            5) desactivar_cron ;;
+            6) break ;;
         esac
     done
 }
