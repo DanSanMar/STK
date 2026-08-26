@@ -362,25 +362,25 @@ verificar_dependencias() {
 }
 
 enviar_notificacion() {
-    verificar_dependencias[cite: 1]
+    verificar_dependencias
 
     # 1. Detectar usuario activo y entorno gráfico (X11 / Wayland)
     local usuario_activo
-    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)[cite: 1]
-    [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)[cite: 1]
-    [ -z "$usuario_activo" ] && usuario_activo=$(whoami)[cite: 1]
-    [ -z "$usuario_activo" ] && return 1[cite: 1]
+    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
+    [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
+    [ -z "$usuario_activo" ] && usuario_activo=$(whoami)
+    [ -z "$usuario_activo" ] && return 1
 
     local user_id
-    user_id=$(id -u "$usuario_activo" 2>/dev/null)[cite: 1]
-    [ -z "$user_id" ] && return 1[cite: 1]
+    user_id=$(id -u "$usuario_activo" 2>/dev/null)
+    [ -z "$user_id" ] && return 1
 
-    [ ! -f "$CRON_RESUMEN_FILE" ] && return 1[cite: 1]
+    [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
 
     # 2. Extraer el último bloque de resumen del informe
     local ultimo_bloque
-    ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)[cite: 1]
-    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")[cite: 1]
+    ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
+    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")
 
     # 3. Construir mensaje y determinar semáforo de estado
     local titulo="STK: Mantenimiento Automático"
@@ -416,7 +416,7 @@ enviar_notificacion() {
     # --- INFORMACIÓN DE AUDITORÍA DE SEGURIDAD ---
     if echo "$ultimo_bloque" | grep -qi "Puntuación:"; then
         local puntuacion
-        puntuacion=$(echo "$ultimo_bloque" | grep "Puntuación:" | tail -1 | sed 's/.*Puntuación: \([^)]*\).*/\1/' | xargs)[cite: 1]
+        puntuacion=$(echo "$ultimo_bloque" | grep "Puntuación:" | tail -1 | sed 's/.*Puntuación: \([^)]*\).*/\1/' | xargs)
         mensaje+="🔍 Auditoría: <b>${puntuacion:-N/A}</b>\n"
     fi
 
@@ -458,10 +458,10 @@ EOF
     chmod +x "$script_abrir"
 
     # 5. Envío de notificación y apertura de terminal
-    if command -v notify-send &>/dev/null; then[cite: 1]
-        local dbus_socket="/run/user/${user_id}/bus"[cite: 1]
+    if command -v notify-send &>/dev/null; then
+        local dbus_socket="/run/user/${user_id}/bus"
         
-        if [ -S "$dbus_socket" ]; then[cite: 1]
+        if [ -S "$dbus_socket" ]; then
             # Obtener variables de pantalla del proceso gráfico activo del usuario
             local user_display
             user_display=$(pgrep -u "$usuario_activo" -a | grep -oP 'DISPLAY=:\d+(\.\d+)?' | head -n 1 | cut -d= -f2)
@@ -491,7 +491,7 @@ EOF
                     term_cmd="ghostty -e $script_abrir"
                 elif command -v xdg-terminal-exec &>/dev/null; then
                     term_cmd="xdg-terminal-exec $script_abrir"
-                elif command -v x-terminal-emulator &>/dev/null; then[cite: 1]
+                elif command -v x-terminal-emulator &>/dev/null; then
                     term_cmd="x-terminal-emulator -e $script_abrir"
                 elif command -v ptyxis &>/dev/null; then
                     term_cmd="ptyxis -- $script_abrir"
@@ -523,18 +523,18 @@ EOF
             
             # Limpiar script auxiliar tras un margen razonable
             (sleep 30 && rm -f "$script_abrir") &>/dev/null &
-            return 0[cite: 1]
+            return 0
         fi
     fi
 
     # 6. Fallback si no hay entorno gráfico ni DBus activo
-    if command -v wall &>/dev/null; then[cite: 1]
+    if command -v wall &>/dev/null; then
         printf "\n========================================\n  %s\n========================================\n%s\n========================================\n\n" \
-            "$titulo" "$(echo -e "$mensaje" | sed 's/<[^>]*>//g')" | wall 2>/dev/null[cite: 1]
+            "$titulo" "$(echo -e "$mensaje" | sed 's/<[^>]*>//g')" | wall 2>/dev/null
     fi
 
     rm -f "$script_abrir" 2>/dev/null
-    return 0[cite: 1]
+    return 0
 }
 #fin enviar notify
 TAREA_ARG="$1"
