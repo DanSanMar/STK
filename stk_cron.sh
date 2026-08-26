@@ -908,16 +908,16 @@ eliminar_tarea_especifica() {
     sleep 2
 }
 
-gestionar_tareas_individuales() {
+ggestionar_tareas_individuales() {
     while true; do
         clear
         mostrar_logo
         echo ""
-        pintar "$CIAN" "--- GESTIÓN INDIVIDUAL DE TAREAS ---"
+        pintar "$CIAN" "--- ELIMINACIÓN DE TAREAS ---"
         echo ""
 
-        if [ ! -f "$CRON_CONFIG_FILE" ] || ! command -v jq &>/dev/null; then
-            pintar "$ROJO" "❌ No hay configuración activa o falta la herramienta 'jq'."
+        if [ ! -f "$CRON_CONFIG_FILE" ]; then
+            pintar "$ROJO" "❌ No hay configuración activa."
             read -p "Presione Enter..."
             return
         fi
@@ -948,7 +948,13 @@ gestionar_tareas_individuales() {
             ((i++))
         done <<< "$tareas_raw"
 
-        lista_opciones+="$i. Volver"
+        # Añadir opciones especiales
+        local opc_eliminar_todas=$i
+        lista_opciones+="$i. 🗑️  Eliminar TODAS las tareas\n"
+        ((i++))
+        
+        local opc_volver=$i
+        lista_opciones+="$i. ↩ Volver"
 
         local seleccion=""
         if command -v fzf &>/dev/null; then
@@ -963,36 +969,46 @@ gestionar_tareas_individuales() {
             read -r seleccion
         fi
 
-        if [ "$seleccion" -eq "$i" ] || [ -z "$seleccion" ]; then
+        # Salir o volver
+        if [ "$seleccion" -eq "$opc_volver" ] || [ -z "$seleccion" ]; then
             break
         fi
 
+        # Opción: Eliminar TODAS las tareas
+        if [ "$seleccion" -eq "$opc_eliminar_todas" ]; then
+            local confirm_todas=""
+            if command -v fzf &>/dev/null; then
+                confirm_todas=$(echo -e "No\nSí" | fzf_estilo "¿Seguro que desea eliminar TODAS las tareas?" "CONFIRMACIÓN")
+            else
+                echo -ne "${ROJO_BRILLANTE}¿Seguro que desea eliminar TODAS las tareas? s/N: ${RESET}"
+                read -r conf_input
+                [[ "$conf_input" =~ ^[sS]$ ]] && confirm_todas="Sí"
+            fi
+
+            if [ "$confirm_todas" == "Sí" ]; then
+                desactivar_cron
+                break
+            fi
+            continue
+        fi
+
+        # Opción: Eliminar tarea específica elegida
         local tarea_elegida="${mapa_tareas[$seleccion]}"
         local sel_id="${tarea_elegida%%:*}"
         local sel_desc="${tarea_elegida#*:}"
 
-        # Submenú de acción para la tarea seleccionada
-        clear
-        mostrar_logo
-        echo ""
-        pintar "$VERDE_BRILLANTE" "Tarea: $sel_desc ($sel_id)"
-        echo ""
-        echo -e "1. 🗑️ Eliminar esta tarea"
-        echo -e "2. ↩ Volver"
-        echo ""
-        echo -ne "${AMARILLO}Seleccione acción: ${RESET}"
-        read -r accion
+        local confirm_indiv=""
+        if command -v fzf &>/dev/null; then
+            confirm_indiv=$(echo -e "No\nSí" | fzf_estilo "¿Eliminar '$sel_desc'?" "CONFIRMACIÓN ELIMINACIÓN")
+        else
+            echo -ne "${ROJO_BRILLANTE}¿Eliminar '$sel_desc' de la programación? s/N: ${RESET}"
+            read -r conf_input
+            [[ "$conf_input" =~ ^[sS]$ ]] && confirm_indiv="Sí"
+        fi
 
-        case "$accion" in
-            1)
-                echo -ne "${ROJO_BRILLANTE}¿Eliminar '$sel_desc' de la programación? s/N: ${RESET}"
-                read -r conf_elim
-                if [[ "$conf_elim" =~ ^[sS]$ ]]; then
-                    eliminar_tarea_especifica "$sel_id"
-                fi
-                ;;
-            *) ;;
-        esac
+        if [ "$confirm_indiv" == "Sí" ]; then
+            eliminar_tarea_especifica "$sel_id"
+        fi
     done
 }
 
@@ -1172,7 +1188,7 @@ desactivar_cron() {
             else
                 cat > "$CRON_CONFIG_FILE" << EOF
 {
-    "version": "1.0",
+    "version": "$ver",
     "configuracion": {
         "schedule": null,
         "descripcion": "Ninguna",
@@ -1239,11 +1255,11 @@ gestionar_tareas_auto() {
         echo ""
 
         local opciones_fzf="1. Programar Tareas
-2. Gestionar/Eliminar tareas 
+2. Desactivar Tareas
 3. Configuración actual
 4. Ver Logs/Resumen
-5. Desactivar TODAS las tareas
-6. Volver"
+5. Volver"
+
 
         # Captura la selección del usuario mediante fzf_estilo
         local seleccion
@@ -1263,8 +1279,7 @@ gestionar_tareas_auto() {
             2) gestionar_tareas_individuales ;;
             3) ver_configuracion_cron ;;
             4) logs_resumen ;;
-            5) desactivar_cron ;;
-            6) break ;;
+            5) break ;;
         esac
     done
 }
