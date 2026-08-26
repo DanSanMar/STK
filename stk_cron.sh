@@ -963,27 +963,18 @@ eliminar_tarea_especifica() {
         return 1
     fi
 
-    # Contar cuántas tareas quedarán
     local total_restantes
     total_restantes=$(jq --arg id "$id_a_eliminar" '[.tareas[] | select(.id != $id)] | length' "$CRON_CONFIG_FILE")
-
     local tmp_json=$(mktemp)
 
     if [ "$total_restantes" -eq 0 ]; then
-        # Si no quedan tareas, desactivamos el CRON completamente
         crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
-        jq --arg id "$id_a_eliminar" \
-           '.tareas = [] | .configuracion.activado = false' \
-           "$CRON_CONFIG_FILE" > "$tmp_json"
-        
+        jq --arg id "$id_a_eliminar" '.tareas = [] | .configuracion.activado = false' "$CRON_CONFIG_FILE" > "$tmp_json"
+        mv "$tmp_json" "$CRON_CONFIG_FILE"
+        chmod 600 "$CRON_CONFIG_FILE"
         pintar "$AMARILLO" "⚠️ Al no quedar tareas, el programador automático se ha desactivado."
     else
-        # Eliminar solo la tarea seleccionada manteniendo la configuración de cron
-        jq --arg id "$id_a_eliminar" \
-           '.tareas = [.tareas[] | select(.id != $id)]' \
-           "$CRON_CONFIG_FILE" > "$tmp_json"
-           
-        # --- AÑADIR ESTA REGENERACIÓN DE CRONTAB ---
+        jq --arg id "$id_a_eliminar" '.tareas = [.tareas[] | select(.id != $id)]' "$CRON_CONFIG_FILE" > "$tmp_json"
         mv "$tmp_json" "$CRON_CONFIG_FILE"
         chmod 600 "$CRON_CONFIG_FILE"
 
@@ -997,20 +988,8 @@ eliminar_tarea_especifica() {
         done < <(jq -r '.tareas[] | .id + "|" + .schedule' "$CRON_CONFIG_FILE" 2>/dev/null)
 
         (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
-        log_cron "INFO" "Tarea eliminada e índex de crontab actualizado: $id_a_eliminar"
+        log_cron "INFO" "Tarea eliminada: $id_a_eliminar"
         pintar "$VERDE_BRILLANTE" "✔ Tarea '$id_a_eliminar' eliminada correctamente."
-        sleep 2
-        return 0
-    fi
-
-    if [ $? -eq 0 ]; then
-        mv "$tmp_json" "$CRON_CONFIG_FILE"
-        chmod 600 "$CRON_CONFIG_FILE"
-        log_cron "INFO" "Tarea eliminada individualmente: $id_a_eliminar"
-        pintar "$VERDE_BRILLANTE" "✔ Tarea '$id_a_eliminar' eliminada correctamente."
-    else
-        rm -f "$tmp_json"
-        pintar "$ROJO" "❌ Error al actualizar el archivo JSON."
     fi
     sleep 2
 }
