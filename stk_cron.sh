@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-$ver="v 4.6"
+ver="v 4.6"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -53,7 +53,7 @@ mostrar_logo() {
     echo -e "${AZUL}  ██      ██████  ██    ██ ██ ██ ██ ███████ ██ ███ ██ █████  ${RESET}"
     echo -e "${AZUL}  ██      ██   ██ ██    ██ ██  ████      ██ ██     ██ ██     ${RESET}"
     echo -e "${AZUL_BRILLANTE}   ██████ ██   ██  ██████  ██   ███      ██ ██     ██ ███████${RESET}"
-    echo -e "${VERDE_BRILLANTE}               CRON TASK MANAGER $ver${RESET}"
+    echo -e "${VERDE_BRILLANTE}---               CRON TASK MANAGER $ver               ---${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
@@ -533,12 +533,12 @@ verificar_cron_stk() {
 obtener_frecuencia_descripcion() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.configuracion.descripcion // "No configurada"' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
+            jq -r '.tareas[] | select(.frecuencia != null) | .frecuencia' "$CRON_CONFIG_FILE" 2>/dev/null | head -n 1 || echo "Ninguna"
         else
-            grep -oP '"descripcion":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null || echo "No configurada"
+            grep -oP '"frecuencia":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | head -n 1 || echo "Ninguna"
         fi
     else
-        echo "No configurada"
+        echo "Ninguna"
     fi
 }
 
