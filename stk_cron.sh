@@ -1367,21 +1367,12 @@ gestionar_tareas_auto() {
 4. Ver Logs/Resumen
 5. Volver"
 
-
-        # Captura la selección del usuario mediante fzf_estilo
         local seleccion
         seleccion=$(echo "$opciones_fzf" | fzf_estilo "Selecciona una opción" "Menú de Tareas Automatizadas")
 
-        # Si presiona ESC o se cancela, sale del bucle
-        if [ -z "$seleccion" ]; then
-            break
-        fi
+        [ -z "$seleccion" ] && break
 
-        # Extrae el número inicial del string seleccionado (ej: "1")
-        local opcion_num
-        opcion_num=$(echo "$seleccion" | awk '{print $1}' | tr -d '.')
-
-        case "$opcion_num" in
+        case "$(echo "$seleccion" | awk '{print $1}' | tr -d '.')" in
             1) programar_nueva_tarea ;;
             2) gestionar_tareas_individuales ;;
             3) ver_configuracion_cron ;;
