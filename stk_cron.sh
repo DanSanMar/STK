@@ -141,6 +141,23 @@ log_cron() {
     fi
 }
 
+
+# CREAR WRAPPER 
+crear_wrapper_cron() {
+    cat << 'EOF' > "$STK_AUTO_WRAPPER"
+#!/bin/bash
+# ==============================================================================
+#           STK - WRAPPER Y EJECUTOR DE TAREAS AUTOMÁTICAS (CRON)
+# ==============================================================================
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export HOME="/root"
+export TERM="linux"
+export LANG="es_ES.UTF-8"
+
+CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
+CRON_LOG_FILE="/var/log/stk_cron.log"
+CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
+
 verificar_dependencias() {
     local pkgs_faltantes=()
     if ! command -v notify-send &>/dev/null; then
@@ -238,7 +255,7 @@ enviar_notificacion() {
 
     # 4. Crear script temporal auxiliar para el informe interactivo
     local script_abrir="/tmp/stk_abrir_informe_$$.sh"
-    cat > "$script_abrir" << EOF
+    cat > "$script_abrir" << 'EOF_INFORME'
 #!/bin/bash
 echo "================================================================================"
 echo "📊 STK AUTOMATIC TASK MANAGER - INFORME COMPLETO DE EJECUCIÓN"
@@ -249,7 +266,8 @@ echo ""
 echo "================================================================================"
 echo " Presiona ENTER o Cierra la ventana para salir..."
 read
-EOF
+EOF_INFORME
+    
     chmod +x "$script_abrir"
 
     # 5. Envío de notificación y apertura de terminal
@@ -331,23 +349,8 @@ EOF
     rm -f "$script_abrir" 2>/dev/null
     return 0
 }
-#fin enviar notify
 
-# CREAR WRAPPER 
-crear_wrapper_cron() {
-    cat << 'EOF' > "$STK_AUTO_WRAPPER"
-#!/bin/bash
-# ==============================================================================
-#           STK - WRAPPER Y EJECUTOR DE TAREAS AUTOMÁTICAS (CRON)
-# ==============================================================================
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export HOME="/root"
-export TERM="linux"
-export LANG="es_ES.UTF-8"
 
-CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
-CRON_LOG_FILE="/var/log/stk_cron.log"
-CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
 log_cron_exec() {
     local nivel="${1:-INFO}"
