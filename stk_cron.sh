@@ -390,8 +390,32 @@ verificar_dependencias() {
 #           SISTEMA DE NOTIFICACIÓN 
 # ==============================================================================
 
+# Función auxiliar para abrir el informe dentro del contexto del usuario gráfico
+abrir_informe_grafico() {
+    local usuario="$1"
+    local user_id="$2"
+    local archivo="$3"
+    local dbus_socket="/run/user/${user_id}/bus"
+
+    sudo -u "$usuario" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+        DISPLAY="${DISPLAY:-:0}" \
+        bash -c "
+            if command -v xdg-open &>/dev/null; then
+                xdg-open '$archivo' &>/dev/null &
+            elif command -v x-terminal-emulator &>/dev/null; then
+                x-terminal-emulator -e less +G '$archivo' &>/dev/null &
+            elif command -v gnome-terminal &>/dev/null; then
+                gnome-terminal -- less +G '$archivo' &>/dev/null &
+            elif command -v xterm &>/dev/null; then
+                xterm -e less +G '$archivo' &>/dev/null &
+            fi
+        " &>/dev/null &
+}
+
 enviar_notificacion() {
     verificar_dependencias
+
     # 1. Detectar usuario activo en sesión gráfica o TTY
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
@@ -405,51 +429,125 @@ enviar_notificacion() {
 
     [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
 
-    # 2. Analizar ÚNICAMENTE el último bloque de ejecución
+    # 2. Extraer el último bloque de ejecución
     local ultimo_bloque
     ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
-    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 30 "$CRON_RESUMEN_FILE")
+    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")
 
-    # 3. Definir mensaje (solo detectar fallos reales o fallos de salida)
-    local titulo="STK: Tareas Automáticas"
-    local mensaje="✅ Tareas completadas correctamente."
+    # 3. Construir mensaje detallado
+    local titulo="STK: Informe de Tareas Automáticas"
+    local mensaje=""
     local urgencia="normal"
     local icono="dialog-information"
 
-    if echo "$ultimo_bloque" | grep -Eqi "❌|fall[óo]|failed" 2>/dev/null; then
-        mensaje="⚠️ Algunas tareas han fallado. Revisa el resumen."
-        urgencia="critical"
-        icono="dialog-warning"
-    fi
-
-    # 4. Inyección DBus y envío de notificación gráfica
-    if command -v notify-send &>/dev/null; then
-        local dbus_socket="/run/user/${user_id}/bus"
+    # --- INFORMACIÓN DE AUDITORÍA ---
+    if echo "$ultimo_bloque" | grep -qi "AUDITORÍA"; then
+        local puntuacion=$(echo "$ultimo_bloque" | grep "Puntuación:" | tail -1 | sed 's/.*Puntuación: \([^)]*\).*/\1/' | xargs)
+        mensaje+="🔍 Auditoría: ${puntuacion:-Sin datos}\n"
         
-        # Inyectar DBUS_SESSION_BUS_ADDRESS directamente
-        if [ -S "$dbus_socket" ]; then
-            sudo -u "$usuario_activo" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
-                DISPLAY="${DISPLAY:-:0}" \
-                notify-send -u "$urgencia" -i "$icono" -t 8000 "$titulo" "$mensaje" 2>/dev/null && return 0
+        local alertas_raw=$(echo "$ultimo_bloque" | grep -A 10 "⚠️ Alertas detectadas:" | grep "•" | head -n 3)
+        if [ -n "$alertas_raw" ]; then
+            urgencia="critical"
+            icono="dialog-warning"
+            mensaje+="   ⚠️ Alertas:\n"
+            while IFS= read -r alerta; do
+                mensaje+="     $alerta\n"
+            done <<< "$alertas_raw"
+            
+            local total_alertas=$(echo "$ultimo_bloque" | grep -A 10 "⚠️ Alertas detectadas:" | grep "•" | wc -l)
+            if [ "$total_alertas" -gt 3 ]; then
+                mensaje+="     ... y $((total_alertas - 3)) más\n"
+            fi
         fi
     fi
 
-    # 5. Fallback 1: Notificación en terminal de texto (wall)
-    if command -v wall &>/dev/null; then
-        printf "\n========================================\n  %s\n========================================\n  %s\n  📁 Log: %s\n========================================\n\n" \
-            "$titulo" "$mensaje" "$CRON_RESUMEN_FILE" | wall 2>/dev/null
+    # --- INFORMACIÓN DE SERVICIOS ---
+    if echo "$ultimo_bloque" | grep -qi "SERVICIOS"; then
+        if echo "$ultimo_bloque" | grep -q "⚠️ Servicios fallidos detectados:"; then
+            urgencia="critical"
+            icono="dialog-warning"
+            local servicios_fallidos=$(echo "$ultimo_bloque" | grep "⚠️ Servicios fallidos detectados:" | tail -1 | sed 's/.*: //')
+            mensaje+="📊 Servicios: ⚠️ $servicios_fallidos\n"
+            
+            local svcs=$(echo "$ultimo_bloque" | grep -A 5 "⚠️ Servicios fallidos detectados:" | grep "•" | head -n 2 | sed 's/.*• //' | xargs | sed 's/ /, /g')
+            if [ -n "$svcs" ]; then
+                mensaje+="   Caídos: $svcs\n"
+            fi
+        else
+            mensaje+="📊 Servicios: ✅ Todos operativos\n"
+        fi
     fi
 
-    # 6. Fallback 2: Log local en el HOME del usuario
-    local user_home
-    user_home=$(eval echo "~$usuario_activo")
-    if [ -d "$user_home" ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $titulo - $mensaje" >> "${user_home}/.stk_notifications.log" 2>/dev/null
+    # --- INFORMACIÓN DE UFW ---
+    if echo "$ultimo_bloque" | grep -qi "UFW"; then
+        local bloqueos=$(echo "$ultimo_bloque" | grep "Bloqueos totales:" | tail -1 | awk -F':' '{print $2}' | xargs)
+        mensaje+="🛡️ UFW: ${bloqueos:-0} bloqueos totales\n"
+        
+        if [ -n "$bloqueos" ] && [ "$bloqueos" -gt 0 ]; then
+            local ultimo_bloqueo=$(echo "$ultimo_bloque" | grep "UFW BLOCK" | tail -1 | sed 's/.*• //' | head -c 50)
+            [ -n "$ultimo_bloqueo" ] && mensaje+="   Último: $ultimo_bloqueo\n"
+        fi
+    fi
+
+    # --- INFORMACIÓN DE ACTUALIZACIÓN ---
+    if echo "$ultimo_bloque" | grep -qi "ACTUALIZACIÓN"; then
+        if echo "$ultimo_bloque" | grep -q "✅ Actualización completada"; then
+            mensaje+="🔄 Actualización: ✅ Completada\n"
+        else
+            urgencia="critical"
+            mensaje+="🔄 Actualización: ❌ Falló\n"
+        fi
+    fi
+
+    # --- INFORMACIÓN DE LIMPIEZA ---
+    if echo "$ultimo_bloque" | grep -qi "LIMPIEZA"; then
+        if echo "$ultimo_bloque" | grep -q "✅ Limpieza completada"; then
+            mensaje+="🧹 Limpieza: ✅ Completada\n"
+        else
+            urgencia="critical"
+            mensaje+="🧹 Limpieza: ❌ Falló\n"
+        fi
+    fi
+
+    [ -z "$mensaje" ] && mensaje="✅ Ejecución finalizada sin incidencias."
+    mensaje+="\n📁 Log: $CRON_RESUMEN_FILE"
+
+    # 4. Envío DBus interactivo con captura de clic real
+    if command -v notify-send &>/dev/null; then
+        local dbus_socket="/run/user/${user_id}/bus"
+        
+        if [ -S "$dbus_socket" ]; then
+            # Lanzamos subshell en segundo plano que envía la notificación y espera la acción del usuario
+            sudo -u "$usuario_activo" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+                DISPLAY="${DISPLAY:-:0}" \
+                bash -c "
+                    accion=\$(notify-send -u '$urgencia' -i '$icono' -t 15000 \
+                        --action='ver_log=📋 Ver Informe Completo' \
+                        '$titulo' '$(echo -e "$mensaje")' 2>/dev/null)
+                    
+                    if [ \"\$accion\" = \"ver_log\" ]; then
+                        if command -v xdg-open &>/dev/null; then
+                            xdg-open '$CRON_RESUMEN_FILE' &>/dev/null &
+                        elif command -v x-terminal-emulator &>/dev/null; then
+                            x-terminal-emulator -e less +G '$CRON_RESUMEN_FILE' &>/dev/null &
+                        fi
+                    fi
+                " &>/dev/null &
+                
+            return 0
+        fi
+    fi
+
+    # 5. Fallback Terminal (wall)
+    if command -v wall &>/dev/null; then
+        printf "\n========================================\n  %s\n========================================\n%s\n========================================\n\n" \
+            "$titulo" "$mensaje" | wall 2>/dev/null
     fi
 
     return 0
 }
+
 # ==============================================================================
 #                 FLUJO PRINCIPAL DE EJECUCIÓN
 # ==============================================================================
@@ -533,9 +631,11 @@ verificar_cron_stk() {
 obtener_frecuencia_descripcion() {
     if [ -f "$CRON_CONFIG_FILE" ]; then
         if command -v jq &>/dev/null; then
-            jq -r '.tareas[] | select(.frecuencia != null) | .frecuencia' "$CRON_CONFIG_FILE" 2>/dev/null | head -n 1 || echo "Ninguna"
+            local frecs
+            frecs=$(jq -r '.tareas[].frecuencia' "$CRON_CONFIG_FILE" 2>/dev/null | sort -u | tr '\n' ', ' | sed 's/, $//')
+            echo "${frecs:-Ninguna}"
         else
-            grep -oP '"frecuencia":\s*"\K[^"]+' "$CRON_CONFIG_FILE" 2>/dev/null | head -n 1 || echo "Ninguna"
+            echo "Configurada"
         fi
     else
         echo "Ninguna"
