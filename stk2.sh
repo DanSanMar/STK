@@ -1206,10 +1206,10 @@ Actualizar_sistema() {
     echo ""
     if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
         pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
-        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."[cite: 1]
+        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."
     else
         pintar $ROJO "✘ Hubo un error durante la actualización."
-        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."[cite: 1]
+        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."
     fi
 
     # Restaurar la trampa de señal por defecto antes de salir

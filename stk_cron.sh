@@ -1015,7 +1015,7 @@ eliminar_tarea_especifica() {
     sleep 2
 }
 
-ggestionar_tareas_individuales() {
+gestionar_tareas_individuales() {
     while true; do
         clear
         mostrar_logo
