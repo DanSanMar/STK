@@ -2,10 +2,9 @@
 # ==============================================================================
 #                 GESTOR DE TAREAS AUTOMATIZADAS (CRON)
 # ==============================================================================
-# STK - Módulo de programación automática de tareas
-# Versión: 4 Tests generales tras integración completa a un solo script
+# Pasamos a cron4me
 # ==============================================================================
-
+$ver="v 4.6"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -47,15 +46,15 @@ pintar() {
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
 
-# Definir mostrar_logo
+# mostrar_logo
 mostrar_logo() {
-    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"
-    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
-    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  CRON TASK MANAGER v4.5${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${CIAN}   ██████ ██████   ██████  ███   ██ ██   ██ ███   ███ ███████${RESET}"
+    echo -e "${AZUL_BRILLANTE}  ██      ██   ██ ██    ██ ████  ██ ██   ██ ████ ████ ██     ${RESET}"
+    echo -e "${AZUL}  ██      ██████  ██    ██ ██ ██ ██ ███████ ██ ███ ██ █████  ${RESET}"
+    echo -e "${AZUL}  ██      ██   ██ ██    ██ ██  ████      ██ ██     ██ ██     ${RESET}"
+    echo -e "${AZUL_BRILLANTE}   ██████ ██   ██  ██████  ██   ███      ██ ██     ██ ███████${RESET}"
+    echo -e "${VERDE_BRILLANTE}               CRON TASK MANAGER $ver${RESET}"
+    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
 # Definir fzf_estilo
@@ -103,7 +102,7 @@ inicializar_estructura() {
     if [ ! -f "$CRON_CONFIG_FILE" ]; then
         cat > "$CRON_CONFIG_FILE" << 'EOF'
 {
-    "version": "4.5",
+    "version": "$ver",
     "configuracion": {
         "schedule": null,
         "descripcion": null,
@@ -361,177 +360,95 @@ ejecutar_auto_ufw() {
     fi
     return 0
 }
+# ==============================================================================
+#           VERIFICACIÓN E INSTALACIÓN DE DEPENDENCIAS (PACMAN / APT)
+# ==============================================================================
+
+verificar_dependencias() {
+    local pkgs_faltantes=()
+
+    # 1. Verificar si notify-send está disponible
+    if ! command -v notify-send &>/dev/null; then
+        pkgs_faltantes+=("libnotify")
+    fi
+
+    # 2. Si faltan paquetes, intentamos instalar de forma desatendida
+    if [ ${#pkgs_faltantes[@]} -gt 0 ]; then
+        log_cron "WARN" "Instalando dependencias faltantes: ${pkgs_faltantes[*]}"
+        
+        if command -v pacman &>/dev/null; then
+            # Arch Linux / Manjaro / EndeavourOS
+            pacman -Sy --noconfirm --needed "${pkgs_faltantes[@]}" &>/dev/null
+        elif command -v apt-get &>/dev/null; then
+            # Debian / Ubuntu / Kali
+            apt-get update -y &>/dev/null && apt-get install -y "${pkgs_faltantes[@]}" &>/dev/null
+        fi
+    fi
+}
 
 # ==============================================================================
-#                 SISTEMA DE NOTIFICACIÓN EN TERMINAL
+#           SISTEMA DE NOTIFICACIÓN 
 # ==============================================================================
 
 enviar_notificacion() {
-    # =========================================================================
-    # 1. DETECCIÓN DEL USUARIO ACTIVO
-    # =========================================================================
+    verificar_dependencias
+    # 1. Detectar usuario activo en sesión gráfica o TTY
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(whoami)
     [ -z "$usuario_activo" ] && return 1
 
-    # =========================================================================
-    # 2. DETECCIÓN DEL ENTORNO GRÁFICO (Wayland vs X11)
-    # =========================================================================
-    local user_id user_home display_val xauth_val wayland_display
+    local user_id
     user_id=$(id -u "$usuario_activo" 2>/dev/null)
+    [ -z "$user_id" ] && return 1
+
+    [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
+
+    # 2. Analizar ÚNICAMENTE el último bloque de ejecución
+    local ultimo_bloque
+    ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
+    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 30 "$CRON_RESUMEN_FILE")
+
+    # 3. Definir mensaje (solo detectar fallos reales o fallos de salida)
+    local titulo="STK: Tareas Automáticas"
+    local mensaje="✅ Tareas completadas correctamente."
+    local urgencia="normal"
+    local icono="dialog-information"
+
+    if echo "$ultimo_bloque" | grep -Eqi "❌|fall[óo]|failed" 2>/dev/null; then
+        mensaje="⚠️ Algunas tareas han fallado. Revisa el resumen."
+        urgencia="critical"
+        icono="dialog-warning"
+    fi
+
+    # 4. Inyección DBus y envío de notificación gráfica
+    if command -v notify-send &>/dev/null; then
+        local dbus_socket="/run/user/${user_id}/bus"
+        
+        # Inyectar DBUS_SESSION_BUS_ADDRESS directamente
+        if [ -S "$dbus_socket" ]; then
+            sudo -u "$usuario_activo" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+                DISPLAY="${DISPLAY:-:0}" \
+                notify-send -u "$urgencia" -i "$icono" -t 8000 "$titulo" "$mensaje" 2>/dev/null && return 0
+        fi
+    fi
+
+    # 5. Fallback 1: Notificación en terminal de texto (wall)
+    if command -v wall &>/dev/null; then
+        printf "\n========================================\n  %s\n========================================\n  %s\n  📁 Log: %s\n========================================\n\n" \
+            "$titulo" "$mensaje" "$CRON_RESUMEN_FILE" | wall 2>/dev/null
+    fi
+
+    # 6. Fallback 2: Log local en el HOME del usuario
+    local user_home
     user_home=$(eval echo "~$usuario_activo")
-    
-    # Detectar display desde loginctl
-    local session_id=$(loginctl list-sessions --no-legend 2>/dev/null | grep "$usuario_activo" | awk '{print $1}' | head -n 1)
-    if [ -n "$session_id" ]; then
-        wayland_display=$(loginctl show-session "$session_id" -p Display --value 2>/dev/null)
-        # Limpiar si loginctl devuelve un display X11 convencional (:0)
-        [[ "$wayland_display" =~ ^:[0-9] ]] && wayland_display=""
-    fi
-    
-    # Fallback: buscar socket wayland en /run/user/
-    if [ -z "$wayland_display" ]; then
-        wayland_display=$(find "/run/user/${user_id}" -name "wayland-*" 2>/dev/null | head -n 1 | xargs -r basename)
-    fi
-    
-    if [ -n "$wayland_display" ]; then
-        display_val=""
-        xauth_val=""
-    else
-        display_val="${DISPLAY:-:0}"
-        xauth_val="$user_home/.Xauthority"
-        [ ! -f "$xauth_val" ] && xauth_val=$(find "/run/user/${user_id}" -name ".Xauthority" 2>/dev/null | head -n 1)
+    if [ -d "$user_home" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $titulo - $mensaje" >> "${user_home}/.stk_notifications.log" 2>/dev/null
     fi
 
-    # =========================================================================
-    # 3. DETECCIÓN DE TERMINAL DISPONIBLE
-    # =========================================================================
-    local term_bin=""
-    local term_args=""
-
-    local terminales=(
-        "ghostty:--execute"
-        "kitty:-e"
-        "alacritty:-e"
-        "gnome-terminal:--"
-        "konsole:-e"
-        "xfce4-terminal:-x"
-        "xterm:-e"
-        "urxvt:-e"
-        "st:-e"
-        "terminator:-x"
-        "tilix:-e"
-        "wezterm:start --"
-    )
-
-    for term_entry in "${terminales[@]}"; do
-        local term_name="${term_entry%%:*}"
-        local term_flag="${term_entry##*:}"
-        
-        if command -v "$term_name" &>/dev/null; then
-            term_bin="$term_name"
-            term_args="$term_flag"
-            break
-        fi
-    done
-
-    [ -z "$term_bin" ] && return 1
-
-    # =========================================================================
-    # 4. PREPARACIÓN DEL CONTENIDO Y SCRIPT TEMPORAL
-    # =========================================================================
-    if [ -f "$CRON_RESUMEN_FILE" ]; then
-        local tmp_resumen="/tmp/stk_resumen_${user_id}.log"
-        local runner_script="/tmp/stk_run_term_${user_id}.sh"
-        
-        rm -f "$tmp_resumen" "$runner_script"
-        
-        # Extraer el ÚLTIMO bloque del resumen
-        awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" > "$tmp_resumen" 2>/dev/null
-        
-        if [ ! -s "$tmp_resumen" ]; then
-            tail -n 40 "$CRON_RESUMEN_FILE" > "$tmp_resumen"
-        fi
-
-        # NOTA: Sin comillas en TRUNNER para permitir la expansión de $tmp_resumen
-        cat << TRUNNER > "$runner_script"
-#!/bin/bash
-export TERM="xterm-256color"
-clear
-
-if grep -qi "fall[óo]" "$tmp_resumen" 2>/dev/null; then
-    echo -e "\033[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-    echo -e "\033[91m ❌ ATENCIÓN: ALGUNAS TAREAS AUTOMÁTICAS HAN FALLADO \033[0m"
-    echo -e "\033[91m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-else
-    echo -e "\033[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-    echo -e "\033[92m ℹ️ INFORME DE TAREAS AUTOMÁTICAS (STK CRON) \033[0m"
-    echo -e "\033[92m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-fi
-
-cat "$tmp_resumen" 2>/dev/null || echo "No se pudo leer el resumen"
-
-rm -f "$tmp_resumen" "\$0" 2>/dev/null
-
-echo ""
-echo -n "Presiona ENTER para cerrar este informe..."
-read -r
-TRUNNER
-
-        chown "$usuario_activo:" "$tmp_resumen" "$runner_script" 2>/dev/null || true
-        chmod 755 "$runner_script" 2>/dev/null || true
-
-        # =========================================================================
-        # 5. CONFIGURACIÓN DEL ENTORNO DE EJECUCIÓN
-        # =========================================================================
-        local env_vars="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${user_id}/bus"
-        
-        if [ -n "$wayland_display" ]; then
-            env_vars="$env_vars WAYLAND_DISPLAY=$wayland_display"
-            [ "$term_bin" = "ghostty" ] && env_vars="$env_vars GDK_BACKEND=wayland"
-        else
-            env_vars="$env_vars DISPLAY=$display_val"
-            [ -n "$xauth_val" ] && env_vars="$env_vars XAUTHORITY=$xauth_val"
-            sudo -u "$usuario_activo" DISPLAY="$display_val" xhost +si:localuser:root &>/dev/null || true
-        fi
-
-        # =========================================================================
-        # 6. EJECUCIÓN DEL COMANDO
-        # =========================================================================
-        local cmd_exec=""
-
-        case "$term_bin" in
-            ghostty)
-                if [ -n "$wayland_display" ]; then
-                    cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args --app-id=stk-notify bash $runner_script"
-                else
-                    cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash $runner_script"
-                fi
-                ;;
-            gnome-terminal|wezterm)
-                cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash -c '$runner_script'"
-                ;;
-            *)
-                cmd_exec="sudo -u $usuario_activo env $env_vars $term_bin $term_args bash $runner_script"
-                ;;
-        esac
-
-        eval "nohup $cmd_exec > /dev/null 2>&1 & disown"
-
-        # =========================================================================
-        # 7. LOG DE DEPURACIÓN
-        # =========================================================================
-        if [ "${STK_DEBUG:-0}" -eq 1 ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') [NOTIFY] Usuario: $usuario_activo, Terminal: $term_bin, Wayland: ${wayland_display:-no}" >> /tmp/stk_notify_debug.log
-            echo "  Comando: $cmd_exec" >> /tmp/stk_notify_debug.log
-        fi
-
-        return 0
-    fi
-    
-    return 1
+    return 0
 }
 # ==============================================================================
 #                 FLUJO PRINCIPAL DE EJECUCIÓN
@@ -895,7 +812,7 @@ guardar_configuracion_cron() {
 
     cat > "$CRON_CONFIG_FILE" << EOF
 {
-    "version": "1.0",
+    "version": "$ver",
     "configuracion": {
         "activado": true,
         "fecha_activacion": "$(date '+%Y-%m-%d %H:%M:%S')",
