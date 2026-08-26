@@ -156,17 +156,12 @@ CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-# --- FUNCIÓN DE LOGGING ÚNICA ---
 log_cron_exec() {
     local nivel="${1:-INFO}"
     local mensaje="${2}"
     local fecha=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$fecha] [$nivel] [root] - $mensaje" >> "$CRON_LOG_FILE"
 }
-
-# ==============================================================================
-#                 SUBRUTINAS TÉCNICAS (ACTUALIZACIÓN Y LIMPIEZA)
-# ==============================================================================
 
 Actualizar_sistema() {
     local status=0
@@ -200,17 +195,12 @@ super_limpieza() {
         apt-get autoremove -y && apt-get clean || status=1
     fi
 
-    # Limpieza de logs journalctl > 7 días
     if command -v journalctl &>/dev/null; then
         journalctl --vacuum-time=7d &>/dev/null || true
     fi
 
     return $status
 }
-
-# ==============================================================================
-#                 VERSIONES AUTOMÁTICAS (Sin interacción)
-# ==============================================================================
 
 ejecutar_auto_actualizacion() {
     log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
@@ -251,7 +241,6 @@ ejecutar_auto_auditoria() {
     local checks_passed=0
     local alertas=()
     
-    # 1. UID 0
     ((total_checks++))
     if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd 2>/dev/null | wc -l) -eq 1 ]; then
         ((checks_passed++))
@@ -259,7 +248,6 @@ ejecutar_auto_auditoria() {
         alertas+=("Múltiples usuarios con UID 0")
     fi
     
-    # 2. Cuentas sin contraseña
     ((total_checks++))
     if [ -z "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
         ((checks_passed++))
@@ -267,7 +255,6 @@ ejecutar_auto_auditoria() {
         alertas+=("Cuentas inactivas o sin contraseña")
     fi
     
-    # 3. Firewall
     ((total_checks++))
     if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
         ((checks_passed++))
@@ -275,7 +262,6 @@ ejecutar_auto_auditoria() {
         alertas+=("Firewall inactivo o sin reglas")
     fi
     
-    # 4. SSH
     ((total_checks++))
     if command -v ss &>/dev/null; then
         if ! ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
@@ -287,7 +273,6 @@ ejecutar_auto_auditoria() {
         ((checks_passed++))
     fi
     
-    # 5. MAC (SELinux/AppArmor)
     ((total_checks++))
     if command -v getenforce &>/dev/null && [ "$(getenforce 2>/dev/null)" == "Enforcing" ]; then
         ((checks_passed++))
@@ -360,63 +345,25 @@ ejecutar_auto_ufw() {
     fi
     return 0
 }
-# ==============================================================================
-#           VERIFICACIÓN E INSTALACIÓN DE DEPENDENCIAS (PACMAN / APT)
-# ==============================================================================
 
 verificar_dependencias() {
     local pkgs_faltantes=()
-
-    # 1. Verificar si notify-send está disponible
     if ! command -v notify-send &>/dev/null; then
         pkgs_faltantes+=("libnotify")
     fi
 
-    # 2. Si faltan paquetes, intentamos instalar de forma desatendida
     if [ ${#pkgs_faltantes[@]} -gt 0 ]; then
-        log_cron "WARN" "Instalando dependencias faltantes: ${pkgs_faltantes[*]}"
-        
         if command -v pacman &>/dev/null; then
-            # Arch Linux / Manjaro / EndeavourOS
             pacman -Sy --noconfirm --needed "${pkgs_faltantes[@]}" &>/dev/null
         elif command -v apt-get &>/dev/null; then
-            # Debian / Ubuntu / Kali
             apt-get update -y &>/dev/null && apt-get install -y "${pkgs_faltantes[@]}" &>/dev/null
         fi
     fi
 }
 
-# ==============================================================================
-#           SISTEMA DE NOTIFICACIÓN 
-# ==============================================================================
-
-# Función auxiliar para abrir el informe dentro del contexto del usuario gráfico
-abrir_informe_grafico() {
-    local usuario="$1"
-    local user_id="$2"
-    local archivo="$3"
-    local dbus_socket="/run/user/${user_id}/bus"
-
-    sudo -u "$usuario" \
-        DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
-        DISPLAY="${DISPLAY:-:0}" \
-        bash -c "
-            if command -v xdg-open &>/dev/null; then
-                xdg-open '$archivo' &>/dev/null &
-            elif command -v x-terminal-emulator &>/dev/null; then
-                x-terminal-emulator -e less +G '$archivo' &>/dev/null &
-            elif command -v gnome-terminal &>/dev/null; then
-                gnome-terminal -- less +G '$archivo' &>/dev/null &
-            elif command -v xterm &>/dev/null; then
-                xterm -e less +G '$archivo' &>/dev/null &
-            fi
-        " &>/dev/null &
-}
-
 enviar_notificacion() {
     verificar_dependencias
 
-    # 1. Detectar usuario activo en sesión gráfica o TTY
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
@@ -429,12 +376,10 @@ enviar_notificacion() {
 
     [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
 
-    # 2. Extraer el último bloque de ejecución
     local ultimo_bloque
     ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
     [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")
 
-    # 3. Construir mensaje
     local titulo="STK: Informe de Tareas Automáticas"
     local mensaje=""
     local urgencia="normal"
@@ -451,48 +396,39 @@ enviar_notificacion() {
     fi
 
     [ -z "$mensaje" ] && mensaje="✅ Ejecución finalizada sin incidencias."
-    
-    # Formatear el archivo como enlace HTML accesible
     mensaje+="\n📁 Log: <a href=\"file://$CRON_RESUMEN_FILE\">$CRON_RESUMEN_FILE</a>"
 
-    # 4. Envío DBus interactivo con proceso persistente de captura de acción
     if command -v notify-send &>/dev/null; then
         local dbus_socket="/run/user/${user_id}/bus"
-        
         if [ -S "$dbus_socket" ]; then
             sudo -u "$usuario_activo" \
                 DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
                 DISPLAY="${DISPLAY:-:0}" \
-                nohup bash -c '
-                    res=$(notify-send -u "'"$urgencia"'" -i "'"$icono"'" -t 20000 \
-                        --action="default=Abrir informe completo" \
-                        --action="abrir=📋 Abrir Log" \
-                        "'"$titulo"'" "'$(echo -e "$mensaje")'" 2>/dev/null)
+                bash -c "
+                    res=\$(notify-send -u '$urgencia' -i '$icono' -t 20000 \
+                        --action='default=Abrir informe' \
+                        --action='abrir=📋 Abrir Log' \
+                        '$titulo' '$(echo -e "$mensaje")' 2>/dev/null)
                     
-                    if [ "$res" = "default" ] || [ "$res" = "abrir" ]; then
+                    if [ \"\$res\" = \"default\" ] || [ \"\$res\" = \"abrir\" ]; then
                         if command -v xdg-open &>/dev/null; then
-                            xdg-open "'"$CRON_RESUMEN_FILE"'" &>/dev/null &
+                            xdg-open '$CRON_RESUMEN_FILE' &>/dev/null &
                         elif command -v x-terminal-emulator &>/dev/null; then
-                            x-terminal-emulator -e less +G "'"$CRON_RESUMEN_FILE"'" &>/dev/null &
+                            x-terminal-emulator -e less +G '$CRON_RESUMEN_FILE' &>/dev/null &
                         fi
                     fi
-                ' >/dev/null 2>&1 &
+                " &>/dev/null &
             return 0
         fi
     fi
 
-    # Fallback Terminal
     if command -v wall &>/dev/null; then
         printf "\n========================================\n  %s\n========================================\n%s\n========================================\n\n" \
             "$titulo" "$mensaje" | wall 2>/dev/null
     fi
 
     return 0
-}}
-
-# ==============================================================================
-#                 FLUJO PRINCIPAL DE EJECUCIÓN
-# ==============================================================================
+}
 
 TAREA_ARG="$1"
 if [ -n "$TAREA_ARG" ]; then
@@ -535,7 +471,6 @@ done
 T_FIN=$(date +%s)
 DURACION=$((T_FIN - T_INICIO))
 
-# Guardar informe en el Log de Resumen de ejecuciones
 {
     echo "═══════════════════════════════════════════════════════════════"
     echo "📊 RESUMEN EJECUCIÓN - $(date "+%Y-%m-%d %H:%M:%S")"
@@ -552,7 +487,6 @@ DURACION=$((T_FIN - T_INICIO))
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
-# Actualizar fecha de última ejecución
 TMP_JSON=$(mktemp)
 jq --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" '.configuracion.ultima_ejecucion = $fecha' "$CRON_CONFIG_FILE" > "$TMP_JSON" 2>/dev/null && mv "$TMP_JSON" "$CRON_CONFIG_FILE"
 
