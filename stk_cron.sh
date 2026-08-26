@@ -434,119 +434,61 @@ enviar_notificacion() {
     ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
     [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")
 
-    # 3. Construir mensaje detallado
+    # 3. Construir mensaje
     local titulo="STK: Informe de Tareas Automáticas"
     local mensaje=""
     local urgencia="normal"
     local icono="dialog-information"
 
-    # --- INFORMACIÓN DE AUDITORÍA ---
     if echo "$ultimo_bloque" | grep -qi "AUDITORÍA"; then
         local puntuacion=$(echo "$ultimo_bloque" | grep "Puntuación:" | tail -1 | sed 's/.*Puntuación: \([^)]*\).*/\1/' | xargs)
         mensaje+="🔍 Auditoría: ${puntuacion:-Sin datos}\n"
-        
-        local alertas_raw=$(echo "$ultimo_bloque" | grep -A 10 "⚠️ Alertas detectadas:" | grep "•" | head -n 3)
-        if [ -n "$alertas_raw" ]; then
-            urgencia="critical"
-            icono="dialog-warning"
-            mensaje+="   ⚠️ Alertas:\n"
-            while IFS= read -r alerta; do
-                mensaje+="     $alerta\n"
-            done <<< "$alertas_raw"
-            
-            local total_alertas=$(echo "$ultimo_bloque" | grep -A 10 "⚠️ Alertas detectadas:" | grep "•" | wc -l)
-            if [ "$total_alertas" -gt 3 ]; then
-                mensaje+="     ... y $((total_alertas - 3)) más\n"
-            fi
-        fi
     fi
 
-    # --- INFORMACIÓN DE SERVICIOS ---
-    if echo "$ultimo_bloque" | grep -qi "SERVICIOS"; then
-        if echo "$ultimo_bloque" | grep -q "⚠️ Servicios fallidos detectados:"; then
-            urgencia="critical"
-            icono="dialog-warning"
-            local servicios_fallidos=$(echo "$ultimo_bloque" | grep "⚠️ Servicios fallidos detectados:" | tail -1 | sed 's/.*: //')
-            mensaje+="📊 Servicios: ⚠️ $servicios_fallidos\n"
-            
-            local svcs=$(echo "$ultimo_bloque" | grep -A 5 "⚠️ Servicios fallidos detectados:" | grep "•" | head -n 2 | sed 's/.*• //' | xargs | sed 's/ /, /g')
-            if [ -n "$svcs" ]; then
-                mensaje+="   Caídos: $svcs\n"
-            fi
-        else
-            mensaje+="📊 Servicios: ✅ Todos operativos\n"
-        fi
-    fi
-
-    # --- INFORMACIÓN DE UFW ---
-    if echo "$ultimo_bloque" | grep -qi "UFW"; then
-        local bloqueos=$(echo "$ultimo_bloque" | grep "Bloqueos totales:" | tail -1 | awk -F':' '{print $2}' | xargs)
-        mensaje+="🛡️ UFW: ${bloqueos:-0} bloqueos totales\n"
-        
-        if [ -n "$bloqueos" ] && [ "$bloqueos" -gt 0 ]; then
-            local ultimo_bloqueo=$(echo "$ultimo_bloque" | grep "UFW BLOCK" | tail -1 | sed 's/.*• //' | head -c 50)
-            [ -n "$ultimo_bloqueo" ] && mensaje+="   Último: $ultimo_bloqueo\n"
-        fi
-    fi
-
-    # --- INFORMACIÓN DE ACTUALIZACIÓN ---
-    if echo "$ultimo_bloque" | grep -qi "ACTUALIZACIÓN"; then
-        if echo "$ultimo_bloque" | grep -q "✅ Actualización completada"; then
-            mensaje+="🔄 Actualización: ✅ Completada\n"
-        else
-            urgencia="critical"
-            mensaje+="🔄 Actualización: ❌ Falló\n"
-        fi
-    fi
-
-    # --- INFORMACIÓN DE LIMPIEZA ---
-    if echo "$ultimo_bloque" | grep -qi "LIMPIEZA"; then
-        if echo "$ultimo_bloque" | grep -q "✅ Limpieza completada"; then
-            mensaje+="🧹 Limpieza: ✅ Completada\n"
-        else
-            urgencia="critical"
-            mensaje+="🧹 Limpieza: ❌ Falló\n"
-        fi
+    if echo "$ultimo_bloque" | grep -q "❌"; then
+        urgencia="critical"
+        icono="dialog-warning"
     fi
 
     [ -z "$mensaje" ] && mensaje="✅ Ejecución finalizada sin incidencias."
-    mensaje+="\n📁 Log: $CRON_RESUMEN_FILE"
+    
+    # Formatear el archivo como enlace HTML accesible
+    mensaje+="\n📁 Log: <a href=\"file://$CRON_RESUMEN_FILE\">$CRON_RESUMEN_FILE</a>"
 
-    # 4. Envío DBus interactivo con captura de clic real
+    # 4. Envío DBus interactivo con proceso persistente de captura de acción
     if command -v notify-send &>/dev/null; then
         local dbus_socket="/run/user/${user_id}/bus"
         
         if [ -S "$dbus_socket" ]; then
-            # Lanzamos subshell en segundo plano que envía la notificación y espera la acción del usuario
             sudo -u "$usuario_activo" \
                 DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
                 DISPLAY="${DISPLAY:-:0}" \
-                bash -c "
-                    accion=\$(notify-send -u '$urgencia' -i '$icono' -t 15000 \
-                        --action='ver_log=📋 Ver Informe Completo' \
-                        '$titulo' '$(echo -e "$mensaje")' 2>/dev/null)
+                nohup bash -c '
+                    res=$(notify-send -u "'"$urgencia"'" -i "'"$icono"'" -t 20000 \
+                        --action="default=Abrir informe completo" \
+                        --action="abrir=📋 Abrir Log" \
+                        "'"$titulo"'" "'$(echo -e "$mensaje")'" 2>/dev/null)
                     
-                    if [ \"\$accion\" = \"ver_log\" ]; then
+                    if [ "$res" = "default" ] || [ "$res" = "abrir" ]; then
                         if command -v xdg-open &>/dev/null; then
-                            xdg-open '$CRON_RESUMEN_FILE' &>/dev/null &
+                            xdg-open "'"$CRON_RESUMEN_FILE"'" &>/dev/null &
                         elif command -v x-terminal-emulator &>/dev/null; then
-                            x-terminal-emulator -e less +G '$CRON_RESUMEN_FILE' &>/dev/null &
+                            x-terminal-emulator -e less +G "'"$CRON_RESUMEN_FILE"'" &>/dev/null &
                         fi
                     fi
-                " &>/dev/null &
-                
+                ' >/dev/null 2>&1 &
             return 0
         fi
     fi
 
-    # 5. Fallback Terminal (wall)
+    # Fallback Terminal
     if command -v wall &>/dev/null; then
         printf "\n========================================\n  %s\n========================================\n%s\n========================================\n\n" \
             "$titulo" "$mensaje" | wall 2>/dev/null
     fi
 
     return 0
-}
+}}
 
 # ==============================================================================
 #                 FLUJO PRINCIPAL DE EJECUCIÓN
