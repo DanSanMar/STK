@@ -610,6 +610,10 @@ DURACION=$((T_FIN - T_INICIO))
     echo "═══════════════════════════════════════════════════════════════"
 } >> "$CRON_RESUMEN_FILE"
 
+# Actualizar fecha de última ejecución
+TMP_JSON=$(mktemp)
+jq --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" '.configuracion.ultima_ejecucion = $fecha' "$CRON_CONFIG_FILE" > "$TMP_JSON" 2>/dev/null && mv "$TMP_JSON" "$CRON_CONFIG_FILE"
+
 enviar_notificacion
 
 exit 0
@@ -655,14 +659,19 @@ obtener_tareas_configuradas() {
 }
 
 obtener_ultima_ejecucion() {
-    if [ -f "$CRON_LOG_FILE" ]; then
-        local ultima_linea
-        ultima_linea=$(grep -E "INICIO|FIN" "$CRON_LOG_FILE" 2>/dev/null | tail -1)
-        if [ -n "$ultima_linea" ]; then
-            echo "$ultima_linea" | sed 's/^\[//' | cut -d']' -f1
-        else
-            echo "Sin registros"
+    if [ -f "$CRON_RESUMEN_FILE" ]; then
+        local ultima_fecha
+        # Extrae la fecha del último bloque impreso en el log de resumen
+        ultima_fecha=$(grep "RESUMEN EJECUCIÓN" "$CRON_RESUMEN_FILE" 2>/dev/null | tail -1 | cut -d'-' -f2- | xargs)
+        if [ -n "$ultima_fecha" ]; then
+            echo "$ultima_fecha"
+            return
         fi
+    fi
+
+    if [ -f "$CRON_LOG_FILE" ] && [ -s "$CRON_LOG_FILE" ]; then
+        # Extrae la marca de tiempo de la última línea registrada en el log general
+        tail -1 "$CRON_LOG_FILE" | sed 's/^\[//' | cut -d']' -f1
     else
         echo "Sin registros"
     fi
