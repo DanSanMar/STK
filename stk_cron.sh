@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 4.8"
+ver="v 4.9"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -259,14 +259,45 @@ log_cron_exec() {
     echo "[$fecha] [$nivel] [root] - $mensaje" >> "$CRON_LOG_FILE"
 }
 
+esperar_bloqueos() {
+    local max_espera=120
+    local contador=0
+    
+    # Comprobar si existe algún archivo de bloqueo en el sistema
+    mientras_bloqueado() {
+        [ -f /var/lib/pacman/db.lck ] || \
+        [ -f /var/lib/dpkg/lock-frontend ] || \
+        [ -f /var/lib/dpkg/lock ] || \
+        [ -f /var/run/dnf.pid ] || \
+        [ -f /var/run/zypp.pid ]
+    }
+
+    while mientras_bloqueado && [ $contador -lt $max_espera ]; do
+        echo "⏳ Gestor de paquetes ocupado por otro proceso del sistema. Esperando 5s... ($contador/${max_espera}s)"
+        sleep 5
+        ((contador+=5))
+    done
+
+    if mientras_bloqueado; then
+        echo "⚠️ Tiempo de espera agotado. El bloqueo del gestor de paquetes no se liberó a tiempo."
+        return 1
+    fi
+    return 0
+}
+
 Actualizar_sistema() {
     local status=0
+
+    # Esperar activamente a que finalicen las actualizaciones automáticas del sistema
+    esperar_bloqueos || return 1
+
     if command -v pacman &>/dev/null; then
         echo "📦 Sincronizando repositorios y sistema (PACMAN)..."
         pacman -Syu --noconfirm --color never || status=$?
     elif command -v apt-get &>/dev/null; then
         echo "📦 Sincronizando repositorios y sistema (APT)..."
-        apt-get update -y && apt-get upgrade -y || status=$?
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y && apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || status=$?
     elif command -v dnf &>/dev/null; then
         echo "📦 Sincronizando repositorios y sistema (DNF - Fedora/RHEL)..."
         dnf upgrade -y --color=never || status=$?
@@ -285,7 +316,6 @@ Actualizar_sistema() {
 
     return $status
 }
-
 super_limpieza() {
     local status=0
     if command -v pacman &>/dev/null; then
