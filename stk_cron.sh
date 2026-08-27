@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 4.9"
+ver="v 5"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -882,14 +882,13 @@ activar_tarea_cron() {
     # 2. Limpiar crontab de entradas STK previas para regenerar la lista completa
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
 
-    # 3. Leer TODAS las tareas acumuladas en tasks.json y volcarlas a crontab
+    # 3. Extraer schedules ÚNICOS para no duplicar ejecuciones simultáneas
     local lineas_cron=""
-    while IFS= read -r item; do
-        [ -z "$item" ] && continue
-        local t_id=$(echo "$item" | cut -d'|' -f1)
-        local t_sched=$(echo "$item" | cut -d'|' -f2)
-        lineas_cron+="${t_sched} ${STK_AUTO_WRAPPER} ${t_id} ${CRON_STK_ID}\n"
-    done < <(jq -r '.tareas[] | .id + "|" + .schedule' "$CRON_CONFIG_FILE")
+    while IFS= read -r sched; do
+        [ -z "$sched" ] && continue
+        # Se invoca el wrapper SIN pasar el ID de la tarea para que ejecute TODAS en orden
+        lineas_cron+="${sched} ${STK_AUTO_WRAPPER} ${CRON_STK_ID}\n"
+    done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sort -u)
 
     (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
 
@@ -934,12 +933,10 @@ eliminar_tarea_especifica() {
         # Sincronizar crontab con las tareas restantes
         crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
         local lineas_cron=""
-        while IFS= read -r item; do
-            [ -z "$item" ] && continue
-            local t_id=$(echo "$item" | cut -d'|' -f1)
-            local t_sched=$(echo "$item" | cut -d'|' -f2)
-            lineas_cron+="${t_sched} ${STK_AUTO_WRAPPER} ${t_id} ${CRON_STK_ID}\n"
-        done < <(jq -r '.tareas[] | .id + "|" + .schedule' "$CRON_CONFIG_FILE")
+        while IFS= read -r sched; do
+            [ -z "$sched" ] && continue
+            lineas_cron+="${sched} ${STK_AUTO_WRAPPER} ${CRON_STK_ID}\n"
+        done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sort -u)
 
         (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
         log_cron "INFO" "Tarea eliminada (ID Único: $item_a_eliminar)"
