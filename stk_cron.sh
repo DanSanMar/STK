@@ -193,7 +193,7 @@ enviar_notificacion() {
     ultimo_bloque=$(tail -n 35 "$CRON_RESUMEN_FILE")
 
     # 3. Construir título y estado principal
-    local titulo="STK: Resultado de Mantenimiento"
+    local titulo="Cron4me: Informe de ejecución programada"
     local mensaje=""
     local urgencia="normal"
     local icono="dialog-information"
