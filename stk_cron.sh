@@ -489,17 +489,26 @@ for tarea in $TAREAS; do
         "ufw")           ejecutar_auto_ufw > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
     esac
 
-    # ... [Guardar resultados y logs existentes] ...
+   
+    # 1. Registrar resultado visual 
+    if [ $STATUS_CODE -eq 0 ]; then
+        RESULTADOS+=("✅ Tarea [$tarea] finalizada exitosamente.")
+    else
+        RESULTADOS+=("❌ Tarea [$tarea] falló (Código: $STATUS_CODE).")
+    fi
 
-    # ---------------------------------------------------------------------
-    # NUEVO: ESCALONAMIENTO Y VERIFICACIÓN DE RECURSOS
-    # ---------------------------------------------------------------------
-    # Esperar a que los gestores de paquetes liberen los cierres/locks
+    # 2. Capturar y acumular la salida producida en DETALLES_INFORME
+    DETALLES_INFORME+="--- Salida de $tarea ---\n"
+    DETALLES_INFORME+="$(cat "$LOG_TEMP")\n\n"
+
+    # 3. Limpiar el archivo temporal utilizado
+    rm -f "$LOG_TEMP"
+    # ---------------------------
+
     while pgrep -x "pacman" >/dev/null || pgrep -x "apt-get" >/dev/null; do
         sleep 2
     done
 
-    # Pausa de escalonamiento de 5 segundos antes de pasar a la siguiente tarea
     sleep 5
 done
 
