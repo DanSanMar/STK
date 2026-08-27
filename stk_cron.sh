@@ -1090,7 +1090,7 @@ ver_logs_cron() {
     if [ -f "$CRON_LOG_FILE" ]; then
         
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        tail -n 20 "$CRON_LOG_FILE"
+        tail -n 18 "$CRON_LOG_FILE"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         
         
@@ -1109,16 +1109,15 @@ ver_logs_cron() {
         pintar "$ROJO" "❌ No hay logs de ejecución aún."
     fi
     echo ""
+    pintar "$CIAN" "--- ÚLTIMOS LOGS DE EJECUCIÓN CRON ---"
+    echo ""
     read -p "Presione Enter para continuar..."
 }
 
 ver_resumen_cron() {
     clear
     mostrar_logo
-    echo ""
-    pintar "$CIAN" "--- RESUMEN ÚLTIMA EJECUCIÓN CRON ---"
-    echo ""
-    
+        
     if [ -f "$CRON_RESUMEN_FILE" ]; then
         echo -e "${AMARILLO}Último resumen:${RESET}"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
@@ -1128,6 +1127,8 @@ ver_resumen_cron() {
     else
         pintar "$ROJO" "❌ No hay resúmenes de ejecución aún."
     fi
+    echo ""
+    pintar "$CIAN" "--- RESUMEN ÚLTIMAS EJECUCIONES CRON ---"
     echo ""
     read -p "Presione Enter para continuar..."
 }
