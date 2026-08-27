@@ -176,12 +176,11 @@ verificar_dependencias() {
 enviar_notificacion() {
     verificar_dependencias
 
-    # 1. Detectar usuario activo y entorno gráfico (X11 / Wayland)
+    # 1. Detectar usuario activo y socket de DBus de forma robusta
     local usuario_activo
     usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(whoami)
-    [ -z "$usuario_activo" ] && return 1
 
     local user_id
     user_id=$(id -u "$usuario_activo" 2>/dev/null)
@@ -189,164 +188,65 @@ enviar_notificacion() {
 
     [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
 
-    # 2. Extraer el último bloque de resumen del informe
+    # 2. Extraer ÚNICAMENTE la ejecución recién realizada (últimas 35 líneas)
     local ultimo_bloque
-    ultimo_bloque=$(awk '/═══════════════════════════════════════════════════════════════/{block=""} {block=block $0 "\n"} END{printf "%s", block}' "$CRON_RESUMEN_FILE" 2>/dev/null)
-    [ -z "$ultimo_bloque" ] && ultimo_bloque=$(tail -n 50 "$CRON_RESUMEN_FILE")
+    ultimo_bloque=$(tail -n 35 "$CRON_RESUMEN_FILE")
 
-    # 3. Construir mensaje y determinar semáforo de estado
-    local titulo="STK: Mantenimiento Automático"
+    # 3. Construir título y estado principal
+    local titulo="STK: Resultado de Mantenimiento"
     local mensaje=""
     local urgencia="normal"
     local icono="dialog-information"
-    local hay_errores=false
-    local hay_alertas=false
 
     if echo "$ultimo_bloque" | grep -q "❌"; then
-        hay_errores=true
         urgencia="critical"
         icono="dialog-error"
-        mensaje="🔴 <b>ESTADO: ERRORES DETECTADOS</b>\n\n"
+        mensaje="❌ <b>ESTADO: HUBO FALLOS EN LA EJECUCIÓN</b>\n\n"
     elif echo "$ultimo_bloque" | grep -q "⚠️"; then
-        hay_alertas=true
         urgencia="normal"
         icono="dialog-warning"
-        mensaje="🟠 <b>ESTADO: REQUIERE ATENCIÓN</b>\n\n"
+        mensaje="⚠️ <b>ESTADO: ATENCIÓN / ALERTAS</b>\n\n"
     else
-        urgencia="low"
+        urgencia="normal"
         icono="emblem-ok-symbolic"
-        mensaje="🟢 <b>ESTADO: TODO CORRECTO</b>\n\n"
+        mensaje="✅ <b>ESTADO: EJECUCIÓN EXITOSA</b>\n\n"
     fi
 
-    # --- DESGLOSE COMPLETO DE TAREAS ---
-    local tareas_resumen
-    tareas_resumen=$(echo "$ultimo_bloque" | grep -E "✅|❌" | grep -v "RESUMEN EJECUCIÓN" | sed 's/^[[:space:]]*//')
-    if [ -n "$tareas_resumen" ]; then
-        mensaje+="📋 <b>Estado de Tareas:</b>\n${tareas_resumen}\n\n"
-    fi
-
-    # --- INFORMACIÓN DE AUDITORÍA DE SEGURIDAD ---
-    if echo "$ultimo_bloque" | grep -qi "Puntuación:"; then
-        local puntuacion
-        puntuacion=$(echo "$ultimo_bloque" | grep "Puntuación:" | tail -1 | sed 's/.*Puntuación: \([^)]*\).*/\1/' | xargs)
-        mensaje+="🔍 Auditoría: <b>${puntuacion:-N/A}</b>\n"
-    fi
-
-    # --- INFORMACIÓN DE SERVICIOS SYSTEMD ---
-    if echo "$ultimo_bloque" | grep -qi "Servicios fallidos"; then
-        local servicios
-        servicios=$(echo "$ultimo_bloque" | grep "Servicios fallidos" | tail -1 | sed 's/.*: //')
-        mensaje+="📊 Servicios con fallos: <b>${servicios}</b>\n"
-    fi
-
-    # --- INFORMACIÓN DE FIREWALL (UFW) ---
-    if echo "$ultimo_bloque" | grep -qi "Bloqueos totales:"; then
-        local bloqueos
-        bloqueos=$(echo "$ultimo_bloque" | grep "Bloqueos totales:" | tail -1 | awk -F':' '{print $2}' | xargs)
-        mensaje+="🛡️ UFW: <b>${bloqueos:-0} bloqueos registrados</b>\n"
-    fi
-
-    # Pie de notificación según el estado
-    if [ "$hay_errores" = true ] || [ "$hay_alertas" = true ]; then
-        mensaje+="\n⚠️ <i>Abriendo informe emergente en terminal...</i>"
-    else
-        mensaje+="\n📁 Log guardado en: <i>$CRON_RESUMEN_FILE</i>"
-    fi
-
-    # 4. Crear script temporal auxiliar para el informe interactivo
-    local script_abrir="/tmp/stk_abrir_informe_$$.sh"
-    cat > "$script_abrir" << 'EOF_INFORME'
-#!/bin/bash
-echo "================================================================================"
-echo "📊 STK AUTOMATIC TASK MANAGER - INFORME COMPLETO DE EJECUCIÓN"
-echo "================================================================================"
-echo ""
-tail -n 120 "$CRON_RESUMEN_FILE" 2>/dev/null || echo "❌ No se pudo leer el archivo de logs."
-echo ""
-echo "================================================================================"
-echo " Presiona ENTER o Cierra la ventana para salir..."
-read
-EOF_INFORME
+    # 4. Extraer el resultado de cada tarea ejecutada en este ciclo
+    local resumen_tareas
+    resumen_tareas=$(echo "$ultimo_bloque" | grep -E "✅|❌" | grep -v "RESUMEN EJECUCIÓN" | sed 's/^[[:space:]]*//')
     
-    chmod +x "$script_abrir"
+    if [ -n "$resumen_tareas" ]; then
+        mensaje+="📋 <b>Resultado de Tareas:</b>\n${resumen_tareas}\n"
+    fi
 
-    # 5. Envío de notificación y apertura de terminal
+    # Extraer detalle específico si Pacman / DB falló
+    if echo "$ultimo_bloque" | grep -q "no se pudo bloquear la base de datos"; then
+        mensaje+="\n⚠️ <i>Causa: Pacman bloqueado (db.lck).</i>"
+    fi
+
+    # 5. Enviar notificación al escritorio del usuario
     if command -v notify-send &>/dev/null; then
         local dbus_socket="/run/user/${user_id}/bus"
         
-        if [ -S "$dbus_socket" ]; then
-            # Obtener variables de pantalla del proceso gráfico activo del usuario
-            local user_display
-            user_display=$(pgrep -u "$usuario_activo" -a | grep -oP 'DISPLAY=:\d+(\.\d+)?' | head -n 1 | cut -d= -f2)
-            [ -z "$user_display" ] && user_display="${DISPLAY:-:0}"
+        # Entorno gráfico
+        local user_display
+        user_display=$(pgrep -u "$usuario_activo" -a | grep -oP 'DISPLAY=:\d+(\.\d+)?' | head -n 1 | cut -d= -f2)
+        [ -z "$user_display" ] && user_display="${DISPLAY:-:0}"
 
-            local user_wayland
-            user_wayland=$(pgrep -u "$usuario_activo" -a | grep -oP 'WAYLAND_DISPLAY=wayland-\d+' | head -n 1 | cut -d= -f2)
-            [ -z "$user_wayland" ] && user_wayland="wayland-0"
+        local user_wayland
+        user_wayland=$(pgrep -u "$usuario_activo" -a | grep -oP 'WAYLAND_DISPLAY=wayland-\d+' | head -n 1 | cut -d= -f2)
+        [ -z "$user_wayland" ] && user_wayland="wayland-0"
 
-            # Enviar notificación emergente
-            sudo -u "$usuario_activo" \
-                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
-                DISPLAY="${user_display}" \
-                WAYLAND_DISPLAY="${user_wayland}" \
-                XDG_RUNTIME_DIR="/run/user/${user_id}" \
-                notify-send -u "$urgencia" -i "$icono" -t 15000 \
-                "$titulo" "$(echo -e "$mensaje")" 2>/dev/null
-
-            # Abrir terminal automática solo si hubo errores o alertas
-            if [ "$hay_errores" = true ] || [ "$hay_alertas" = true ]; then
-                sleep 2
-                
-                local term_cmd=""
-                
-                # Cadena de detección de terminales (incluye Ghostty y emuladores comunes)
-                if command -v ghostty &>/dev/null; then
-                    term_cmd="ghostty -e $script_abrir"
-                elif command -v xdg-terminal-exec &>/dev/null; then
-                    term_cmd="xdg-terminal-exec $script_abrir"
-                elif command -v x-terminal-emulator &>/dev/null; then
-                    term_cmd="x-terminal-emulator -e $script_abrir"
-                elif command -v ptyxis &>/dev/null; then
-                    term_cmd="ptyxis -- $script_abrir"
-                elif command -v gnome-terminal &>/dev/null; then
-                    term_cmd="gnome-terminal -- $script_abrir"
-                elif command -v konsole &>/dev/null; then
-                    term_cmd="konsole -e $script_abrir"
-                elif command -v alacritty &>/dev/null; then
-                    term_cmd="alacritty -e $script_abrir"
-                elif command -v kitty &>/dev/null; then
-                    term_cmd="kitty $script_abrir"
-                elif command -v foot &>/dev/null; then
-                    term_cmd="foot $script_abrir"
-                elif command -v wezterm &>/dev/null; then
-                    term_cmd="wezterm start -- $script_abrir"
-                elif command -v xterm &>/dev/null; then
-                    term_cmd="xterm -e $script_abrir"
-                fi
-
-                if [ -n "$term_cmd" ]; then
-                    sudo -u "$usuario_activo" \
-                        DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
-                        DISPLAY="${user_display}" \
-                        WAYLAND_DISPLAY="${user_wayland}" \
-                        XDG_RUNTIME_DIR="/run/user/${user_id}" \
-                        bash -c "$term_cmd" &>/dev/null &
-                fi
-            fi
-            
-            # Limpiar script auxiliar tras un margen razonable
-            (sleep 30 && rm -f "$script_abrir") &>/dev/null &
-            return 0
-        fi
+        sudo -u "$usuario_activo" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+            DISPLAY="${user_display}" \
+            WAYLAND_DISPLAY="${user_wayland}" \
+            XDG_RUNTIME_DIR="/run/user/${user_id}" \
+            notify-send -u "$urgencia" -i "$icono" -t 10000 \
+            "$titulo" "$(echo -e "$mensaje")" 2>/dev/null
     fi
 
-    # 6. Fallback si no hay entorno gráfico ni DBus activo
-    if command -v wall &>/dev/null; then
-        printf "\n========================================\n  %s\n========================================\n%s\n========================================\n\n" \
-            "$titulo" "$(echo -e "$mensaje" | sed 's/<[^>]*>//g')" | wall 2>/dev/null
-    fi
-
-    rm -f "$script_abrir" 2>/dev/null
     return 0
 }
 
