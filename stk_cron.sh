@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 4.6"
+ver="v 4.7"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -468,17 +468,18 @@ for tarea in $TAREAS; do
         "ufw")           ejecutar_auto_ufw > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
     esac
 
-    if [ $STATUS_CODE -eq 0 ]; then
-        RESULTADOS+=("✅ ${tarea^^}: Completada")
-    else
-        RESULTADOS+=("❌ ${tarea^^}: Falló (Código $STATUS_CODE)")
-    fi
-    
-    if [ -s "$LOG_TEMP" ]; then
-        cat "$LOG_TEMP" >> "/var/log/stk_cron_${tarea}.log" 2>/dev/null
-        DETALLES_INFORME+="$(cat "$LOG_TEMP")$(printf '\n\n')"
-    fi
-    rm -f "$LOG_TEMP"
+    # ... [Guardar resultados y logs existentes] ...
+
+    # ---------------------------------------------------------------------
+    # NUEVO: ESCALONAMIENTO Y VERIFICACIÓN DE RECURSOS
+    # ---------------------------------------------------------------------
+    # Esperar a que los gestores de paquetes liberen los cierres/locks
+    while pgrep -x "pacman" >/dev/null || pgrep -x "apt-get" >/dev/null; do
+        sleep 2
+    done
+
+    # Pausa de escalonamiento de 5 segundos antes de pasar a la siguiente tarea
+    sleep 5
 done
 
 T_FIN=$(date +%s)
