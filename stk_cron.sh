@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 4.7"
+ver="v 4.8"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -263,10 +263,19 @@ Actualizar_sistema() {
     local status=0
     if command -v pacman &>/dev/null; then
         echo "📦 Sincronizando repositorios y sistema (PACMAN)..."
-        pacman -Syu --noconfirm || status=1
+        pacman -Syu --noconfirm --color never || status=$?
     elif command -v apt-get &>/dev/null; then
         echo "📦 Sincronizando repositorios y sistema (APT)..."
-        apt-get update -y && apt-get upgrade -y || status=1
+        apt-get update -y && apt-get upgrade -y || status=$?
+    elif command -v dnf &>/dev/null; then
+        echo "📦 Sincronizando repositorios y sistema (DNF - Fedora/RHEL)..."
+        dnf upgrade -y --color=never || status=$?
+    elif command -v zypper &>/dev/null; then
+        echo "📦 Sincronizando repositorios y sistema (ZYPPER - openSUSE)..."
+        zypper --non-interactive update || status=$?
+    elif command -v apk &>/dev/null; then
+        echo "📦 Sincronizando repositorios y sistema (APK - Alpine)..."
+        apk update && apk upgrade || status=$?
     fi
 
     if command -v flatpak &>/dev/null; then
@@ -284,11 +293,20 @@ super_limpieza() {
         pacman -Sc --noconfirm &>/dev/null || true
         local huerfanos=$(pacman -Qtdq 2>/dev/null)
         if [ -n "$huerfanos" ]; then
-            pacman -Rns $huerfanos --noconfirm || status=1
+            pacman -Rns $huerfanos --noconfirm || status=$?
         fi
     elif command -v apt-get &>/dev/null; then
         echo "🧹 Limpiando caché y paquetes no requeridos (APT)..."
-        apt-get autoremove -y && apt-get clean || status=1
+        apt-get autoremove -y && apt-get clean || status=$?
+    elif command -v dnf &>/dev/null; then
+        echo "🧹 Limpiando caché y paquetes no requeridos (DNF)..."
+        dnf autoremove -y && dnf clean all || status=$?
+    elif command -v zypper &>/dev/null; then
+        echo "🧹 Limpiando caché (ZYPPER)..."
+        zypper clean --all || status=$?
+    elif command -v apk &>/dev/null; then
+        echo "🧹 Limpiando caché (APK)..."
+        apk cache clean || status=$?
     fi
 
     if command -v journalctl &>/dev/null; then
@@ -301,14 +319,17 @@ super_limpieza() {
 ejecutar_auto_actualizacion() {
     log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
     echo "🔄 INICIANDO ACTUALIZACIÓN DEL SISTEMA..."
+    
+    # Muestra el resultado de la función en STDOUT para que se guarde en LOG_TEMP
     Actualizar_sistema
     local res=$?
+    
     if [ $res -eq 0 ]; then
         log_cron_exec "INFO" "✅ Actualización completada"
         echo "✅ Actualización completada correctamente."
     else
-        log_cron_exec "ERROR" "❌ Actualización falló"
-        echo "❌ Error al ejecutar la actualización."
+        log_cron_exec "ERROR" "❌ Actualización falló con código $res"
+        echo "❌ Error al ejecutar la actualización (Código $res)."
     fi
     return $res
 }
@@ -1111,7 +1132,7 @@ ver_logs_cron() {
     echo ""
     pintar "$CIAN" "--- ÚLTIMOS LOGS DE EJECUCIÓN CRON ---"
     echo ""
-    read -p "Presione Enter para continuar..."
+    read -p "Presione cualquier tecla para ver el resumen..."
 }
 
 ver_resumen_cron() {
@@ -1119,18 +1140,17 @@ ver_resumen_cron() {
     mostrar_logo
         
     if [ -f "$CRON_RESUMEN_FILE" ]; then
-        echo -e "${AMARILLO}Último resumen:${RESET}"
+        echo -e "${AMARILLO}Último resumen de ejecución cron:${RESET}"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         tail -n 100 "$CRON_RESUMEN_FILE"
-        echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        echo ""
+        
     else
         pintar "$ROJO" "❌ No hay resúmenes de ejecución aún."
     fi
     echo ""
-    pintar "$CIAN" "--- RESUMEN ÚLTIMAS EJECUCIONES CRON ---"
+    pintar "$CIAN" "--- FINAL DEL RESUMEN ÚLTIMAS EJECUCIONES CRON ---"
     echo ""
-    read -p "Presione Enter para continuar..."
+    read -p "Presione cualquier tecla para continuar..."
 }
 
 desactivar_cron() {
