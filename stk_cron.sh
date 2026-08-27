@@ -1088,11 +1088,11 @@ ver_logs_cron() {
     echo ""
     
     if [ -f "$CRON_LOG_FILE" ]; then
-        echo -e "${AMARILLO}Últimas 30 líneas del log general:${RESET}"
+        
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        tail -n 30 "$CRON_LOG_FILE"
+        tail -n 20 "$CRON_LOG_FILE"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        echo ""
+        
         
         echo -e "${AMARILLO}Logs específicos de tareas:${RESET}"
         for tarea in actualizacion limpieza auditoria servicios ufw; do
@@ -1103,7 +1103,7 @@ ver_logs_cron() {
             fi
         done
         
-        echo ""
+        
         echo -e "${AMARILLO}Tamaño total del log:${RESET} $(du -h "$CRON_LOG_FILE" | cut -f1)"
     else
         pintar "$ROJO" "❌ No hay logs de ejecución aún."
@@ -1122,16 +1122,9 @@ ver_resumen_cron() {
     if [ -f "$CRON_RESUMEN_FILE" ]; then
         echo -e "${AMARILLO}Último resumen:${RESET}"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        tail -n 20 "$CRON_RESUMEN_FILE"
+        tail -n 100 "$CRON_RESUMEN_FILE"
         echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
         echo ""
-        echo -ne "${AMARILLO}¿Ver resumen completo? (s/N): ${RESET}"
-        read -r ver_completo
-        if [[ "$ver_completo" =~ ^[sS]$ ]]; then
-            clear
-            cat "$CRON_RESUMEN_FILE"
-            echo ""
-        fi
     else
         pintar "$ROJO" "❌ No hay resúmenes de ejecución aún."
     fi
