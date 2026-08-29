@@ -2506,4 +2506,21 @@ hacer_backup() {
 
 # --- EJECUCIÓN ---
 rotar_logs "silencioso"
-menu
+
+# Comprobación de flags pasados como argumento al script
+case "$1" in
+    -m|--monitor|stk_monitor)
+        monitor_rendimiento
+        ;;
+
+    -a|--audit|auditoria_seguridad)
+        auditoria_seguridad
+        ;;
+
+    -u|--update|actualizacion)
+        Actualizar_sistema    
+        ;;
+    *)
+        menu
+        ;;
+esac
