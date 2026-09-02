@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.6 Test CRON ok en arch y debian, las flags también"
+V="5.9.7 añadiendo help -h"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -2507,6 +2507,26 @@ hacer_backup() {
 # --- EJECUCIÓN ---
 rotar_logs "silencioso"
 
+mostrar_ayuda() {
+    echo -e "${CIAN}STK - System Tool Kit v${V}${RESET}"
+    echo -e "${BLANCO}Uso:${RESET} sudo $0 [OPCIÓN]"
+    echo ""
+    echo -e "${AMARILLO}Opciones de línea de comandos:${RESET}"
+    echo -e "  ${VERDE}-m, --monitor${RESET}          Abre el monitor de rendimiento del sistema."
+    echo -e "  ${VERDE}-a, --audit${RESET}            Ejecuta la auditoría de seguridad del sistema."
+    echo -e "  ${VERDE}-u, --update${RESET}           Actualiza los paquetes del sistema y repositorios."
+    echo -e "  ${VERDE}-c, --clean${RESET}            Ejecuta la súper limpieza de espacio e imprevistos."
+    echo -e "  ${VERDE}-l, --logs${RESET}             Muestra las últimas entradas de la bitácora STK."
+    echo -e "  ${VERDE}-b, --backup${RESET}           Accede directamente al menú de copias de seguridad."
+    echo -e "  ${VERDE}-A, --auto${RESET}             Ejecuta el modo automático de mantenimiento integral."
+    echo -e "  ${VERDE}-v, --version${RESET}          Muestra la versión del script y sale."
+    echo -e "  ${VERDE}-h, --help, ayuda${RESET}      Muestra este mensaje de ayuda."
+    echo ""
+    echo -e "  ${AZUL}Sin argumentos:${RESET}        Abre el menú interactivo con FZF."
+    echo ""
+    exit 0
+}
+
 # Comprobación de flags pasados como argumento al script
 case "$1" in
     -m|--monitor|stk_monitor)
@@ -2518,8 +2538,34 @@ case "$1" in
         ;;
 
     -u|--update|actualizacion)
-        Actualizar_sistema    
+        Actualizar_sistema   
         ;;
+
+    -c|--clean|limpieza)
+        super_limpieza
+        ;;
+
+    -l|--logs|bitacora)
+        ver_logs
+        ;;
+
+    -b|--backup|copia)
+        hacer_backup
+        ;;
+
+    -A|--auto|modo_automativo)
+        modo_auto
+        ;;
+
+    -v|--version)
+        echo -e "${CIAN}STK Version:${RESET} ${BLANCO}v$V${RESET}"
+        exit 0
+        ;;
+
+    -h|--help|ayuda)
+        mostrar_ayuda
+        ;;
+
     *)
         menu
         ;;
