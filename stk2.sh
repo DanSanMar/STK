@@ -534,9 +534,9 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) if command -v dash4me.sh &>/dev/null; then
-                                dash4me.sh -m
+                                dash4me.sh 
                             else
-                                "./dash4me.sh" -m
+                                "./dash4me.sh"
                             fi
                             ;;
                         2) mostrar_info_red ;;
@@ -2445,9 +2445,9 @@ mostrar_ayuda() {
 case "$1" in
     -m|--monitor|stk_monitor)
         if command -v dash4me.sh &>/dev/null; then
-            dash4me.sh -m
+            dash4me.sh
         else
-            "./dash4me.sh" -m
+            "./dash4me.sh"
         fi
         exit 0
         ;;
