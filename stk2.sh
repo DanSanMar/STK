@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.7 añadiendo help -h"
+V="5.9.8 dash4me"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -533,7 +533,12 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                     accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. Gestor de Firewall UFW\n5. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
-                        1) monitor_rendimiento ;;
+                        1) if command -v dash4me.sh &>/dev/null; then
+                                dash4me.sh -m
+                            else
+                                "./dash4me.sh" -m
+                            fi
+                            ;;
                         2) mostrar_info_red ;;
                         3) auditoria_seguridad ;;
                         4) ejecutar_stop4me ;;
@@ -1642,113 +1647,8 @@ super_limpieza() {
     echo ""
     read -p "Pulse Enter para volver..."
 }
-mostrar_logo_monitor() {
-    # Definimos el logo con limpieza de línea \e[K al principio de cada fila
-    echo -e "\e[K${CIAN}  _____ _______ _  __  __  __                _ _             "
-    echo -e "\e[K / ____|__   __| |/ / |  \/  |              (_) |            "
-    echo -e "\e[K| (___    | |  | ' /  | \  / | ___  _ __  _ _| |_ ___  _ __  "
-    echo -e "\e[K \___ \   | |  |  <   | |\/| |/ _ \| '_ \| | | __/ _ \| '__| "
-    echo -e "\e[K ____) |  | |  | . \  | |  | | (_) | | | | | | |_ (_) | |    "
-    echo -e "\e[K|_____/   |_|  |_|\_\ |_|  |_|\___/|_| |_|_|_|\__\___/|_|    ${RESET}"
-    echo -e "\e[K${AZUL}------------------------------------------------------${RESET}"
-}
-monitor_rendimiento() {
-    # Verificar si tput está disponible antes de usarlo
-    if ! command -v tput &> /dev/null; then
-        pintar $AMARILLO "⚠️ tput no encontrado. La interfaz podría verse desordenada."
-    else
-        tput civis
-    fi
 
-    dibujar_barra() {
-        local porcentaje=$1
-        local color=$VERDE
-        local total_bloques=20
-        local rellenos=$(( porcentaje * total_bloques / 100 ))
-        if [ "$porcentaje" -gt 85 ]; then color=$ROJO
-        elif [ "$porcentaje" -gt 60 ]; then color=$AMARILLO
-        fi
-        printf "${color}["
-        for ((i=0; i<rellenos; i++)); do printf "■"; done
-        for ((i=rellenos; i<total_bloques; i++)); do printf " "; done
-        printf "] %3d%%${RESET}" "$porcentaje"
-    }
 
-    interpretar() {
-        local val=$1
-        local tipo=$2
-        if [ "$val" -gt 85 ]; then
-            case "$tipo" in
-                "cpu")   echo -e "${ROJO_BRILLANTE}CRÍTICO (Sobrecarga)${RESET}" ;;
-                "ram")   echo -e "${ROJO_BRILLANTE}CRÍTICO (Sin memoria)${RESET}" ;;
-                "disco") echo -e "${ROJO_BRILLANTE}CRÍTICO (Disco lleno)${RESET}" ;;
-            esac
-        elif [ "$val" -gt 65 ]; then echo -e "${AMARILLO}ALTO (Carga)${RESET}"
-        else echo -e "${VERDE}ÓPTIMO${RESET}"; fi
-    }
-
-    # Configuración inicial
-    trap "tput cnorm; clear; return" SIGINT
-    tput civis 
-    clear # Limpia la pantalla solo UNA vez al empezar
-
-    while true; do
-        # Retornar cursor a la esquina superior izquierda sin borrar
-        echo -ne "\e[H"
-        
-        mostrar_logo_monitor
-       
-        echo -e "\e[K${NEGRITA}-------- MONITOR DE SISTEMA (Ctrl+C para volver) --------${RESET}"
-        echo -e "\e[K${CIAN}Tasa Auto-refresco: 5s | Pulsa ENTER para actualizar antes${RESET}\n"
-
-        # --- OBTENCIÓN DE DATOS ---
-        CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
-        CPU_CORES=$(nproc)
-        CPU_MHZ=$(grep -m1 "cpu MHz" /proc/cpuinfo | awk '{print int($4)}')
-        CPU_GHZ=$(awk "BEGIN {printf \"%.2f\", $CPU_MHZ/1000}")
-
-        # Cálculo CPU
-        CPU_STATS=$(grep 'cpu ' /proc/stat)
-        IDLE_1=$(echo $CPU_STATS | awk '{print $5}')
-        TOTAL_1=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
-        sleep 0.1
-        CPU_STATS=$(grep 'cpu ' /proc/stat)
-        IDLE_2=$(echo $CPU_STATS | awk '{print $5}')
-        TOTAL_2=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
-        CPU_PERC=$((100 * ((TOTAL_2-TOTAL_1)-(IDLE_2-IDLE_1)) / (TOTAL_2-TOTAL_1) ))
-        CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "User: %.1f%% | System: %.1f%%", $2, $4}')
-
-        # RAM y DISCO
-        RAM_INFO=$(free -m | grep "Mem:")
-        RAM_TOTAL_MB=$(echo $RAM_INFO | awk '{print $2}')
-        RAM_USED_MB=$(echo $RAM_INFO | awk '{print $3}')
-        RAM_DISP_MB=$(echo $RAM_INFO | awk '{print $7}')
-        RAM_PERC=$(( RAM_USED_MB * 100 / RAM_TOTAL_MB ))
-        G_TOTAL=$(awk "BEGIN {printf \"%.1f\", $RAM_TOTAL_MB/1024}"); G_USED=$(awk "BEGIN {printf \"%.1f\", $RAM_USED_MB/1024}"); G_DISP=$(awk "BEGIN {printf \"%.1f\", $RAM_DISP_MB/1024}")
-
-        DISCO_DATA=$(df -h / | awk 'NR==2 {print $2, $3, $4, $5}')
-        D_TOTAL=$(echo $DISCO_DATA | awk '{print $1}'); D_USADO=$(echo $DISCO_DATA | awk '{print $2}'); D_LIBRE=$(echo $DISCO_DATA | awk '{print $3}'); D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
-
-        # --- RENDERIZADO 
-        echo -e "\e[K${AMARILLO}PROCESADOR:${RESET} ${BLANCO}${CPU_MODEL}${RESET}"
-        echo -e "\e[K${AMARILLO}NÚCLEOS:${RESET}    ${BLANCO}${CPU_CORES} hilos${RESET} | ${AMARILLO}FREQ:${RESET} ${BLANCO}${CPU_GHZ} GHz${RESET}\n"
-
-        echo -ne "\e[K${VERDE}CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
-        echo -ne "\e[K${AZUL}USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC; echo -e " -> $(interpretar $RAM_PERC 'ram')"
-        echo -ne "\e[K${CIAN}USO DISCO: ${RESET}"; dibujar_barra $D_PERC; echo -e " -> $(interpretar $D_PERC 'disco')"
-
-        echo -e "\e[K\n${CIAN}------------- INFO MÁS DETALLADA -----------${RESET}"
-        echo -e "\e[K   ${BLANCO}CPU:${RESET}   ${CPU_DETAIL} | ${BLANCO}Hilos:${RESET} ${CPU_CORES}"
-        echo -e "\e[K   ${BLANCO}RAM:${RESET}   ${G_USED}GB usados / ${G_TOTAL}GB total (Disp: ${G_DISP}GB)"
-        echo -e "\e[K   ${BLANCO}DISCO:${RESET} ${D_USADO} usados / ${D_TOTAL} total (Libre: ${D_LIBRE})"
-        echo -e "\e[K${CIAN}--------------------------------------------${RESET}"
-        echo -e "\e[K\n${BLANCO}Presione Ctrl+C para volver al menú principal${RESET}"
-        echo -ne "\e[K" # Línea extra de seguridad
-        # Rellenar con líneas vacías limpias para evitar que texto viejo suba
-        for i in {1..2}; do echo -e "\e[K"; done
-        read -t 5 -n 1 -s key
-    done
-}
 #Gestión de servicios   
 gestionar_servicios() {
     trap "clear; return" SIGINT
@@ -2544,7 +2444,12 @@ mostrar_ayuda() {
 # Comprobación de flags pasados como argumento al script
 case "$1" in
     -m|--monitor|stk_monitor)
-        monitor_rendimiento
+        if command -v dash4me.sh &>/dev/null; then
+            dash4me.sh -m
+        else
+            "./dash4me.sh" -m
+        fi
+        exit 0
         ;;
 
     -a|--audit|auditoria_seguridad)
