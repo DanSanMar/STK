@@ -13,10 +13,7 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
-mostrar_logo_dash4me() {
-    echo -e "\e[K ${AZUL_BRILLANTE}⚡ \e[1;97mDASH\e[36m4\e[92mME \e[0;34m|\e[0;90m SYSTEM DASHBOARD\e[0m"
-    echo -e "\e[K${AZUL}  ------------------------------------------------------------${RESET}"
-}
+
 
 dibujar_barra() {
     local porcentaje=$1
@@ -46,45 +43,57 @@ interpretar() {
 }
 
 obtener_resumen_inicio() {
-    local uptime_str=$(uptime -p 2>/dev/null | sed 's/up //')
-    local load_avg=$(uptime | awk -F'load average:' '{ print $2 }' | sed 's/^[ \t]*//')
+    # Uptime limpio (formato: 3h 12m)
+    local uptime_raw=$(uptime -p 2>/dev/null | sed -e 's/up //' -e 's/ hours\?,*/h/' -e 's/ minutes\?,*/m/' -e 's/ days\?,*/d/')
+    local uptime_str=${uptime_raw:-"N/A"}
+    
+    # Carga media (1 min, 5 min, 15 min)
+    local load_avg=$(uptime 2>/dev/null | awk -F'load average:' '{ print $2 }' | sed 's/^[ \t]*//')
+    
+    # Servicios fallidos en systemd
     local svcs_failed=0
+    local failed_names=""
     if command -v systemctl &>/dev/null; then
+        failed_names=$(systemctl list-units --state=failed --no-legend 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
         svcs_failed=$(systemctl list-units --state=failed --no-legend 2>/dev/null | wc -l)
     fi
-    local usbs=$(lsblk -o MOUNTPOINT -n 2>/dev/null | grep -E "^/(media|run/media|mnt)" | wc -l)
 
-    echo -e "\e[K${CIAN}------------- RESUMEN DE ARRANQUE -----------${RESET}"
-    echo -e "\e[K   ${BLANCO}Encendido:${RESET} $uptime_str | ${BLANCO}Carga media:${RESET} $load_avg"
+    # Dispositivos extraíbles montados (/media, /run/media, /mnt, /media/$USER)
+    local usbs=$(lsblk -o MOUNTPOINT -n 2>/dev/null | grep -c -E "^/(media|run/media|mnt)")
+
+    echo -e "\e[K${CIAN}------------- ESTADO DEL SISTEMA ------------${RESET}"
+    echo -e "\e[K   ${BLANCO}Tiempo activo:${RESET} $uptime_str | ${BLANCO}Carga media:${RESET} $load_avg"
     
+    # Impresión fija de servicios
     if [ "$svcs_failed" -gt 0 ]; then
-        echo -e "\e[K   ${ROJO_BRILLANTE}Servicios fallidos:${RESET} $svcs_failed (Revisar con systemctl)"
+        echo -e "\e[K   ${ROJO_BRILLANTE}Servicios fallidos ($svcs_failed):${RESET} ${AMARILLO}${failed_names}${RESET}"
     else
-        echo -e "\e[K   ${VERDE}Estado Servicios:${RESET} Todos funcionando correctamente"
+        echo -e "\e[K   ${VERDE}Estado Servicios:${RESET} OK (0 fallidos)"
     fi
 
+    # Impresión fija de unidades externas para evitar saltos en la pantalla
     if [ "$usbs" -gt 0 ]; then
         echo -e "\e[K   ${AMARILLO}Unidades externas:${RESET} $usbs montada(s)"
+    else
+        echo -e "\e[K   ${BLANCO}Unidades externas:${RESET} Ninguna"
     fi
 }
 
 monitor_rendimiento() {
     if command -v tput &> /dev/null; then
-        tput civis
+        tput smcup   # Entrar al buffer alternativo
+        tput civis   # Ocultar cursor
     fi
 
-    trap "tput cnorm 2>/dev/null; clear; exit 0" SIGINT SIGTERM
+    # Restaurar terminal al salir
+    trap "tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; exit 0" SIGINT SIGTERM
     
-    # Se limpia la pantalla UNA SOLA VEZ al arrancar
-    clear
-
     while true; do
         # Redirigimos la salida a una variable para evitar redibujados intermedios
         OUTPUT=$(
             echo -ne "\e[H" # Mueve el cursor a la esquina superior izquierda sin limpiar
-            mostrar_logo_dash4me
-            echo -e "\e[K${NEGRITA}-------- MONITOR DE SISTEMA DASH4ME (Ctrl+C para salir) --------${RESET}"
-            echo -e "\e[K${CIAN}Tasa Auto-refresco: 5s | Pulsa ENTER para actualizar antes${RESET}\n"
+            echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ \e[1;97mDASH\e[36m4\e[92mME \e[0;34m|\e[0;90m LITE DASHBOARD |${CIAN} V 1.1${AZUL_BRILLANTE}  ⚡-----\e[0m"
+            echo -e "\e[K${CIAN}Auto-refresco: 3s | ENTER=Actualizar | Ctrl+C=Salir${RESET}\n"
 
             CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
             CPU_CORES=$(nproc)
@@ -119,7 +128,7 @@ monitor_rendimiento() {
             echo -ne "\e[K${CIAN}USO DISCO: ${RESET}"; dibujar_barra $D_PERC; echo -e " -> $(interpretar $D_PERC 'disco')"
 
             echo -e "\e[K\n${CIAN}------------- METRICAS DETALLADAS -----------${RESET}"
-            echo -e "\e[K   ${BLANCO}CPU:${RESET}   ${CPU_DETAIL} | ${BLANCO}Hilos:${RESET} ${CPU_CORES}"
+            echo -e "\e[K   ${BLANCO}CPU:${RESET}   ${CPU_DETAIL}${RESET}"
             echo -e "\e[K   ${BLANCO}RAM:${RESET}   ${G_USED}GB usados / ${G_TOTAL}GB total (Disp: ${G_DISP}GB)"
             echo -e "\e[K   ${BLANCO}DISCO:${RESET} ${D_USADO} usados / ${D_TOTAL} total (Libre: ${D_LIBRE})"
             
@@ -128,7 +137,10 @@ monitor_rendimiento() {
             obtener_info_seguridad
 
             echo -e "\e[K${CIAN}--------------------------------------------${RESET}"
-            echo -e "\e[K\n${BLANCO}Presione Ctrl+C para salir${RESET}"
+           
+            
+            # Limpiar cualquier línea sobrante hacia abajo
+            echo -ne "\e[J"
         )
         
         # Imprime toda la pantalla de una sola vez
@@ -142,18 +154,57 @@ monitor_rendimiento() {
 # 🚀 DATOS DE ARRANQUE Y SISTEMA
 # ==========================================
 obtener_info_arranque() {
-    # Tiempo de booteo (Kernel + Userspace)
+    # 1. Obtener tiempo del arranque actual (extrae el total en segundos/milisegundos)
+    local boot_time="N/A"
+    local boot_sec=0
     if command -v systemd-analyze &>/dev/null; then
-        BOOT_TIME=$(systemd-analyze | awk -F'=' '{print $2}' | xargs)
-    else
-        BOOT_TIME="N/A"
+        boot_time=$(systemd-analyze 2>/dev/null | head -n 1 | awk -F'=' '{print $2}' | xargs)
+        # Extraer solo el número flotante final (ej: "14.450s" -> "14.45")
+        boot_sec=$(echo "$boot_time" | awk '{print $NF}' | tr -d 's')
     fi
 
-    # Último reinicio registrado
-    LAST_BOOT=$(uptime -s 2>/dev/null || who -b | awk '{print $3,$4}')
+    # 2. Último reinicio registrado
+    local last_boot=$(uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{print $3,$4}')
 
-    echo -e "${AZUL}⚡ Último arranque:${RESET} $LAST_BOOT"
-    echo -e "${AZUL}⏱️  Tiempo de booteo:${RESET} $BOOT_TIME"
+    # 3. Calcular la media de los últimos 5 arranques usando journalctl
+    local media_str="N/A"
+    local comparativa=""
+    
+    if command -v journalctl &>/dev/null && [ -n "$boot_sec" ]; then
+        # Extrae los tiempos totales de booteo de los últimos 5 arranques
+        local tiempos=$(journalctl -b -0 -b -1 -b -2 -b -3 -b -4 _COMM=systemd-analyze 2>/dev/null | grep -oP '=\s*\K[0-9.]+(?=s)' | head -n 5)
+        
+        if [ -n "$tiempos" ]; then
+            local suma=0
+            local count=0
+            for t in $tiempos; do
+                suma=$(awk "BEGIN {print $suma + $t}")
+                count=$((count + 1))
+            done
+            
+            if [ "$count" -gt 0 ]; then
+                local media=$(awk "BEGIN {printf \"%.2f\", $suma / $count}")
+                media_str="${media}s (últimos $count)"
+                
+                # Comparar arranque actual vs media
+                local diff=$(awk "BEGIN {printf \"%.2f\", $boot_sec - $media}")
+                local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
+                local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
+
+                if [ "$es_mayor" -eq 1 ]; then
+                    comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
+                elif [ "$es_menor" -eq 1 ]; then
+                    comparativa=" ${VERDE_BRILLANTE}(${diff}s más rápido)${RESET}"
+                else
+                    comparativa=" ${VERDE}(Promedio habitual)${RESET}"
+                fi
+            fi
+        fi
+    fi
+
+    echo -e "\e[K${AZUL}⚡ Último arranque:${RESET} $last_boot"
+    echo -e "\e[K${AZUL}⏱️  Tiempo de booteo:${RESET} ${BLANCO}${boot_time}${RESET}${comparativa}"
+    echo -e "\e[K${AZUL}📊 Media de arranque:${RESET} $media_str"
 }
 
 # ==========================================
@@ -168,30 +219,25 @@ obtener_info_seguridad() {
         UFW_PRINT="${AMARILLO}No instalado${RESET}"
     fi
 
-    # 2. Conexiones SSH activas en este momento
-    SSH_SESSIONS=$(who | grep -c "pts/")
+    # 2. Conexiones SSH entrantes legítimas (puerto 22 o sshd)
+    SSH_SESSIONS=$(ss -tn state established '( dport = :22 or sport = :22 )' 2>/dev/null | tail -n +2 | wc -l)
 
-    # 3. Sesiones con privilegios SUDO activas
-    SUDO_USERS=$(ps aux | grep -v grep | grep -c "sudo")
-
-    # 4. Intentos fallidos de SSH / Login (Si existe faillog o journalctl)
-    INTENTOS_FALLIDOS=0
-    if command -v journalctl &>/dev/null; then
-        INTENTOS_FALLIDOS=$(journalctl -u ssh -u sshd --since "24 hours ago" 2>/dev/null | grep -c "Failed password")
+    # 3. Detección de posibles Reverse Shells (puertos arbitrarios)
+    REVERSE_SHELLS=$(ss -tupn state established 2>/dev/null | grep -E '(bash|sh|zsh|python|perl|nc|socat)' | wc -l)
+    if [ "$REVERSE_SHELLS" -gt 0 ]; then
+        REV_PRINT="${ROJO_BRILLANTE}⚠️ ALERTA: $REVERSE_SHELLS sospechosa(s)${RESET}"
+    else
+        REV_PRINT="${VERDE}Ninguna detectada${RESET}"
     fi
 
-    echo -e "${AZUL}🛡️ Firewall (UFW):${RESET} $UFW_PRINT"
-    echo -e "${AZUL}👥 Sesiones SSH activas:${RESET} $SSH_SESSIONS"
-    echo -e "${AZUL}🔑 Procesos Sudo activos:${RESET} $SUDO_USERS"
-    echo -e "${AZUL}⚠️ Fallos SSH (24h):${RESET} ${AMARILLO}${INTENTOS_FALLIDOS}${RESET}"
+    # 4. Sesiones con privilegios SUDO activas
+    SUDO_USERS=$(ps aux | grep -v grep | grep -c "sudo")
+
+    echo -e "\e[K${AZUL}🛡️ Firewall (UFW):${RESET} $UFW_PRINT"
+    echo -e "\e[K${AZUL}👥 Conexiones SSH (p22):${RESET} $SSH_SESSIONS"
+    echo -e "\e[K${AZUL}🚨 Shells Sospechosas:${RESET} $REV_PRINT"
+    echo -e "\e[K${AZUL}🔑 Procesos Sudo activos:${RESET} $SUDO_USERS"
 }
 
-case "$1" in
-    -m|--monitor|"")
-        monitor_rendimiento
-        ;;
-    *)
-        echo "Uso: $0 [-m|--monitor]"
-        exit 1
-        ;;
-esac
+monitor_rendimiento
+
