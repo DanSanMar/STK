@@ -533,12 +533,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                     accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. Gestor de Firewall UFW\n5. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
-                        1) if command -v dash4me.sh &>/dev/null; then
-                                dash4me.sh 
-                            else
-                                "./dash4me.sh"
-                            fi
-                            ;;
+                        1) ejecutar_dash4me ;;
                         2) mostrar_info_red ;;
                         3) auditoria_seguridad ;;
                         4) ejecutar_stop4me ;;
@@ -2441,14 +2436,27 @@ mostrar_ayuda() {
     exit 0
 }
 
+ejecutar_dash4me() {
+    # Busca 'dash4me' o 'dash4me.sh' en la misma carpeta que stk2
+    if [ -f "$SCRIPT_DIR/dash4me" ]; then
+        bash "$SCRIPT_DIR/dash4me"
+    elif [ -f "$SCRIPT_DIR/dash4me.sh" ]; then
+        bash "$SCRIPT_DIR/dash4me.sh"
+    # Si no está en la carpeta, intenta buscarlo en el PATH global
+    elif command -v dash4me &>/dev/null; then
+        dash4me
+    elif command -v dash4me.sh &>/dev/null; then
+        dash4me.sh
+    else
+        echo -e "${ROJO}❌ Error: No se encuentra dash4me ni dash4me.sh en $SCRIPT_DIR${RESET}"
+        read -p "Presione Enter para continuar..."
+    fi
+}
+
 # Comprobación de flags pasados como argumento al script
 case "$1" in
     -m|--monitor|stk_monitor)
-        if command -v dash4me.sh &>/dev/null; then
-            dash4me.sh
-        else
-            "./dash4me.sh"
-        fi
+        ejecutar_dash4me
         exit 0
         ;;
 
