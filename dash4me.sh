@@ -129,6 +129,8 @@ monitor_rendimiento() {
             echo -e "\e[K   ${BLANCO}DISCO:${RESET} ${D_USADO} usados / ${D_TOTAL} total (Libre: ${D_LIBRE})"
             
             obtener_resumen_inicio
+            obtener_info_arranque
+            obtener_info_seguridad
 
             echo -e "\e[K${CIAN}--------------------------------------------${RESET}"
             echo -e "\e[K\n${BLANCO}Presione Ctrl+C para salir${RESET}"
@@ -139,6 +141,54 @@ monitor_rendimiento() {
 
         read -t 4.9 -n 1 -s key
     done
+}
+
+# ==========================================
+# 🚀 DATOS DE ARRANQUE Y SISTEMA
+# ==========================================
+obtener_info_arranque() {
+    # Tiempo de booteo (Kernel + Userspace)
+    if command -v systemd-analyze &>/dev/null; then
+        BOOT_TIME=$(systemd-analyze | awk -F'=' '{print $2}' | xargs)
+    else
+        BOOT_TIME="N/A"
+    fi
+
+    # Último reinicio registrado
+    LAST_BOOT=$(uptime -s 2>/dev/null || who -b | awk '{print $3,$4}')
+
+    echo -e "${AZUL}⚡ Último arranque:${RESET} $LAST_BOOT"
+    echo -e "${AZUL}⏱️  Tiempo de booteo:${RESET} $BOOT_TIME"
+}
+
+# ==========================================
+# 🛡️ AUDITORÍA RÁPIDA DE SEGURIDAD
+# ==========================================
+obtener_info_seguridad() {
+    # 1. Estado del Firewall (UFW)
+    if command -v ufw &>/dev/null; then
+        UFW_STATUS=$(ufw status | head -n 1 | awk '{print $2}')
+        [ "$UFW_STATUS" = "active" ] && UFW_PRINT="${VERDE}Activo${RESET}" || UFW_PRINT="${ROJO}Inactivo${RESET}"
+    else
+        UFW_PRINT="${AMARILLO}No instalado${RESET}"
+    fi
+
+    # 2. Conexiones SSH activas en este momento
+    SSH_SESSIONS=$(who | grep -c "pts/")
+
+    # 3. Sesiones con privilegios SUDO activas
+    SUDO_USERS=$(ps aux | grep -v grep | grep -c "sudo")
+
+    # 4. Intentos fallidos de SSH / Login (Si existe faillog o journalctl)
+    INTENTOS_FALLIDOS=0
+    if command -v journalctl &>/dev/null; then
+        INTENTOS_FALLIDOS=$(journalctl -u ssh -u sshd --since "24 hours ago" 2>/dev/null | grep -c "Failed password")
+    fi
+
+    echo -e "${AZUL}🛡️ Firewall (UFW):${RESET} $UFW_PRINT"
+    echo -e "${AZUL}👥 Sesiones SSH activas:${RESET} $SSH_SESSIONS"
+    echo -e "${AZUL}🔑 Procesos Sudo activos:${RESET} $SUDO_USERS"
+    echo -e "${AZUL}⚠️ Fallos SSH (24h):${RESET} ${AMARILLO}${INTENTOS_FALLIDOS}${RESET}"
 }
 
 case "$1" in
