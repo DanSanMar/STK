@@ -298,7 +298,7 @@ get_package_name() {
             case "$Package" in
                 pacman) echo "js128" ;;
                 apt)    echo "nodejs" ;;
-                dnf)    echo "mozjs115" ;;
+                dnf)    echo "nodejs" ;; # Cambiado de mozjs115 a nodejs, pero mantenemos la lógica por si cambia 
                 *)      echo "nodejs" ;;
             esac
             ;;
@@ -410,9 +410,23 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
             exit 1
         fi
 
+        # Crear enlace de compatibilidad dinámico para 'js' si no existe
         if ! command -v js &>/dev/null; then
-            echo -e "${AMARILLO}⚠️ Advertencia: El intérprete 'js' no se encontró o requiere un alias en el PATH.${RESET}"
-            registrar_log "$LOG_WARN" "Dependencia 'js' no localizada tras la instalación."
+            js_candidates=(js128 js115 qjs gjs node nodejs)
+            for target in "${js_candidates[@]}"; do
+                if command -v "$target" &>/dev/null; then
+                    target_path=$(command -v "$target")
+                    echo -e "${AMARILLO}🔗 Creando enlace de compatibilidad para 'js' -> $target_path${RESET}"
+                    
+                    # Crear symlink en /usr/local/bin y /usr/bin por compatibilidad global de PATH
+                    ln -sf "$target_path" /usr/local/bin/js
+                    ln -sf "$target_path" /usr/bin/js 2>/dev/null
+                    
+                    # Actualizar la tabla de comandos de la sesión activa de bash
+                    hash -r 2>/dev/null
+                    break
+                fi
+            done
         fi
 
         if [ ${#missing_tools[@]} -gt 0 ]; then
