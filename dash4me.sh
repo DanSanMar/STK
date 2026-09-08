@@ -97,9 +97,27 @@ obtener_info_red() {
     fi
 
     # Comprobación rápida de conectividad hacia Internet (Timeout de 1s)
-    local status_ping="${ROJO_BRILLANTE}Desconectado${RESET}"
-    if ping -c 1 -W 1 1.1.1.1 &>/dev/null; then
-        status_ping="${VERDE_BRILLANTE}OK a (1.1.1.1)${RESET}"
+   local status_ping="${ROJO_BRILLANTE}Desconectado${RESET}"
+
+    # 1. Lista de direcciones IP fiables y públicas
+    local ips_ip_check=("1.1.1.1" "8.8.8.8" "9.9.9.9")
+    local ip_exitosa=""
+
+    # Probar la lista de IPs con ping
+    for ip in "${ips_ip_check[@]}"; do
+        if ping -c 1 -W 1 "$ip" &>/dev/null; then
+            ip_exitosa="$ip"
+            break
+        fi
+    done
+
+    if [[ -n "$ip_exitosa" ]]; then
+        status_ping="${VERDE_BRILLANTE}OK a ($ip_exitosa)${RESET}"
+    else
+        # 2. Fallback: Si ICMP (ping) está bloqueado, probar resolución/conexión por puerto 80/443 (HTTP/TCP)
+        if nc -zw1 1.1.1.1 53 &>/dev/null || curl -sI --connect-timeout 2 http://www.google.com &>/dev/null; then
+            status_ping="${VERDE_BRILLANTE}OK (TCP/HTTP)${RESET}"
+        fi
     fi
 
     echo -e "\e[K${AZUL_BRILLANTE}─── 🌐 TELEMETRÍA Y RED ───${RESET}"
