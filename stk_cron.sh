@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 5"
+ver="v 5.1 test programación manual"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -795,9 +795,47 @@ programar_nueva_tarea() {
             descripcion_freq="Semanal día $dia a las ${hora}:00"
             ;;
         5)
-            echo -e "${CIAN}Formato: Minuto Hora Día Mes DíaSemana (Ej: 0 12 * * *)${RESET}"
-            echo -ne "${AMARILLO}Ingrese expresión Cron: ${RESET}"
+            clear
+            mostrar_logo
+            echo ""
+            pintar "$CIAN" "════════════════════════════════════════════════════════════"
+            pintar "$VERDE_BRILLANTE" "📖 GUÍA EXTENDIDA DE SINTAXIS CRON"
+            pintar "$CIAN" "════════════════════════════════════════════════════════════"
+            echo ""
+            echo -e "${AMARILLO}1. FORMATO ESTÁNDAR (5 Campos):${RESET}"
+            echo -e "   ┌───────────── minuto (0 - 59)"
+            echo -e "   │ ┌─────────── hora (0 - 23)"
+            echo -e "   │ │ ┌───────── día del mes (1 - 31)"
+            echo -e "   │ │ │ ┌────── mes (1 - 12)"
+            echo -e "   │ │ │ │ ┌──── día de la semana (0 - 6) (0=Domingo)"
+            echo -e "   │ │ │ │ │"
+            echo -e "   * * * * *"
+            echo ""
+            echo -e "${AMARILLO}2. EJEMPLOS FRECUENTES DE HORA Y DÍA:${RESET}"
+            echo -e "   ${VERDE}• 0 3 * * *${RESET}          → Todos los días a las 03:00 AM"
+            echo -e "   ${VERDE}• 30 22 * * *${RESET}         → Todos los días a las 10:30 PM"
+            echo -e "   ${VERDE}• 0 12 * * 1${RESET}         → Todos los lunes a las 12:00 PM"
+            echo -e "   ${VERDE}• 0 0 1 * *${RESET}          → El día 1 de cada mes a medianoche"
+            echo ""
+            echo -e "${AMARILLO}3. EJEMPLOS DE INTERVALOS REPETITIVOS:${RESET}"
+            echo -e "   ${VERDE}• 0 */4 * * *${RESET}        → Cada 4 horas exactamente"
+            echo -e "   ${VERDE}• */30 * * * *${RESET}       → Cada 30 minutos"
+            echo -e "   ${VERDE}• 0 9-18 * * 1-5${RESET}     → Cada hora laborable (9 AM a 6 PM, Lun-Vie)"
+            echo ""
+            echo -e "${AMARILLO}4. MACROS DE ARRANQUE / REBOOT:${RESET}"
+            echo -e "   ${VERDE}• @reboot sleep 120${RESET}   → 2 minutos después del encendido"
+            echo -e "   ${VERDE}• @reboot sleep 300${RESET}   → 5 minutos después del encendido"
+            echo -e "   ${VERDE}• @reboot sleep 600${RESET}   → 10 minutos después del encendido"
+            echo ""
+            pintar "$CIAN" "════════════════════════════════════════════════════════════"
+            echo -e "${ROJO_BRILLANTE}Nota:${RESET} No es necesario incluir '&&' al final; el ejecutable lo procesa solo."
+            echo ""
+            echo -ne "${AMARILLO}Ingrese expresión Cron deseada: ${RESET}"
             read -r custom_schedule
+
+            # Sanitización automática: remueve '&&' accidental y espacios de más
+            custom_schedule=$(echo "$custom_schedule" | sed 's/&&//g' | xargs)
+
             if [ -z "$custom_schedule" ]; then
                 pintar "$ROJO" "❌ Formato vacío. Operación cancelada."
                 sleep 2
@@ -876,25 +914,28 @@ activar_tarea_cron() {
         crear_wrapper_cron
     fi
 
-    # 1. Guardar y acumular en el JSON
+    # 1. Guardar en el JSON
     guardar_configuracion_cron "$cron_line" "$descripcion" "${TAREAS_SELECCIONADAS[@]}"
 
-    # 2. Limpiar crontab de entradas STK previas para regenerar la lista completa
+    # 2. Limpiar entradas previas de STK
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
 
-    # 3. Extraer schedules ÚNICOS para no duplicar ejecuciones simultáneas
-    local lineas_cron=""
-    while IFS= read -r sched; do
-        [ -z "$sched" ] && continue
-        # Se invoca el wrapper SIN pasar el ID de la tarea para que ejecute TODAS en orden
-        lineas_cron+="${sched} ${STK_AUTO_WRAPPER} ${CRON_STK_ID}\n"
-    done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sort -u)
+    # 3. CONSOLIDACIÓN SÓLIDA: Elegir el tiempo de retardo más alto o usar uno general fijo (ej. 300s)
+    # Extrae el primer schedule sin caracteres '&&' sobrantes
+    local schedule_limpio
+    schedule_limpio=$(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | head -n 1 | sed 's/&&//g' | xargs)
 
-    (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
+    # Si está vacío, aplica un valor seguro por defecto
+    [ -z "$schedule_limpio" ] && schedule_limpio="@reboot sleep 300"
+
+    # Generar ÚNICAMENTE 1 línea en el crontab
+    local linea_unica="${schedule_limpio} ${STK_AUTO_WRAPPER} ${CRON_STK_ID}\n"
+
+    (crontab -l 2>/dev/null; echo -e -n "$linea_unica") | crontab -
 
     if [ $? -eq 0 ]; then
-        log_cron "INFO" "Tareas CRON sincronizadas correctamente en crontab"
-        mostrar_resumen_final "$cron_line" "$descripcion"
+        log_cron "INFO" "Tareas CRON sincronizadas correctamente en crontab (Regla Consolidada)"
+        mostrar_resumen_final "$schedule_limpio" "$descripcion"
     else
         pintar "$ROJO" "❌ Error al activar las tareas en CRON."
         read -p "Presione Enter..."
