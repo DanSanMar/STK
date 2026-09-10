@@ -16,7 +16,7 @@ SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 STK2_SCRIPT="$SCRIPT_DIR/stk2.sh"
 
 # Si no está en su carpeta, buscar stk2.sh en todo el sistema del usuario
-if [ ! -f "$STK2_SCRIPT" ]; tahen
+if [ ! -f "$STK2_SCRIPT" ]; then
     STK2_SCRIPT=$(find /home /root -maxdepth 4 -name "stk2.sh" 2>/dev/null | head -n 1)
     if [ -n "$STK2_SCRIPT" ]; then
         SCRIPT_DIR="$(dirname "$STK2_SCRIPT")"
@@ -494,13 +494,14 @@ ejecutar_auto_ufw() {
 }
 
 
-TAREA_ARG="$1"
-if [ -n "$TAREA_ARG" ]; then
-    TAREAS="$TAREA_ARG"
-elif command -v jq &>/dev/null; then
-    TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
+PARAM_SCHED="$1"
+
+
+if [ -n "$PARAM_SCHED" ] && command -v jq &>/dev/null; then
+    TAREAS=$(jq -r --arg sched "$PARAM_SCHED" '.tareas[] | select((.schedule | gsub("&"; "") | trim) == $sched) | .id' "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 else
-    TAREAS=$(grep -o "\"id\":\"[^\"]*\"" "$CRON_CONFIG_FILE" 2>/dev/null | cut -d'"' -f4 | tr "\n" " ")
+    
+    TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 fi
 
 T_INICIO=$(date +%s)
@@ -914,25 +915,23 @@ activar_tarea_cron() {
         crear_wrapper_cron
     fi
 
-    # 1. Guardar y acumular la tarea en el JSON
+    # 1. Guardar y acumular en el JSON
     guardar_configuracion_cron "$cron_line" "$descripcion" "${TAREAS_SELECCIONADAS[@]}"
 
-    # 2. Limpiar crontab de entradas STK previas para regenerar la lista limpia
+    # 2. Limpiar entradas previas de STK
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
 
-    # 3. Extraer schedules ÚNICOS desde el JSON
+    # 3. Generar 1 línea por cada SCHEDULE ÚNICO pasando el schedule como parámetro
     local lineas_cron=""
     while IFS= read -r sched; do
         [ -z "$sched" ] && continue
-        # Limpiar posibles && accidentales
         local sched_limpio
         sched_limpio=$(echo "$sched" | sed 's/&&//g' | xargs)
         
-        # IMPORTANTE: Se añade ' #' para que Cron lo interprete como comentario de shell al invocar bash
-        lineas_cron+="${sched_limpio} ${STK_AUTO_WRAPPER} >/dev/null 2>&1 ${CRON_STK_ID}\n"
-    done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sort -u)
+        # Invocamos el wrapper pasándole el schedule entre comillas: "$sched_limpio"
+        lineas_cron+="${sched_limpio} ${STK_AUTO_WRAPPER} \"${sched_limpio}\" >/dev/null 2>&1 ${CRON_STK_ID}\n"
+    done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sed 's/&&//g' | sort -u)
 
-    # 4. Inyectar en crontab
     (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
 
     if [ $? -eq 0 ]; then
