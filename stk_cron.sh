@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 5.1 test programación manual"
+ver="v 5.2 test programación manual"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -16,7 +16,7 @@ SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 STK2_SCRIPT="$SCRIPT_DIR/stk2.sh"
 
 # Si no está en su carpeta, buscar stk2.sh en todo el sistema del usuario
-if [ ! -f "$STK2_SCRIPT" ]; then
+if [ ! -f "$STK2_SCRIPT" ]; tahen
     STK2_SCRIPT=$(find /home /root -maxdepth 4 -name "stk2.sh" 2>/dev/null | head -n 1)
     if [ -n "$STK2_SCRIPT" ]; then
         SCRIPT_DIR="$(dirname "$STK2_SCRIPT")"
@@ -914,28 +914,30 @@ activar_tarea_cron() {
         crear_wrapper_cron
     fi
 
-    # 1. Guardar en el JSON
+    # 1. Guardar y acumular la tarea en el JSON
     guardar_configuracion_cron "$cron_line" "$descripcion" "${TAREAS_SELECCIONADAS[@]}"
 
-    # 2. Limpiar entradas previas de STK
+    # 2. Limpiar crontab de entradas STK previas para regenerar la lista limpia
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
 
-    # 3. CONSOLIDACIÓN SÓLIDA: Elegir el tiempo de retardo más alto o usar uno general fijo (ej. 300s)
-    # Extrae el primer schedule sin caracteres '&&' sobrantes
-    local schedule_limpio
-    schedule_limpio=$(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | head -n 1 | sed 's/&&//g' | xargs)
+    # 3. Extraer schedules ÚNICOS desde el JSON
+    local lineas_cron=""
+    while IFS= read -r sched; do
+        [ -z "$sched" ] && continue
+        # Limpiar posibles && accidentales
+        local sched_limpio
+        sched_limpio=$(echo "$sched" | sed 's/&&//g' | xargs)
+        
+        # IMPORTANTE: Se añade ' #' para que Cron lo interprete como comentario de shell al invocar bash
+        lineas_cron+="${sched_limpio} ${STK_AUTO_WRAPPER} >/dev/null 2>&1 ${CRON_STK_ID}\n"
+    done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sort -u)
 
-    # Si está vacío, aplica un valor seguro por defecto
-    [ -z "$schedule_limpio" ] && schedule_limpio="@reboot sleep 300"
-
-    # Generar ÚNICAMENTE 1 línea en el crontab
-    local linea_unica="${schedule_limpio} ${STK_AUTO_WRAPPER} ${CRON_STK_ID}\n"
-
-    (crontab -l 2>/dev/null; echo -e -n "$linea_unica") | crontab -
+    # 4. Inyectar en crontab
+    (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
 
     if [ $? -eq 0 ]; then
-        log_cron "INFO" "Tareas CRON sincronizadas correctamente en crontab (Regla Consolidada)"
-        mostrar_resumen_final "$schedule_limpio" "$descripcion"
+        log_cron "INFO" "Tareas CRON sincronizadas correctamente en crontab"
+        mostrar_resumen_final "$cron_line" "$descripcion"
     else
         pintar "$ROJO" "❌ Error al activar las tareas en CRON."
         read -p "Presione Enter..."
