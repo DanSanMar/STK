@@ -23,7 +23,7 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
-VER="V 1.5 test"
+VER="V 1.6"
 
 
 dibujar_barra() {
@@ -142,10 +142,59 @@ monitor_rendimiento() {
     
     while true; do
 
+        HORA_ACTUAL=$(date +"%H:%M:%S")
+        SEGUNDOS=$(date +"%S")
+
+        # Color Logo (basado en el último dígito)
+        ULTIMO_DIGITO="${SEGUNDOS: -1}"
+        case "$ULTIMO_DIGITO" in
+            1) COLOR_LOGO="$AZUL_BRILLANTE" ;;
+            2) COLOR_LOGO="$VERDE_BRILLANTE" ;;
+            3) COLOR_LOGO="$AMARILLO_BRILLANTE" ;;
+            4) COLOR_LOGO="$CIAN_BRILLANTE" ;;
+            5) COLOR_LOGO="$ROJO_BRILLANTE" ;;
+            6) COLOR_LOGO="$AZUL_CLARO" ;;
+            7) COLOR_LOGO="$VERDE" ;;
+            8) COLOR_LOGO="$AMARILLO" ;;
+            9) COLOR_LOGO="$CIAN" ;;
+            0) COLOR_LOGO="$ROJO" ;;
+            *) COLOR_LOGO="$BLANCO_NEGRITA" ;;
+        esac
+
+        # Color Versión (desfasado 5 segundos para ser asíncrono)
+        DIGITO_VER=$(( (10#$SEGUNDOS + 5) % 10 ))
+        case "$DIGITO_VER" in
+            1) COLOR_VER="$ROJO_BRILLANTE" ;;
+            2) COLOR_VER="$CIAN" ;;
+            3) COLOR_VER="$VERDE" ;;
+            4) COLOR_VER="$AMARILLO" ;;
+            5) COLOR_VER="$AZUL_BRILLANTE" ;;
+            6) COLOR_VER="$VERDE_BRILLANTE" ;;
+            7) COLOR_VER="$AMARILLO_BRILLANTE" ;;
+            8) COLOR_VER="$CIAN_BRILLANTE" ;;
+            9) COLOR_VER="$AZUL_CLARO" ;;
+            0) COLOR_VER="$BLANCO_NEGRITA" ;;
+            *) COLOR_VER="$CIAN" ;;
+        esac
+        DIGITO_DASH=$(( (10#$SEGUNDOS + 2) % 10 ))
+        case "$DIGITO_DASH" in
+            1) COLOR_DASH="$VERDE_BRILLANTE" ;;
+            2) COLOR_DASH="$AMARILLO_BRILLANTE" ;;
+            3) COLOR_DASH="$CIAN_BRILLANTE" ;;
+            4) COLOR_DASH="$ROJO_BRILLANTE" ;;
+            5) COLOR_DASH="$AZUL_CLARO" ;;
+            6) COLOR_DASH="$VERDE" ;;
+            7) COLOR_DASH="$AMARILLO" ;;
+            8) COLOR_DASH="$CIAN" ;;
+            9) COLOR_DASH="$ROJO" ;;
+            0) COLOR_DASH="$BLANCO_NEGRITA" ;;
+            *) COLOR_DASH="$GRIS_CLARO" ;;
+        esac
+
         OUTPUT=$(
             echo -ne "\e[H"
-        echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ ${BLANCO_NEGRITA}DASH${CIAN}4${VERDE_BRILLANTE}ME ${AZUL_OSCURO}|${GRIS_CLARO} LITE DASHBOARD ${AZUL_OSCURO}| ${CIAN}"${VER}" ${AMARILLO_BRILLANTE}::$(date +%S)s:: ${AZUL_BRILLANTE}⚡-----\e[0m"  
-        echo -e "\e[K ${CIAN}Auto-refresco: 3s | ENTER=Actualizar | Ctrl+C=Salir${RESET}"
+            echo -e "\e[K ${AZUL_BRILLANTE}--- ⚡ ${COLOR_LOGO}DASH4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}LITE DASHBOARD${RESET} ${AZUL_OSCURO}| ${COLOR_VER}${VER}${RESET} ${BLANCO}:${HORA_ACTUAL}: ${AZUL_BRILLANTE}⚡---\e[0m"
+            echo -e "\e[K ${AZUL_BRILLANTE} - ${RESET}AUTO-REFRESCO: ${CIAN}3s${RESET} | ENTER=${CIAN}Actualizar ${RESET}| CTRL+C=${CIAN}Salir${RESET}${AZUL_BRILLANTE} - "
 
             CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
             CPU_CORES=$(nproc)
@@ -228,7 +277,7 @@ monitor_rendimiento() {
         )
         
         echo -e "$OUTPUT"
-        read -t 4.9 -n 1 -s key
+        read -t 1.9 -n 1 -s key
     done
 }
 
