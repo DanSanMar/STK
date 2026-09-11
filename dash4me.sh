@@ -15,6 +15,8 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
+VER="V 1.4 test"
+
 dibujar_barra() {
     local porcentaje=$1
     local color=$VERDE_BRILLANTE
@@ -81,43 +83,35 @@ obtener_resumen_inicio() {
 # 🌐 TELEMETRÍA Y RED (NUEVA FUNCIÓN)
 # ==========================================
 obtener_info_red() {
-    # Interfaz principal por defecto
-    local iface=$(ip route 2>/dev/null | grep default | awk '{print $5}' | head -n1)
-    local ip_local="Sin IP"
-    local rx_gb=0; local tx_gb=0
+    # Obtener interfaz por defecto y su IP local en un solo comando sin grep -P
+    read -r iface ip_local <<< "$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5, $7; exit}')"
+    
+    local rx_gb="0.00"
+    local tx_gb="0.00"
 
-    if [ -n "$iface" ]; then
-        ip_local=$(ip -4 addr show "$iface" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    if [ -n "$iface" ] && [ "$iface" != "lo" ]; then
         local rx_bytes=$(cat /sys/class/net/"$iface"/statistics/rx_bytes 2>/dev/null || echo 0)
         local tx_bytes=$(cat /sys/class/net/"$iface"/statistics/tx_bytes 2>/dev/null || echo 0)
-        rx_gb=$(awk "BEGIN {printf \"%.2f\", $rx_bytes/1073741824}")
-        tx_gb=$(awk "BEGIN {printf \"%.2f\", $tx_bytes/1073741824}")
+        
+        # Un solo proceso awk para procesar ambos valores a GB (Base 1024)
+        read -r rx_gb tx_gb <<< "$(awk -v rx="$rx_bytes" -v tx="$tx_bytes" 'BEGIN {printf "%.2f %.2f", rx/1073741824, tx/1073741824}')"
     else
         iface="N/A"
+        ip_local="Sin IP"
     fi
 
-    # Comprobación rápida de conectividad hacia Internet (Timeout de 1s)
-   local status_ping="${ROJO_BRILLANTE}Desconectado${RESET}"
-
-    # 1. Lista de direcciones IP fiables y públicas
-    local ips_ip_check=("1.1.1.1" "8.8.8.8" "9.9.9.9")
-    local ip_exitosa=""
-
-    # Probar la lista de IPs con ping
-    for ip in "${ips_ip_check[@]}"; do
-        if ping -c 1 -W 1 "$ip" &>/dev/null; then
-            ip_exitosa="$ip"
-            break
-        fi
-    done
-
-    if [[ -n "$ip_exitosa" ]]; then
-        status_ping="${VERDE_BRILLANTE}OK a ($ip_exitosa)${RESET}"
-    else
-        # 2. Fallback: Si ICMP (ping) está bloqueado, probar resolución/conexión por puerto 80/443 (HTTP/TCP)
-        if nc -zw1 1.1.1.1 53 &>/dev/null || curl -sI --connect-timeout 2 http://www.google.com &>/dev/null; then
-            status_ping="${VERDE_BRILLANTE}OK (TCP/HTTP)${RESET}"
-        fi
+    # Comprobación de conectividad optimizada en paralelo
+    local status_ping="${ROJO_BRILLANTE}Desconectado${RESET}"
+    
+    # 1. Chequeo rápido por TCP directo a Cloudflare (puerto 53) en 1 segundo máximo
+    if nc -zw1 1.1.1.1 53 &>/dev/null; then
+        status_ping="${VERDE_BRILLANTE}OK (1.1.1.1:53)${RESET}"
+    # 2. Fallback ICMP ping a Google DNS (solo 1 paquete, timeout estricto)
+    elif ping -c 1 -w 1 8.8.8.8 &>/dev/null; then
+        status_ping="${VERDE_BRILLANTE}OK (8.8.8.8)${RESET}"
+    # 3. Última opción HTTP
+    elif curl -sI --connect-timeout 1 http://www.google.com &>/dev/null; then
+        status_ping="${VERDE_BRILLANTE}OK (HTTP)${RESET}"
     fi
 
     echo -e "\e[K${AZUL_BRILLANTE}─── 🌐 TELEMETRÍA Y RED ───${RESET}"
@@ -137,7 +131,7 @@ monitor_rendimiento() {
     while true; do
         OUTPUT=$(
             echo -ne "\e[H"
-            echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ \e[1;97mDASH\e[36m4\e[92mME \e[0;34m|\e[0;90m LITE DASHBOARD |${CIAN} V 1.3 test${AZUL_BRILLANTE}  ⚡-----\e[0m"
+            echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ \e[1;97mDASH\e[36m4\e[92mME \e[0;34m|\e[0;90m LITE DASHBOARD |${CIAN} $VER${AZUL_BRILLANTE}  ⚡-----\e[0m"
             echo -e "\e[K ${CIAN}Auto-refresco: 3s | ENTER=Actualizar | Ctrl+C=Salir${RESET}"
 
             CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
@@ -229,50 +223,68 @@ monitor_rendimiento() {
 obtener_info_arranque() {
     local boot_time="N/A"
     local boot_sec=0
+    
     if command -v systemd-analyze &>/dev/null; then
-        boot_time=$(systemd-analyze 2>/dev/null | head -n 1 | awk -F'=' '{print $2}' | xargs)
-        # Extrae de forma limpia solo los segundos/milisegundos totales
-        boot_sec=$(echo "$boot_time" | grep -oP '\d+(\.\d+)?(?=s)' | tail -n1)
+        # Extrae la cadena global del systemd-analyze
+        boot_time=$(systemd-analyze 2>/dev/null | awk -F'=' '/Startup finished in/ {print $2}' | xargs)
+        
+        # Convierte formatos con minutos/segundos a segundos flotantes mediante awk
+        if [ -n "$boot_time" ]; then
+            boot_sec=$(echo "$boot_time" | awk '{
+                sec=0;
+                for(i=1; i<=NF; i++) {
+                    if ($i ~ /min/) { sub(/min/, "", $i); sec += $i * 60 }
+                    else if ($i ~ /s/) { sub(/s/, "", $i); sec += $i }
+                }
+                print sec
+            }')
+        fi
     fi
 
     local last_boot=$(uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{print $3,$4}')
     local media_str="N/A"
     local comparativa=""
     
-    # Recopilar tiempo de arranque de los últimos registros disponibles en el Journal
-    if command -v journalctl &>/dev/null && [ -n "$boot_sec" ]; then
-        local suma=0
-        local count=0
-        
-        for i in {0..4}; do
-            # Busca la línea nativa "Startup finished in..." que systemd escribe en cada boot
-            local t=$(journalctl -b -$i -u systemd-logind.service 2>/dev/null | grep -oP 'Startup finished in .+= \K[0-9.]+(?=s)' | head -n 1)
-            
-            # Fallback genérico por si no encuentra el servicio específico
-            if [ -z "$t" ]; then
-                t=$(journalctl -b -$i 2>/dev/null | grep -oP 'Startup finished in .+= \K[0-9.]+(?=s)' | head -n 1)
-            fi
+    # Recopilar métricas del journalctl en una Sola llamada para evitar la lentitud
+    if command -v journalctl &>/dev/null && [ -n "$boot_sec" ] && [ "$(echo "$boot_sec > 0" | awk '{print ($1)?1:0}')" -eq 1 ]; then
+        local tiempos
+        tiempos=$(journalctl -q -n 500 2>/dev/null | awk '/Startup finished in/ {
+            for(i=1; i<=NF; i++) {
+                if ($i == "=") {
+                    val=$(i+1);
+                    sub(/s/, "", val);
+                    print val;
+                    break;
+                }
+            }
+        }' | tail -n 5)
 
-            if [ -n "$t" ]; then
-                suma=$(awk "BEGIN {print $suma + $t}")
-                count=$((count + 1))
-            fi
-        done
-        
-        if [ "$count" -gt 0 ]; then
-            local media=$(awk "BEGIN {printf \"%.2f\", $suma / $count}")
-            media_str="${media}s (últimos $count)"
-            
-            local diff=$(awk "BEGIN {printf \"%.2f\", $boot_sec - $media}")
-            local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
-            local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
+        if [ -n "$tiempos" ]; then
+            eval $(echo "$tiempos" | awk -v actual="$boot_sec" '
+                BEGIN { suma=0; count=0 }
+                { suma += $1; count++ }
+                END {
+                    if (count > 0) {
+                        media = suma / count;
+                        diff = actual - media;
+                        printf "local media=%.2f; local diff=%.2f; local count=%d;", media, diff, count;
+                    }
+                }
+            ')
 
-            if [ "$es_mayor" -eq 1 ]; then
-                comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
-            elif [ "$es_menor" -eq 1 ]; then
-                comparativa=" ${VERDE_BRILLANTE}(${diff}s más rápido)${RESET}"
-            else
-                comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
+            if [ -n "$count" ] && [ "$count" -gt 0 ]; then
+                media_str="${media}s (últimos $count)"
+                
+                local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
+                local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
+
+                if [ "$es_mayor" -eq 1 ]; then
+                    comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
+                elif [ "$es_menor" -eq 1 ]; then
+                    comparativa=" ${VERDE_BRILLANTE}(${diff}s más rápido)${RESET}"
+                else
+                    comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
+                fi
             fi
         fi
     fi
