@@ -228,7 +228,17 @@ obtener_info_arranque() {
     local boot_sec=0
     local last_boot=$(uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{print $3,$4}')
 
-    # 1. Obtener tiempos del arranque actual
+    # 1. Ruta global en /var/log (Accesible en todo el sistema)
+    local data_dir="/var/log/dash4me"
+    local log_file="$data_dir/boot_history.log"
+
+    # Crear directorio global con permisos de lectura para todos
+    if [ ! -d "$data_dir" ]; then
+        mkdir -p "$data_dir" 2>/dev/null
+        chmod 755 "$data_dir" 2>/dev/null
+    fi
+
+    # 2. Obtener tiempos del arranque actual
     if command -v systemd-analyze &>/dev/null; then
         local sa_output
         sa_output=$(systemd-analyze 2>/dev/null | head -n 1)
@@ -238,13 +248,13 @@ obtener_info_arranque() {
             user_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(userspace\))' || echo "N/A")
             boot_time=$(echo "$sa_output" | grep -oP '=\s*\K[\d\.\smin s]+$' | xargs || echo "N/A")
 
-            # Convertir el tiempo total actual a segundos
-            boot_sec=$(echo "$sa_output" | awk -F'=' '{print $NF}' | awk '{
+            # Extraer segundos totales
+            boot_sec=$(echo "$boot_time" | awk '{
                 sec=0;
                 for(i=1; i<=NF; i++) {
-                    if ($i ~ /min/) { sub(/min/, "", $i); sec += $i * 60 }
-                    else if ($i ~ /ms/) { sub(/ms/, "", $i); sec += $i / 1000 }
-                    else if ($i ~ /s/) { sub(/s/, "", $i); sec += $i }
+                    if ($i ~ /min/) { gsub(/[^0-9.]/, "", $i); sec += $i * 60 }
+                    else if ($i ~ /ms/) { gsub(/[^0-9.]/, "", $i); sec += $i / 1000 }
+                    else if ($i ~ /s/) { gsub(/[^0-9.]/, "", $i); sec += $i }
                 }
                 print sec
             }')
@@ -253,48 +263,45 @@ obtener_info_arranque() {
         slowest_service=$(systemd-analyze blame 2>/dev/null | head -n 1 | awk '{print $1 " (" $2 ")"}')
     fi
 
-    # 2. Gestionar archivo de historial propio
-    local data_dir="$HOME/.local/share/dash4me"
-    local log_file="$data_dir/boot_history.log"
+    # 3. Registrar el arranque en el log global
+    if [ -n "$boot_sec" ] && [ "$(awk -v n="$boot_sec" 'BEGIN {print (n>0)?1:0}')" -eq 1 ]; then
+        local boot_id_stamp=$(date -d "$last_boot" "+%Y-%m-%dT%H:%M:%S" 2>/dev/null || echo "$last_boot")
+        
+        if [ ! -f "$log_file" ] || ! grep -q "^$boot_id_stamp" "$log_file" 2>/dev/null; then
+            echo "$boot_id_stamp,$boot_sec" >> "$log_file" 2>/dev/null
+            chmod 644 "$log_file" 2>/dev/null
+        fi
+    fi
+
+    # 4. Cálculo de la media histórica
     local media_str="N/A"
     local comparativa=""
 
-    if [ -n "$boot_sec" ] && awk "BEGIN {exit !($boot_sec > 0)}"; then
-        mkdir -p "$data_dir"
-
-        # Registrar el arranque actual si no existe ya para esta fecha/hora de inicio
-        local boot_id_stamp=$(date -d "$last_boot" "+%Y-%m-%dT%H:%M:%S" 2>/dev/null || echo "$last_boot")
-        if ! grep -q "^$boot_id_stamp" "$log_file" 2>/dev/null; then
-            echo "$boot_id_stamp,$boot_sec" >> "$log_file"
-        fi
-
-        # 3. Calcular la media histórica leyendo el archivo propio
-        if [ -f "$log_file" ]; then
-            eval $(awk -F',' -v actual="$boot_sec" '
-                BEGIN { suma=0; count=0 }
-                $2 ~ /^[0-9]+(\.[0-9]+)?$/ { suma += $2; count++ }
-                END {
-                    if (count > 0) {
-                        media = suma / count;
-                        diff = actual - media;
-                        printf "local media=%.2f; local diff=%.2f; local count=%d;", media, diff, count;
-                    }
+    if [ -f "$log_file" ]; then
+        eval $(awk -F',' -v actual="$boot_sec" '
+            BEGIN { suma=0; count=0 }
+            $2 ~ /^[0-9]+(\.[0-9]+)?$/ { suma += $2; count++ }
+            END {
+                if (count > 0) {
+                    media = suma / count;
+                    diff = actual - media;
+                    printf "local media=%.2f; local diff=%.2f; local count=%d;", media, diff, count;
                 }
-            ' "$log_file")
+            }
+        ' "$log_file")
 
-            if [ -n "$count" ] && [ "$count" -gt 0 ]; then
-                media_str="${media}s ($count registros)"
-                
-                local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
-                local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
+        if [ -n "$count" ] && [ "$count" -gt 0 ]; then
+            media_str="${media}s ($count registros)"
+            
+            local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
+            local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
 
-                if [ "$es_mayor" -eq 1 ]; then
-                    comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
-                elif [ "$es_menor" -eq 1 ]; then
-                    comparativa=" ${VERDE_BRILLANTE}(${diff#-}s más rápido)${RESET}"
-                else
-                    comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
-                fi
+            if [ "$es_mayor" -eq 1 ]; then
+                comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
+            elif [ "$es_menor" -eq 1 ]; then
+                comparativa=" ${VERDE_BRILLANTE}(${diff#-}s más rápido)${RESET}"
+            else
+                comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
             fi
         fi
     fi
