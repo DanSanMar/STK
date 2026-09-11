@@ -15,7 +15,7 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
-VER="V 1.4 test"
+VER="V 1.5 test"
 
 dibujar_barra() {
     local porcentaje=$1
@@ -222,42 +222,58 @@ monitor_rendimiento() {
 
 obtener_info_arranque() {
     local boot_time="N/A"
+    local kernel_time="N/A"
+    local user_time="N/A"
+    local slowest_service="N/A"
     local boot_sec=0
-    
+    local last_boot=$(uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{print $3,$4}')
+
     if command -v systemd-analyze &>/dev/null; then
-        # Extrae la cadena global del systemd-analyze
-        boot_time=$(systemd-analyze 2>/dev/null | awk -F'=' '/Startup finished in/ {print $2}' | xargs)
-        
-        # Convierte formatos con minutos/segundos a segundos flotantes mediante awk
-        if [ -n "$boot_time" ]; then
-            boot_sec=$(echo "$boot_time" | awk '{
+        # 1. Obtener desglose de tiempos Kernel/Userspace y Total
+        local sa_output
+        sa_output=$(systemd-analyze 2>/dev/null | head -n 1)
+
+        if [ -n "$sa_output" ]; then
+            # Extraer tiempos en formato legibles si existen
+            kernel_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(kernel\))' || echo "N/A")
+            user_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(userspace\))' || echo "N/A")
+            boot_time=$(echo "$sa_output" | grep -oP '=\s*\K[\d\.\smin s]+$' | xargs || echo "N/A")
+
+            # Convertir el tiempo total a segundos flotantes de forma precisa
+            boot_sec=$(echo "$sa_output" | awk -F'=' '{print $NF}' | awk '{
                 sec=0;
                 for(i=1; i<=NF; i++) {
                     if ($i ~ /min/) { sub(/min/, "", $i); sec += $i * 60 }
+                    else if ($i ~ /ms/) { sub(/ms/, "", $i); sec += $i / 1000 }
                     else if ($i ~ /s/) { sub(/s/, "", $i); sec += $i }
                 }
                 print sec
             }')
         fi
+
+        # 2. Obtener el servicio que más tarda en iniciar
+        slowest_service=$(systemd-analyze blame 2>/dev/null | head -n 1 | awk '{print $1 " (" $2 ")"}')
     fi
 
-    local last_boot=$(uptime -s 2>/dev/null || who -b 2>/dev/null | awk '{print $3,$4}')
     local media_str="N/A"
     local comparativa=""
-    
-    # Recopilar métricas del journalctl en una Sola llamada para evitar la lentitud
-    if command -v journalctl &>/dev/null && [ -n "$boot_sec" ] && [ "$(echo "$boot_sec > 0" | awk '{print ($1)?1:0}')" -eq 1 ]; then
-        local tiempos
-        tiempos=$(journalctl -q -n 500 2>/dev/null | awk '/Startup finished in/ {
-            for(i=1; i<=NF; i++) {
-                if ($i == "=") {
-                    val=$(i+1);
-                    sub(/s/, "", val);
-                    print val;
-                    break;
+
+    # 3. Calcular la media buscando por botas anteriores (-b -1, -b -2, etc.) en lugar de texto plano
+    if command -v journalctl &>/dev/null && [ -n "$boot_sec" ] && awk "BEGIN {exit !($boot_sec > 0)}"; then
+        local tiempos=""
+        # Recopila el tiempo total de los últimos 5 arranques vía journalctl
+        tiempos=$(journalctl -o cat _SYSTEMD_UNIT=systemd-boot-status.service 2>/dev/null \
+            | grep -oP 'Startup finished in.*=\s*\K.*' \
+            | tail -n 5 \
+            | awk '{
+                sec=0;
+                for(i=1; i<=NF; i++) {
+                    if ($i ~ /min/) { sub(/min/, "", $i); sec += $i * 60 }
+                    else if ($i ~ /ms/) { sub(/ms/, "", $i); sec += $i / 1000 }
+                    else if ($i ~ /s/) { sub(/s/, "", $i); sec += $i }
                 }
-            }
-        }' | tail -n 5)
+                if (sec > 0) print sec
+            }')
 
         if [ -n "$tiempos" ]; then
             eval $(echo "$tiempos" | awk -v actual="$boot_sec" '
@@ -281,7 +297,7 @@ obtener_info_arranque() {
                 if [ "$es_mayor" -eq 1 ]; then
                     comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
                 elif [ "$es_menor" -eq 1 ]; then
-                    comparativa=" ${VERDE_BRILLANTE}(${diff}s más rápido)${RESET}"
+                    comparativa=" ${VERDE_BRILLANTE}(${diff#-}s más rápido)${RESET}"
                 else
                     comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
                 fi
@@ -290,36 +306,77 @@ obtener_info_arranque() {
     fi
 
     echo -e "\e[K${AZUL_BRILLANTE}─── 🚀 ARRANQUE ───${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Último arranque:${RESET} ${BLANCO}$last_boot${RESET}"  
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Tiempo:${RESET} ${BLANCO}${boot_time:-"N/A"}${RESET}${comparativa}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Media de arranque:${RESET} ${BLANCO}$media_str${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Último:${RESET} ${BLANCO}$last_boot${RESET}${NEGRITA}${AZUL_BRILLANTE} Tiempo:${RESET}${BLANCO}${boot_time:-"N/A"}${RESET}${comparativa}"
+    echo -e "\e[K   ${CIAN_BRILLANTE}Kernel:${RESET} ${BLANCO}$kernel_time${RESET} | ${CIAN_BRILLANTE}Userspace:${RESET} ${BLANCO}$user_time${RESET} ${NEGRITA}${AZUL_BRILLANTE}Media histórica:${RESET} ${BLANCO}$media_str${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Servicio más lento:${RESET} ${AMARILLO_BRILLANTE}${slowest_service:-"N/A"}${RESET}"
 }
 
 obtener_info_seguridad() {
+    # 1. Estado del Firewall (Lógica original intacta)
+    local ufw_print="${AMARILLO_BRILLANTE}No instalado${RESET}"
     if command -v ufw &>/dev/null; then
-        UFW_STATUS=$(ufw status | head -n 1 | awk '{print $2}')
-        [ "$UFW_STATUS" = "active" ] && UFW_PRINT="${VERDE_BRILLANTE}Activo${RESET}" || UFW_PRINT="${ROJO_BRILLANTE}Inactivo${RESET}"
-    else
-        UFW_PRINT="${AMARILLO_BRILLANTE}No instalado${RESET}"
+        local ufw_status=$(ufw status 2>/dev/null | head -n 1 | awk '{print $2}')
+        if [ "$ufw_status" = "active" ]; then
+            ufw_print="${VERDE_BRILLANTE}Activo${RESET}"
+        else
+            ufw_print="${ROJO_BRILLANTE}Inactivo${RESET}"
+        fi
     fi
 
-    # Sesiones SSH y Puertos TCP escuchando
-    SSH_SESSIONS=$(ss -tn state established '( dport = :22 or sport = :22 )' 2>/dev/null | tail -n +2 | wc -l)
-    LISTEN_PORTS=$(ss -tuln 2>/dev/null | grep -c "LISTEN")
+    # 2. Conexiones SSH activas (Lógica original intacta)
+    local ssh_sessions
+    ssh_sessions=$(ss -tn state established '( dport = :22 or sport = :22 )' 2>/dev/null | tail -n +2 | wc -l)
 
-    REVERSE_SHELLS=$(ss -tupn state established 2>/dev/null | grep -E '(bash|sh|zsh|python|perl|nc|socat)' | wc -l)
-    if [ "$REVERSE_SHELLS" -gt 0 ]; then
-        REV_PRINT="${ROJO_BRILLANTE}${NEGRITA}⚠️ ALERTA: $REVERSE_SHELLS sospechosa(s)${RESET}"
-    else
-        REV_PRINT="${VERDE_BRILLANTE}Ninguna detectada${RESET}"
-    fi
-
-    SUDO_USERS=$(ps aux | grep -v grep | grep -c "sudo")
+    # 3. Conteo y extracción fiable de procesos Sudo activos
+    local sudo_count=0
+    local sudo_procs=""
     
+    # Busca los PIDs reales de procesos 'sudo' excluyendo grep y subshells
+    local sudo_pids=$(pgrep -x sudo 2>/dev/null)
+    if [ -n "$sudo_pids" ]; then
+        sudo_count=$(echo "$sudo_pids" | wc -l)
+        # Extrae únicamente el nombre base de lo que ejecuta cada sudo
+        sudo_procs=$(ps -o args= -p $sudo_pids 2>/dev/null | awk '{
+            for(i=1;i<=NF;i++) {
+                if ($i !~ /^-/ && $i != "sudo") {
+                    print $i; break
+                }
+            }
+        }' | xargs -n1 basename 2>/dev/null | sort -u | tr '\n' ' ')
+    fi
+
+    # 4. Shells sospechosas (Lógica original intacta)
+    local rev_print="${VERDE_BRILLANTE}Ninguna detectada${RESET}"
+    local reverse_shells
+    reverse_shells=$(ss -tupn state established 2>/dev/null | grep -E '(bash|sh|zsh|python|perl|nc|socat)' | wc -l)
+    if [ "$reverse_shells" -gt 0 ]; then
+        rev_print="${ROJO_BRILLANTE}${NEGRITA}⚠️ ALERTA: $reverse_shells sospechosa(s)${RESET}"
+    fi
+
+    # 5. Puertos en escucha mapeados con su proceso (Ubicado al final)
+    local listen_info
+    listen_info=$(ss -tulnp 2>/dev/null | awk 'NR>1 {
+        split($5, a, ":"); 
+        port=a[length(a)]; 
+        proc="desconocido"; 
+        if (match($0, /users:\(\("([^"]+)"/, m)) proc=m[1]; 
+        if (port ~ /^[0-9]+$/) print port " (" proc ")"
+    }' | sort -nu -k1,1 | head -n 6 | tr '\n' '  ' | sed 's/  $//')
+    
+    [ -z "$listen_info" ] && listen_info="Ninguno"
+
+    # --- IMPRESIÓN DEL MÓDULO ---
     echo -e "\e[K${AZUL_BRILLANTE}─── 🛡️ SEGURIDAD ───${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Firewall (UFW):${RESET} $UFW_PRINT | ${NEGRITA}${AZUL_BRILLANTE}Puertos escuchando:${RESET} ${BLANCO}$LISTEN_PORTS${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Conexiones SSH (p22):${RESET} ${BLANCO}$SSH_SESSIONS${RESET} | ${NEGRITA}${AZUL_BRILLANTE}Procesos Sudo activos:${RESET} ${BLANCO}$SUDO_USERS${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Shells Sospechosas:${RESET} $REV_PRINT"
+    #   Resumen global
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}UFW:${RESET} $ufw_print | ${NEGRITA}${AZUL_BRILLANTE}SSH activas:${RESET} ${BLANCO}${ssh_sessions}${RESET} | ${NEGRITA}${AZUL_BRILLANTE}Sudos activos:${RESET} ${AMARILLO_BRILLANTE}${sudo_count}${RESET}"
+        #   Shells Sospechosas
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Shells Sospechosas:${RESET} $rev_print"
+    #   Nombres de comandos Sudo (solo si hay más de 0)
+    if [ "$sudo_count" -gt 0 ]; then
+        echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Ejecutando Sudo:${RESET} ${AMARILLO_BRILLANTE}${sudo_procs}${RESET}"
+    fi
+    #  Puertos en escucha al final
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Puertos escuchando:${RESET} ${CIAN_BRILLANTE}[ $listen_info ]${RESET}"
 }
 
 monitor_rendimiento
