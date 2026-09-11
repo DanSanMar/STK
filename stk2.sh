@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.8 dash4me"
+V="5.9.9 dash4me y modo_auto en test"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -600,7 +600,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
     done
 }
 
-# --- NUEVO MODO AUTOMÁTICO AUTÓNOMO Y VERBOSO ---
+# --- MODO AUTOMÁTICO ---
 
 modo_auto() {
     # Capturar Ctrl+C para volver de forma segura al menú principal
@@ -627,10 +627,10 @@ modo_auto() {
     local RES_SERVICIOS="Sin procesar"
 
     # --------------------------------------------------------------------------
-    # PASO 1: ACTUALIZACIÓN DEL SISTEMA
+    # PASO 1: ACTUALIZACIÓN DEL SISTEMA (MODO VERBOSO)
     # --------------------------------------------------------------------------
     pintar "$AZUL_BRILLANTE" "📌 [1/4] Ejecutando Actualización del Sistema ($Package)..."
-    mostrar_spinner & SPINNER_PID=$!
+    echo ""
     
     local LOG_TEMP_ACT
     LOG_TEMP_ACT=$(mktemp)
@@ -642,32 +642,32 @@ modo_auto() {
             # Guardar lista de paquetes actualizables antes de ejecutar
             mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
 
-            DEBIAN_FRONTEND=noninteractive apt-get update -y &>"$LOG_TEMP_ACT" && \
-            DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y &>>"$LOG_TEMP_ACT" && \
-            apt-get autoremove -y &>>"$LOG_TEMP_ACT"
-            ESTADO_ACT=$?
+            # Usamos 'tee' para volcar la salida a pantalla y al archivo de log al mismo tiempo
+            apt-get update -y 2>&1 | tee "$LOG_TEMP_ACT" && \
+            apt-get full-upgrade -y 2>&1 | tee -a "$LOG_TEMP_ACT" && \
+            apt-get autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+            ESTADO_ACT=${PIPESTATUS[0]}
             ;;
 
         pacman)
-            # Extraer paquetes desde el log temporal de pacman
-            pacman -Syu --noconfirm &>"$LOG_TEMP_ACT"
-            ESTADO_ACT=$?
+            pacman -Syu --noconfirm 2>&1 | tee "$LOG_TEMP_ACT"
+            ESTADO_ACT=${PIPESTATUS[0]}
             if [ $ESTADO_ACT -eq 0 ]; then
                 mapfile -t PKGS_ACTUALIZADOS < <(grep -E "upgraded|actualizado" "$LOG_TEMP_ACT" | awk '{print $2}')
             fi
             ;;
 
         dnf)
-            dnf upgrade --refresh -y &>"$LOG_TEMP_ACT" && dnf autoremove -y &>>"$LOG_TEMP_ACT"
-            ESTADO_ACT=$?
+            dnf upgrade --refresh -y 2>&1 | tee "$LOG_TEMP_ACT" && dnf autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+            ESTADO_ACT=${PIPESTATUS[0]}
             if [ $ESTADO_ACT -eq 0 ]; then
                 mapfile -t PKGS_ACTUALIZADOS < <(grep -E "Upgraded:|Upgrade" "$LOG_TEMP_ACT" | awk '{print $2}')
             fi
             ;;
 
         zypper)
-            zypper refresh &>"$LOG_TEMP_ACT" && zypper update -y &>>"$LOG_TEMP_ACT"
-            ESTADO_ACT=$?
+            zypper refresh 2>&1 | tee "$LOG_TEMP_ACT" && zypper update -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+            ESTADO_ACT=${PIPESTATUS[0]}
             ;;
     esac
 
@@ -675,9 +675,10 @@ modo_auto() {
     local RES_FLATPAK=""
     local FLATPAKS_ACT=()
     if command -v flatpak &>/dev/null; then
+        echo -e "\n${AZUL}📦 Comprobando y actualizando Flatpak...${RESET}"
         local LOG_FLATPAK
         LOG_FLATPAK=$(mktemp)
-        flatpak update -y &>"$LOG_FLATPAK"
+        flatpak update -y 2>&1 | tee "$LOG_FLATPAK"
         
         if grep -qi -E "nothing to do|nothing updated|nada que hacer" "$LOG_FLATPAK"; then
             RES_FLATPAK="Flatpak: Sin cambios."
@@ -692,9 +693,10 @@ modo_auto() {
     local RES_SNAP=""
     local SNAPS_ACT=()
     if command -v snap &>/dev/null; then
+        echo -e "\n${AZUL}📦 Comprobando y actualizando Snap...${RESET}"
         local LOG_SNAP
         LOG_SNAP=$(mktemp)
-        snap refresh &>"$LOG_SNAP"
+        snap refresh 2>&1 | tee "$LOG_SNAP"
         
         if grep -qi -E "all snaps are up to date|todos los snaps están actualizados" "$LOG_SNAP"; then
             RES_SNAP="Snap: Sin cambios."
@@ -705,9 +707,7 @@ modo_auto() {
         rm -f "$LOG_SNAP"
     fi
 
-    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-    printf "\r\e[K"
-
+    echo ""
     if [ $ESTADO_ACT -eq 0 ]; then
         local total_pkgs=$(( ${#PKGS_ACTUALIZADOS[@]} + ${#FLATPAKS_ACT[@]} + ${#SNAPS_ACT[@]} ))
         RES_ACTUALIZACION="✔ Sistema al día ($Package: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
@@ -719,54 +719,6 @@ modo_auto() {
         pintar "$ROJO" "   └─ $RES_ACTUALIZACION"
     fi
     rm -f "$LOG_TEMP_ACT"
-    echo ""
-
-    # --------------------------------------------------------------------------
-    # PASO 2: SÚPER LIMPIEZA
-    # --------------------------------------------------------------------------
-    pintar "$AZUL_BRILLANTE" "📌 [2/4] Ejecutando Limpieza Profunda del Sistema..."
-    mostrar_spinner & SPINNER_PID=$!
-
-    local ANTES_RAIZ
-    ANTES_RAIZ=$(df --output=avail / | tail -n 1)
-
-    command -v journalctl &>/dev/null && journalctl --vacuum-time=3d &>/dev/null
-
-    case "$Package" in
-        apt)
-            apt-get install -f -y &>/dev/null
-            apt-get autoremove --purge -y &>/dev/null
-            apt-get autoclean -y &>/dev/null
-            apt-get clean &>/dev/null
-            ;;
-        dnf)
-            dnf clean all &>/dev/null
-            dnf autoremove -y &>/dev/null
-            ;;
-        pacman)
-            pacman -Sc --noconfirm &>/dev/null
-            local huerfanos
-            huerfanos=$(pacman -Qtdq 2>/dev/null)
-            [ -n "$huerfanos" ] && pacman -Rns $huerfanos --noconfirm &>/dev/null
-            ;;
-        zypper)
-            zypper clean --all &>/dev/null
-            ;;
-    esac
-
-    find /home/*/.local/share/Trash/files /root/.local/share/Trash/files -mindepth 1 -delete 2>/dev/null
-    find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
-
-    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-    printf "\r\e[K"
-
-    local DESPUES_RAIZ
-    DESPUES_RAIZ=$(df --output=avail / | tail -n 1)
-    local LIBERADO_MB=$(( (DESPUES_RAIZ - ANTES_RAIZ) / 1024 ))
-    [ "$LIBERADO_MB" -lt 0 ] && LIBERADO_MB=0
-
-    RES_LIMPIEZA="✔ Limpieza finalizada. Espacio liberado en /: ~${LIBERADO_MB} MB."
-    pintar "$VERDE" "   └─ $RES_LIMPIEZA"
     echo ""
 
     # --------------------------------------------------------------------------
