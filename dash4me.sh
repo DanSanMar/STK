@@ -3,6 +3,13 @@
 # --- CONFIGURACIÓN DE COLORES ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
+
+# Variantes y tonos específicos
+BLANCO_NEGRITA='\e[1;97m'
+GRIS_CLARO='\e[0;90m'
+AZUL_OSCURO='\e[0;34m'
+
+# Colores estándar
 VERDE_BRILLANTE='\e[92m'
 VERDE='\e[32m'
 AMARILLO='\e[33m'
@@ -17,6 +24,7 @@ ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
 VER="V 1.5 test"
+
 
 dibujar_barra() {
     local porcentaje=$1
@@ -120,6 +128,8 @@ obtener_info_red() {
     echo -e "\e[K   ${NEGRITA}${BLANCO}Tráfico I/O:${RESET} RX: ${VERDE_BRILLANTE}${rx_gb} GB${RESET} | TX: ${AMARILLO_BRILLANTE}${tx_gb} GB${RESET}"
 }
 
+
+
 monitor_rendimiento() {
     if command -v tput &> /dev/null; then
         tput smcup
@@ -127,12 +137,15 @@ monitor_rendimiento() {
     fi
 
     trap "tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; exit 0" SIGINT SIGTERM
+
+    
     
     while true; do
+
         OUTPUT=$(
             echo -ne "\e[H"
-            echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ \e[1;97mDASH\e[36m4\e[92mME \e[0;34m|\e[0;90m LITE DASHBOARD |${CIAN} $VER${AZUL_BRILLANTE}  ⚡-----\e[0m"
-            echo -e "\e[K ${CIAN}Auto-refresco: 3s | ENTER=Actualizar | Ctrl+C=Salir${RESET}"
+        echo -e "\e[K ${AZUL_BRILLANTE}----- ⚡ ${BLANCO_NEGRITA}DASH${CIAN}4${VERDE_BRILLANTE}ME ${AZUL_OSCURO}|${GRIS_CLARO} LITE DASHBOARD ${AZUL_OSCURO}| ${CIAN}"${VER}" ${AMARILLO_BRILLANTE}::$(date +%S)s:: ${AZUL_BRILLANTE}⚡-----\e[0m"  
+        echo -e "\e[K ${CIAN}Auto-refresco: 3s | ENTER=Actualizar | Ctrl+C=Salir${RESET}"
 
             CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
             CPU_CORES=$(nproc)
