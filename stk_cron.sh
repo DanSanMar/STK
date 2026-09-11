@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 5.2 test programación manual"
+ver="v 5.3 test programación manual"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -918,18 +918,30 @@ activar_tarea_cron() {
     # 1. Guardar y acumular en el JSON
     guardar_configuracion_cron "$cron_line" "$descripcion" "${TAREAS_SELECCIONADAS[@]}"
 
-    # 2. Limpiar entradas previas de STK
+    # 2. Limpiar entradas previas en crontab
     crontab -l 2>/dev/null | grep -v "$CRON_STK_ID" | crontab -
 
-    # 3. Generar 1 línea por cada SCHEDULE ÚNICO pasando el schedule como parámetro
+    # 3. Generar 1 línea por cada SCHEDULE ÚNICO separando cron de los comandos
     local lineas_cron=""
     while IFS= read -r sched; do
         [ -z "$sched" ] && continue
         local sched_limpio
         sched_limpio=$(echo "$sched" | sed 's/&&//g' | xargs)
-        
-        # Invocamos el wrapper pasándole el schedule entre comillas: "$sched_limpio"
-        lineas_cron+="${sched_limpio} ${STK_AUTO_WRAPPER} \"${sched_limpio}\" >/dev/null 2>&1 ${CRON_STK_ID}\n"
+
+        if [[ "$sched_limpio" == @reboot* ]]; then
+            # Si incluye sleep (ej. "@reboot sleep 120"), mover el sleep tras la directiva @reboot
+            local tiempo_sleep
+            tiempo_sleep=$(echo "$sched_limpio" | grep -oP 'sleep \d+' || true)
+            
+            if [ -n "$tiempo_sleep" ]; then
+                lineas_cron+="@reboot ${tiempo_sleep} && ${STK_AUTO_WRAPPER} \"${sched_limpio}\" >/dev/null 2>&1 ${CRON_STK_ID}\n"
+            else
+                lineas_cron+="@reboot ${STK_AUTO_WRAPPER} \"${sched_limpio}\" >/dev/null 2>&1 ${CRON_STK_ID}\n"
+            fi
+        else
+            # Para expresiones estándar de cron (ej. "0 3 * * *")
+            lineas_cron+="${sched_limpio} ${STK_AUTO_WRAPPER} \"${sched_limpio}\" >/dev/null 2>&1 ${CRON_STK_ID}\n"
+        fi
     done < <(jq -r '.tareas[].schedule' "$CRON_CONFIG_FILE" | sed 's/&&//g' | sort -u)
 
     (crontab -l 2>/dev/null; echo -e -n "$lineas_cron") | crontab -
@@ -1093,14 +1105,14 @@ mostrar_resumen_final() {
     
     clear
     echo -e "${VERDE_BRILLANTE}"
-    echo "╔══════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                  ║"
-    echo "║                  ✅ TAREA AUTOMÁTICA ACTIVADA                    ║"
-    echo "║                                                                  ║"
-    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo "╔═════════════════════════════════════════════════════════════╗"
+    echo "║                                                             ║"
+    echo "║                  ✅ TAREA AUTOMÁTICA ACTIVADA               ║"
+    echo "║                                                             ║"
+    echo "╚═════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
     echo ""
-    echo -e "${CIAN}═══════════════════════════════════════════════════════════════${RESET}"
+    echo -e "${CIAN}══════════════════════════════════════════════════════════${RESET}"
     echo -e "${AMARILLO}📅 CONFIGURACIÓN:${RESET}"
     echo -e "   ${VERDE}•${RESET} Frecuencia: ${AZUL}$descripcion${RESET}"
     echo -e "   ${VERDE}•${RESET} Schedule:   ${AZUL}$cron_line${RESET}"
