@@ -9,6 +9,7 @@ AMARILLO='\e[33m'
 AMARILLO_BRILLANTE='\e[93m'
 AZUL='\e[34m'
 AZUL_BRILLANTE='\e[94m'
+AZUL_CLARO='\e[38;5;117m' 
 CIAN='\e[36m'
 CIAN_BRILLANTE='\e[96m'
 ROJO='\e[31m'
@@ -114,10 +115,9 @@ obtener_info_red() {
         status_ping="${VERDE_BRILLANTE}OK (HTTP)${RESET}"
     fi
 
-    echo -e "\e[K${AZUL_BRILLANTE}─── 🌐 TELEMETRÍA Y RED ───${RESET}"
-    echo -e "\e[K   ${NEGRITA}${BLANCO}Interfaz princ.:${RESET} ${AZUL_BRILLANTE}${iface}${RESET} (${CIAN_BRILLANTE}${ip_local}${RESET})"
-    echo -e "\e[K   ${NEGRITA}${BLANCO}Tráfico I/O:${RESET}     RX: ${VERDE_BRILLANTE}${rx_gb} GB${RESET} | TX: ${AMARILLO_BRILLANTE}${tx_gb} GB${RESET}"
-    echo -e "\e[K   ${NEGRITA}${BLANCO}Salida a Internet:${RESET} Ping $status_ping"
+    echo -e "\e[K${AZUL_CLARO}- 🌐 TELEMETRÍA Y RED -${RESET}"
+    echo -e "\e[K   ${NEGRITA}${BLANCO}Interfaz:${RESET} ${AZUL_BRILLANTE}${iface}${RESET} (${CIAN_BRILLANTE}${ip_local}${RESET})${NEGRITA}${BLANCO} Ping: $status_ping"
+    echo -e "\e[K   ${NEGRITA}${BLANCO}Tráfico I/O:${RESET} RX: ${VERDE_BRILLANTE}${rx_gb} GB${RESET} | TX: ${AMARILLO_BRILLANTE}${tx_gb} GB${RESET}"
 }
 
 monitor_rendimiento() {
@@ -189,21 +189,20 @@ monitor_rendimiento() {
             D_LIBRE=$(echo $DISCO_DATA | awk '{print $3}')
             D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
 
-            echo -e "\e[K${AZUL_BRILLANTE}─── 📊 RENDIMIENTO EN TIEMPO REAL ───${RESET}"
-            echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE} *** CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
-            echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE} +++ USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC; echo -e " -> $(interpretar $RAM_PERC 'ram')"
+            echo -e "\e[K${AZUL_CLARO}- 📊 RENDIMIENTO EN TIEMPO REAL -${RESET}"
+            echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE}    *** CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
+            echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    +++ USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC; echo -e " -> $(interpretar $RAM_PERC 'ram')"
             
             if [ "$SWAP_TOTAL" -gt 0 ]; then
                 echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE} --- USO SWAP:  ${RESET}"; dibujar_barra $SWAP_PERC; echo -e " -> $(interpretar $SWAP_PERC 'swap')"
             fi
 
-            echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE} *** USO DISCO: ${RESET}"; dibujar_barra $D_PERC; echo -e " -> $(interpretar $D_PERC 'disco')"
-            echo -e "\e[K${AZUL_BRILLANTE}─── 💻 SISTEMA ───${RESET}"
-            echo -e "\e[K${NEGRITA}${AMARILLO}PROCESADOR:${RESET} ${BLANCO}${CPU_MODEL}${RESET}"
-            echo -e "\e[K${NEGRITA}${AMARILLO}NÚCLEOS:${RESET}    ${CIAN_BRILLANTE}${CPU_CORES}${RESET} hilos | ${NEGRITA}${AMARILLO}FREQ:${RESET} ${CIAN_BRILLANTE}${CPU_GHZ}${RESET} GHz"
-            echo -e "\e[K   ${NEGRITA}${BLANCO}CPU:${RESET}   ${CIAN_BRILLANTE}${CPU_DETAIL}${RESET}"
-            echo -e "\e[K   ${NEGRITA}${BLANCO}RAM:${RESET}   ${VERDE_BRILLANTE}${G_USED}GB${RESET} usados / ${BLANCO}${G_TOTAL}GB${RESET} total (Disp: ${AZUL_BRILLANTE}${G_DISP}GB${RESET})"
-            echo -e "\e[K   ${NEGRITA}${BLANCO}DISCO:${RESET} ${VERDE_BRILLANTE}${D_USADO}${RESET} usados / ${BLANCO}${D_TOTAL}${RESET} total (Libre: ${AZUL_BRILLANTE}${D_LIBRE}${RESET})"
+            echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    *** USO DISCO: ${RESET}"; dibujar_barra $D_PERC; echo -e " -> $(interpretar $D_PERC 'disco')"
+            echo -e "\e[K${AZUL_CLARO}- 💻 SISTEMA -${RESET}"
+            echo -e "\e[K   ${NEGRITA}${AMARILLO}CPU:${RESET} ${BLANCO}${CPU_MODEL} ${RESET}${CIAN_BRILLANTE}${CPU_CORES}${RESET} hilos ${RESET}"
+            echo -e "\e[K   ${BLANCO}Now:${RESET} ${CIAN_BRILLANTE}${CPU_GHZ}${RESET} GHz${NEGRITA}${BLANCO} | ${RESET}${CIAN_BRILLANTE}${CPU_DETAIL}${RESET}"
+            echo -e "\e[K   ${NEGRITA}${AMARILLO}RAM:${RESET}   ${VERDE_BRILLANTE}${G_USED}GB${RESET} usados / ${BLANCO}${G_TOTAL}GB${RESET} total (Disp: ${AZUL_BRILLANTE}${G_DISP}GB${RESET})"
+            echo -e "\e[K   ${NEGRITA}${AMARILLO}DISCO:${RESET} ${VERDE_BRILLANTE}${D_USADO}${RESET} usados / ${BLANCO}${D_TOTAL}${RESET} total (Libre: ${AZUL_BRILLANTE}${D_LIBRE}${RESET})"
             
             obtener_resumen_inicio
             obtener_info_arranque
@@ -291,7 +290,7 @@ obtener_info_arranque() {
         ' "$log_file")
 
         if [ -n "$count" ] && [ "$count" -gt 0 ]; then
-            media_str="${media}s ($count registros)"
+            media_str="${media}s ($count log)"
             
             local es_mayor=$(awk "BEGIN {print ($diff > 0.5)?1:0}")
             local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
@@ -306,9 +305,9 @@ obtener_info_arranque() {
         fi
     fi
 
-    echo -e "\e[K${AZUL_BRILLANTE}─── 🚀 ARRANQUE ───${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Último:${RESET} ${BLANCO}$last_boot${RESET}${NEGRITA}${AZUL_BRILLANTE} Tiempo:${RESET}${BLANCO}${boot_time:-"N/A"}${RESET}${comparativa}"
-    echo -e "\e[K   ${CIAN_BRILLANTE}Kernel:${RESET} ${BLANCO}$kernel_time${RESET} | ${CIAN_BRILLANTE}Userspace:${RESET} ${BLANCO}$user_time${RESET} ${NEGRITA}${AZUL_BRILLANTE}Media histórica:${RESET} ${BLANCO}$media_str${RESET}"
+    echo -e "\e[K${AZUL_CLARO}- 🚀 ARRANQUE -${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Último:${RESET} ${BLANCO}$last_boot${RESET}${NEGRITA}${AZUL_BRILLANTE} Tiempo: ${RESET}${BLANCO}${boot_time:-"N/A"}${RESET}${comparativa}"
+    echo -e "\e[K   ${CIAN_BRILLANTE}Kernel:${RESET} ${BLANCO}$kernel_time${RESET} | ${CIAN_BRILLANTE}Userspace:${RESET} ${BLANCO}$user_time${RESET} ${NEGRITA}${AZUL_BRILLANTE}Media:${RESET} ${BLANCO}$media_str${RESET}"
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Servicio más lento:${RESET} ${AMARILLO_BRILLANTE}${slowest_service:-"N/A"}${RESET}"
 }
 
@@ -367,7 +366,7 @@ obtener_info_seguridad() {
     [ -z "$listen_info" ] && listen_info="Ninguno"
 
     # --- IMPRESIÓN DEL MÓDULO ---
-    echo -e "\e[K${AZUL_BRILLANTE}─── 🛡️ SEGURIDAD ───${RESET}"
+    echo -e "\e[K${AZUL_CLARO}- 🛡️ SEGURIDAD -${RESET}"
     #   Resumen global
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}UFW:${RESET} $ufw_print | ${NEGRITA}${AZUL_BRILLANTE}SSH activas:${RESET} ${BLANCO}${ssh_sessions}${RESET} | ${NEGRITA}${AZUL_BRILLANTE}Sudos activos:${RESET} ${AMARILLO_BRILLANTE}${sudo_count}${RESET}"
         #   Shells Sospechosas
