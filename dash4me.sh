@@ -306,7 +306,7 @@ obtener_info_arranque() {
 
         if [ -n "$sa_output" ]; then
             kernel_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(kernel\))' || echo "N/A")
-            user_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(userspace\))' || echo "N/A")
+            user_time=$(echo "$sa_output" | grep -oP '[\d\.]+(ms|s|min)(?=\s+\(users\))' || echo "N/A")
             boot_time=$(echo "$sa_output" | grep -oP '=\s*\K[\d\.\smin s]+$' | xargs || echo "N/A")
 
             # Extraer segundos totales
@@ -358,11 +358,11 @@ obtener_info_arranque() {
             local es_menor=$(awk "BEGIN {print ($diff < -0.5)?1:0}")
 
             if [ "$es_mayor" -eq 1 ]; then
-                comparativa=" ${ROJO_BRILLANTE}(+${diff}s más lento)${RESET}"
+                comparativa=" ${ROJO_BRILLANTE}(+${diff}s + lento)${RESET}"
             elif [ "$es_menor" -eq 1 ]; then
-                comparativa=" ${VERDE_BRILLANTE}(${diff#-}s más rápido)${RESET}"
+                comparativa=" ${VERDE_BRILLANTE}(${diff#-}s + rápido)${RESET}"
             else
-                comparativa=" ${VERDE_BRILLANTE}(Promedio habitual)${RESET}"
+                comparativa=" ${VERDE_BRILLANTE}( = Promedio)${RESET}"
             fi
         fi
     fi
@@ -370,7 +370,7 @@ obtener_info_arranque() {
     echo -e "\e[K${AZUL_CLARO}- 🚀 ARRANQUE -${RESET}"
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Último:${RESET} ${BLANCO}$last_boot${RESET}${NEGRITA}${AZUL_BRILLANTE} Tiempo: ${RESET}${BLANCO}${boot_time:-"N/A"}${RESET}${comparativa}"
     echo -e "\e[K   ${CIAN_BRILLANTE}Kernel:${RESET} ${BLANCO}$kernel_time${RESET} | ${CIAN_BRILLANTE}Userspace:${RESET} ${BLANCO}$user_time${RESET} ${NEGRITA}${AZUL_BRILLANTE}Media:${RESET} ${BLANCO}$media_str${RESET}"
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Servicio más lento:${RESET} ${AMARILLO_BRILLANTE}${slowest_service:-"N/A"}${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Servicio + lento:${RESET} ${AMARILLO_BRILLANTE}${slowest_service:-"N/A"}${RESET}"
 }
 
 obtener_info_seguridad() {
