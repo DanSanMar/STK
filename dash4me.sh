@@ -23,7 +23,7 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
-VER="V 1.6"
+VER="V 1.6.1" #estable
 
 
 dibujar_barra() {
