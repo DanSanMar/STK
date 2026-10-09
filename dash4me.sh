@@ -503,20 +503,20 @@ renderizar_pantalla() {
     fi
 
     echo -e "\e[K${AZUL_CLARO}- 📊 RENDIMIENTO EN TIEMPO REAL -${RESET}"
-    echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE}    *** CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC "uso"; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
-    echo -ne "\e[K${NEGRITA}${ROJO_BRILLANTE}    *** TEMP CPU:   ${RESET}"; dibujar_barra $CPU_TEMP "temp"; echo -e " -> $(interpretar $CPU_TEMP 'cpu_temp')"
-    echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    +++ USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " -> $(interpretar $RAM_PERC 'ram')"
+    echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE}    ### CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC "uso"; echo -e " --> $(interpretar $CPU_PERC 'cpu')"
+    echo -ne "\e[K${NEGRITA}${ROJO_BRILLANTE}    ### TEMP CPU:  ${RESET}"; dibujar_barra $CPU_TEMP "temp"; echo -e " -> $(interpretar $CPU_TEMP 'cpu_temp')"
+    echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    ### USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " --> $(interpretar $RAM_PERC 'ram')"
     
     if command -v nvidia-smi &>/dev/null; then
-        echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:   ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " -> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
-        echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:   ${RESET}"; dibujar_barra $LAST_GPU_TEMP "temp"; echo -e " -> $(interpretar $LAST_GPU_TEMP 'gpu_temp')"
+        echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:  ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " --> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
+        echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:  ${RESET}"; dibujar_barra $LAST_GPU_TEMP "temp"; echo -e " -> $(interpretar $LAST_GPU_TEMP 'gpu_temp')"
     fi
 
     if [ "$SWAP_TOTAL" -gt 0 ]; then
-        echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    --- USO SWAP:  ${RESET}"; dibujar_barra $SWAP_PERC "uso"; echo -e " -> $(interpretar $SWAP_PERC 'swap')"
+        echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    --- USO SWAP:  ${RESET}"; dibujar_barra $SWAP_PERC "uso"; echo -e " --> $(interpretar $SWAP_PERC 'swap')"
     fi
 
-    echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    @@@ USO DISCO: ${RESET}"; dibujar_barra $D_PERC "uso"; echo -e " -> $(interpretar $D_PERC 'disco')"
+    echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    ### USO DISCO: ${RESET}"; dibujar_barra $D_PERC "uso"; echo -e " --> $(interpretar $D_PERC 'disco')"
     
     echo -e "\e[K${AZUL_CLARO}- 💻 SISTEMA -${RESET}"
     echo -e "\e[K   ${NEGRITA}${AMARILLO}CPU:${RESET} ${BLANCO}${CPU_MODEL} ${RESET}${CIAN_BRILLANTE}${CPU_CORES}${RESET} hilos ${RESET}"
@@ -524,12 +524,9 @@ renderizar_pantalla() {
     echo -e "\e[K   ${NEGRITA}${AMARILLO}RAM:${RESET}   ${VERDE_BRILLANTE}${G_USED}GB${RESET} usados / ${BLANCO}${G_TOTAL}GB${RESET} total (Disp: ${AZUL_BRILLANTE}${G_DISP}GB${RESET})"
     echo -e "\e[K   ${NEGRITA}${AMARILLO}DISCO:${RESET} ${VERDE_BRILLANTE}${D_USADO}${RESET} usados / ${BLANCO}${D_TOTAL}${RESET} total (Libre: ${AZUL_BRILLANTE}${D_LIBRE}${RESET})"
 
-    
-    obtener_info_gpu
-    
     obtener_resumen_inicio
+    obtener_info_gpu
     obtener_info_arranque
-    
     obtener_info_red
     obtener_info_seguridad
 
