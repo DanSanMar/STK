@@ -23,14 +23,14 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
 
-# Colores para GPU
+# Colores para GPU y Térmicos
 VERDE_GPU='\e[38;5;47m'      # Verde brillante para temperatura normal
 AMARILLO_GPU='\e[38;5;226m'   # Amarillo para temperatura media
 ROJO_GPU='\e[38;5;209m'       # Rojo para alta temperatura
 CIAN_GPU='\e[38;5;94m'        # Cian para GPU en general
 AZUL_GRISACEO='\e[38;5;244m'  # Gris azulado para util
 
-VER="V 1.7.0-FULL"
+VER="V 1.8.2-STABLE"
 
 dibujar_barra() {
     local valor=$1
@@ -71,6 +71,12 @@ interpretar() {
             elif [ "$val" -gt 65 ]; then echo -e "${AMARILLO_BRILLANTE}${NEGRITA}ALTO (Carga)${RESET}"
             else echo -e "${VERDE_BRILLANTE}${NEGRITA}ÓPTIMO${RESET}"; fi
             ;;
+        "cpu_temp")
+            if [ "$val" -gt 85 ]; then echo -e "${ROJO_BRILLANTE}${NEGRITA}CRÍTICO (>85°C)${RESET}"
+            elif [ "$val" -gt 75 ]; then echo -e "${AMARILLO_BRILLANTE}${NEGRITA}ELEVADA (76-85°C)${RESET}"
+            elif [ "$val" -eq 0 ]; then echo -e "${AZUL_GRISACEO}${NEGRITA}N/A${RESET}"
+            else echo -e "${VERDE_BRILLANTE}${NEGRITA}NORMAL${RESET}"; fi
+            ;;
         "ram")
             if [ "$val" -gt 85 ]; then echo -e "${ROJO_BRILLANTE}${NEGRITA}CRÍTICO (Sin memoria)${RESET}"
             elif [ "$val" -gt 65 ]; then echo -e "${AMARILLO_BRILLANTE}${NEGRITA}ALTO (Carga)${RESET}"
@@ -93,18 +99,50 @@ interpretar() {
             ;;
         "gpu_temp") 
             if [ "$val" -gt 85 ]; then echo -e "${ROJO_GPU}${NEGRITA}CRÍTICO (>85°C)${RESET}"
-            elif [ "$val" -gt 75 ]; then echo -e "${AMARILLO_GPU}ELEVADA (76-85°C)${RESET}"
-            else echo -e "${VERDE_GPU}NORMAL${RESET}"; fi
+            elif [ "$val" -gt 75 ]; then echo -e "${AMARILLO_GPU}${NEGRITA}ELEVADA (76-85°C)${RESET}"
+            else echo -e "${VERDE_BRILLANTE}${NEGRITA}NORMAL${RESET}"; fi
             ;;
         "gpu_util") 
             if [ "$val" -gt 90 ]; then echo -e "${ROJO_GPU}${NEGRITA}GPU SATURADA (${val}%)${RESET}"
-            elif [ "$val" -gt 70 ]; then echo -e "${AMARILLO_GPU}ALTA UTILIZACIÓN (${val}%)${RESET}"
-            else echo -e "${VERDE_GPU}UTILIZACIÓN NORMAL (${val}%)${RESET}"; fi
+            elif [ "$val" -gt 70 ]; then echo -e "${AMARILLO_GPU}${NEGRITA}ALTA UTILIZACIÓN (${val}%)${RESET}"
+            else echo -e "${VERDE_BRILLANTE}${NEGRITA}UTILIZACIÓN NORMAL (${val}%)${RESET}"; fi
             ;;
         *) 
             echo -e "${VERDE_BRILLANTE}${NEGRITA}ÓPTIMO${RESET}"
             ;;
     esac
+}
+
+obtener_temp_cpu() {
+    local temp=0
+    for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/type" ] && [ -f "$zone/temp" ]; then
+            local type=$(cat "$zone/type" 2>/dev/null)
+            if [[ "$type" =~ x86_pkg_temp|cpu-thermal|cpu_thermal|k10temp|coretemp ]]; then
+                local raw_temp=$(cat "$zone/temp" 2>/dev/null)
+                if [ -n "$raw_temp" ] && [ "$raw_temp" -gt 0 ]; then
+                    temp=$(( raw_temp / 1000 ))
+                    break
+                fi
+            fi
+        fi
+    done
+
+    if [ "$temp" -eq 0 ] && [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+        local raw_temp=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+        if [ -n "$raw_temp" ] && [ "$raw_temp" -gt 0 ]; then
+            temp=$(( raw_temp / 1000 ))
+        fi
+    fi
+
+    if [ "$temp" -eq 0 ] && command -v sensors &>/dev/null; then
+        local sens_temp=$(sensors 2>/dev/null | grep -m1 -E 'Package id 0:|CPU:|Core 0:' | awk '{print $3}' | tr -dc '0-9.')
+        if [ -n "$sens_temp" ]; then
+            temp=$(printf "%.0f" "$sens_temp" 2>/dev/null)
+        fi
+    fi
+
+    echo "${temp:-0}"
 }
 
 obtener_resumen_inicio() {
@@ -265,7 +303,7 @@ obtener_info_gpu() {
         uuid_display=" (UUID: ${gpu_uuid:0:12}...)"
     fi
 
-    echo -e "\e[K${CIAN_GPU}- 🎮 DETALLES DE GPU$uuid_display:${RESET}"
+    echo -e "\e[K${AZUL_CLARO}- 🎮 DETALLES DE GPU$uuid_display:${RESET}"
     echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${gpu_model}${RESET}"
 
     if [ "$gpu_mem_total" -gt 0 ]; then
@@ -381,6 +419,123 @@ obtener_info_seguridad() {
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Puertos escuchando:${RESET} ${CIAN_BRILLANTE}[ $listen_info ]${RESET}"
 }
 
+renderizar_pantalla() {
+    echo -ne "\e[H"
+    echo -e "\e[K ${AZUL_BRILLANTE}--- ⚡ ${COLOR_LOGO}DASH4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}FULL DASHBOARD${RESET} ${AZUL_OSCURO}| ${COLOR_VER}${VER}${RESET} ${BLANCO}:${HORA_ACTUAL}: ${AZUL_BRILLANTE}⚡---\e[0m"
+    echo -e "\e[K ${AZUL_BRILLANTE} - ${RESET}AUTO-REFRESCO: ${CIAN}3s${RESET} | ENTER=${CIAN}Actualizar ${RESET}| CTRL+C=${CIAN}Salir${RESET}${AZUL_BRILLANTE} - "
+
+    # CPU Info & Usage
+    local CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
+    local CPU_CORES=$(nproc)
+    local CPU_MHZ=$(grep -m1 "cpu MHz" /proc/cpuinfo | awk '{print int($4)}')
+    local CPU_GHZ=$(awk "BEGIN {printf \"%.2f\", $CPU_MHZ/1000}")
+
+    local CPU_STATS=$(grep 'cpu ' /proc/stat)
+    local IDLE_1=$(echo $CPU_STATS | awk '{print $5}')
+    local TOTAL_1=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
+    sleep 0.1
+    CPU_STATS=$(grep 'cpu ' /proc/stat)
+    local IDLE_2=$(echo $CPU_STATS | awk '{print $5}')
+    local TOTAL_2=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
+    
+    local DIFF_TOTAL=$((TOTAL_2 - TOTAL_1))
+    local DIFF_IDLE=$((IDLE_2 - IDLE_1))
+    local CPU_PERC=0
+    
+    if [ "$DIFF_TOTAL" -gt 0 ]; then
+        CPU_PERC=$((100 * (DIFF_TOTAL - DIFF_IDLE) / DIFF_TOTAL))
+    fi
+    local CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "User: %.1f%% | Sys: %.1f%% | WA (I/O): %.1f%%", $2, $4, $10}')
+    local CPU_TEMP=$(obtener_temp_cpu)
+
+    # RAM Metrics
+    local RAM_INFO=$(free -m | grep -i "mem:")
+    local RAM_TOTAL_MB=$(echo $RAM_INFO | awk '{print $2}')
+    local RAM_USED_MB=$(echo $RAM_INFO | awk '{print $3}')
+    local RAM_DISP_MB=$(echo $RAM_INFO | awk '{print $7}')
+    
+    RAM_TOTAL_MB=${RAM_TOTAL_MB:-1}
+    RAM_USED_MB=${RAM_USED_MB:-0}
+    RAM_DISP_MB=${RAM_DISP_MB:-0}
+
+    local RAM_PERC=$(( RAM_USED_MB * 100 / RAM_TOTAL_MB ))
+    local G_TOTAL=$(awk "BEGIN {printf \"%.1f\", $RAM_TOTAL_MB/1024}")
+    local G_USED=$(awk "BEGIN {printf \"%.1f\", $RAM_USED_MB/1024}")
+    local G_DISP=$(awk "BEGIN {printf \"%.1f\", $RAM_DISP_MB/1024}")
+
+    # SWAP Metrics
+    local SWAP_INFO=$(free -m | grep -i "swap:")
+    local SWAP_TOTAL=$(echo $SWAP_INFO | awk '{print $2}')
+    local SWAP_USED=$(echo $SWAP_INFO | awk '{print $3}')
+    
+    SWAP_TOTAL=$(echo "${SWAP_TOTAL:-0}" | tr -dc '0-9')
+    SWAP_USED=$(echo "${SWAP_USED:-0}" | tr -dc '0-9')
+    : "${SWAP_TOTAL:=0}"
+    : "${SWAP_USED:=0}"
+
+    local SWAP_PERC=0
+    if [ "$SWAP_TOTAL" -gt 0 ]; then
+        SWAP_PERC=$(( SWAP_USED * 100 / SWAP_TOTAL ))
+    fi
+
+    # Disk Metrics
+    local DISCO_DATA=$(df -h / | awk 'NR==2 {print $2, $3, $4, $5}')
+    local D_TOTAL=$(echo $DISCO_DATA | awk '{print $1}')
+    local D_USADO=$(echo $DISCO_DATA | awk '{print $2}')
+    local D_LIBRE=$(echo $DISCO_DATA | awk '{print $3}')
+    local D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
+    D_PERC=${D_PERC:-0}
+
+    # Consultar métricas GPU si existe nvidia-smi
+    local LAST_GPU_TEMP=0
+    local LAST_GPU_VRAM_PCT=0
+    if command -v nvidia-smi &>/dev/null; then
+        local gpu_data=$(nvidia-smi --query-gpu=temperature.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
+        if [ -n "$gpu_data" ]; then
+            IFS=',' read -r t u tot <<< "$gpu_data"
+            LAST_GPU_TEMP=$(echo "$t" | tr -dc '0-9')
+            u=$(echo "$u" | tr -dc '0-9')
+            tot=$(echo "$tot" | tr -dc '0-9')
+            if [ "${tot:-0}" -gt 0 ]; then
+                LAST_GPU_VRAM_PCT=$(( u * 100 / tot ))
+            fi
+        fi
+    fi
+
+    echo -e "\e[K${AZUL_CLARO}- 📊 RENDIMIENTO EN TIEMPO REAL -${RESET}"
+    echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE}    *** CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC "uso"; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
+    echo -ne "\e[K${NEGRITA}${ROJO_BRILLANTE}    *** TEMP CPU:   ${RESET}"; dibujar_barra $CPU_TEMP "temp"; echo -e " -> $(interpretar $CPU_TEMP 'cpu_temp')"
+    echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    +++ USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " -> $(interpretar $RAM_PERC 'ram')"
+    
+    if command -v nvidia-smi &>/dev/null; then
+        echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:   ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " -> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
+        echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:   ${RESET}"; dibujar_barra $LAST_GPU_TEMP "temp"; echo -e " -> $(interpretar $LAST_GPU_TEMP 'gpu_temp')"
+    fi
+
+    if [ "$SWAP_TOTAL" -gt 0 ]; then
+        echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    --- USO SWAP:  ${RESET}"; dibujar_barra $SWAP_PERC "uso"; echo -e " -> $(interpretar $SWAP_PERC 'swap')"
+    fi
+
+    echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    @@@ USO DISCO: ${RESET}"; dibujar_barra $D_PERC "uso"; echo -e " -> $(interpretar $D_PERC 'disco')"
+    
+    echo -e "\e[K${AZUL_CLARO}- 💻 SISTEMA -${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AMARILLO}CPU:${RESET} ${BLANCO}${CPU_MODEL} ${RESET}${CIAN_BRILLANTE}${CPU_CORES}${RESET} hilos ${RESET}"
+    echo -e "\e[K   ${BLANCO}Now:${RESET} ${CIAN_BRILLANTE}${CPU_GHZ}${RESET} GHz${NEGRITA}${BLANCO} | ${RESET}${CIAN_BRILLANTE}${CPU_DETAIL}${RESET}"
+    echo -e "\e[K   ${NEGRITA}${AMARILLO}RAM:${RESET}   ${VERDE_BRILLANTE}${G_USED}GB${RESET} usados / ${BLANCO}${G_TOTAL}GB${RESET} total (Disp: ${AZUL_BRILLANTE}${G_DISP}GB${RESET})"
+    echo -e "\e[K   ${NEGRITA}${AMARILLO}DISCO:${RESET} ${VERDE_BRILLANTE}${D_USADO}${RESET} usados / ${BLANCO}${D_TOTAL}${RESET} total (Libre: ${AZUL_BRILLANTE}${D_LIBRE}${RESET})"
+
+    
+    obtener_info_gpu
+    
+    obtener_resumen_inicio
+    obtener_info_arranque
+    
+    obtener_info_red
+    obtener_info_seguridad
+
+    echo -ne "\e[J"
+}
+
 monitor_rendimiento() {
     if command -v tput &> /dev/null; then
         tput smcup
@@ -439,120 +594,8 @@ monitor_rendimiento() {
             *) COLOR_DASH="$GRIS_CLARO" ;;
         esac
 
-        OUTPUT=$(
-            echo -ne "\e[H"
-            echo -e "\e[K ${AZUL_BRILLANTE}--- ⚡ ${COLOR_LOGO}DASH4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}FULL DASHBOARD${RESET} ${AZUL_OSCURO}| ${COLOR_VER}${VER}${RESET} ${BLANCO}:${HORA_ACTUAL}: ${AZUL_BRILLANTE}⚡---\e[0m"
-            echo -e "\e[K ${AZUL_BRILLANTE} - ${RESET}AUTO-REFRESCO: ${CIAN}3s${RESET} | ENTER=${CIAN}Actualizar ${RESET}| CTRL+C=${CIAN}Salir${RESET}${AZUL_BRILLANTE} - "
-
-            # CPU Info & Usage
-            CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed -e 's/^[ \t]*//' -e 's/(R)//g' -e 's/(TM)//g' -e 's/  */ /g')
-            CPU_CORES=$(nproc)
-            CPU_MHZ=$(grep -m1 "cpu MHz" /proc/cpuinfo | awk '{print int($4)}')
-            CPU_GHZ=$(awk "BEGIN {printf \"%.2f\", $CPU_MHZ/1000}")
-
-            CPU_STATS=$(grep 'cpu ' /proc/stat)
-            IDLE_1=$(echo $CPU_STATS | awk '{print $5}')
-            TOTAL_1=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
-            sleep 0.1
-            CPU_STATS=$(grep 'cpu ' /proc/stat)
-            IDLE_2=$(echo $CPU_STATS | awk '{print $5}')
-            TOTAL_2=$(echo $CPU_STATS | awk '{print $2+$3+$4+$5+$6+$7+$8}')
-            
-            DIFF_TOTAL=$((TOTAL_2 - TOTAL_1))
-            DIFF_IDLE=$((IDLE_2 - IDLE_1))
-            
-            if [ "$DIFF_TOTAL" -gt 0 ]; then
-                CPU_PERC=$((100 * (DIFF_TOTAL - DIFF_IDLE) / DIFF_TOTAL))
-            else
-                CPU_PERC=0
-            fi
-            CPU_DETAIL=$(top -bn1 | grep "Cpu(s)" | awk '{printf "User: %.1f%% | Sys: %.1f%% | WA (I/O): %.1f%%", $2, $4, $10}')
-
-            # RAM Metrics
-            RAM_INFO=$(free -m | grep -i "mem:")
-            RAM_TOTAL_MB=$(echo $RAM_INFO | awk '{print $2}')
-            RAM_USED_MB=$(echo $RAM_INFO | awk '{print $3}')
-            RAM_DISP_MB=$(echo $RAM_INFO | awk '{print $7}')
-            
-            RAM_TOTAL_MB=${RAM_TOTAL_MB:-1}
-            RAM_USED_MB=${RAM_USED_MB:-0}
-            RAM_DISP_MB=${RAM_DISP_MB:-0}
-
-            RAM_PERC=$(( RAM_USED_MB * 100 / RAM_TOTAL_MB ))
-            G_TOTAL=$(awk "BEGIN {printf \"%.1f\", $RAM_TOTAL_MB/1024}")
-            G_USED=$(awk "BEGIN {printf \"%.1f\", $RAM_USED_MB/1024}")
-            G_DISP=$(awk "BEGIN {printf \"%.1f\", $RAM_DISP_MB/1024}")
-
-            # SWAP Metrics
-            SWAP_INFO=$(free -m | grep -i "swap:")
-            SWAP_TOTAL=$(echo $SWAP_INFO | awk '{print $2}')
-            SWAP_USED=$(echo $SWAP_INFO | awk '{print $3}')
-            
-            SWAP_TOTAL=$(echo "${SWAP_TOTAL:-0}" | tr -dc '0-9')
-            SWAP_USED=$(echo "${SWAP_USED:-0}" | tr -dc '0-9')
-            : "${SWAP_TOTAL:=0}"
-            : "${SWAP_USED:=0}"
-
-            SWAP_PERC=0
-            if [ "$SWAP_TOTAL" -gt 0 ]; then
-                SWAP_PERC=$(( SWAP_USED * 100 / SWAP_TOTAL ))
-            fi
-
-            # Disk Metrics
-            DISCO_DATA=$(df -h / | awk 'NR==2 {print $2, $3, $4, $5}')
-            D_TOTAL=$(echo $DISCO_DATA | awk '{print $1}')
-            D_USADO=$(echo $DISCO_DATA | awk '{print $2}')
-            D_LIBRE=$(echo $DISCO_DATA | awk '{print $3}')
-            D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
-            D_PERC=${D_PERC:-0}
-
-            # Consultar métricas GPU si existe nvidia-smi
-            LAST_GPU_TEMP=0
-            LAST_GPU_VRAM_PCT=0
-            if command -v nvidia-smi &>/dev/null; then
-                local gpu_data=$(nvidia-smi --query-gpu=temperature.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
-                if [ -n "$gpu_data" ]; then
-                    IFS=',' read -r t u tot <<< "$gpu_data"
-                    LAST_GPU_TEMP=$(echo "$t" | tr -dc '0-9')
-                    u=$(echo "$u" | tr -dc '0-9')
-                    tot=$(echo "$tot" | tr -dc '0-9')
-                    if [ "${tot:-0}" -gt 0 ]; then
-                        LAST_GPU_VRAM_PCT=$(( u * 100 / tot ))
-                    fi
-                fi
-            fi
-
-            echo -e "\e[K${AZUL_CLARO}- 📊 RENDIMIENTO EN TIEMPO REAL -${RESET}"
-            echo -ne "\e[K${NEGRITA}${VERDE_BRILLANTE}    *** CARGA CPU: ${RESET}"; dibujar_barra $CPU_PERC "uso"; echo -e " -> $(interpretar $CPU_PERC 'cpu')"
-            echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    +++ USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " -> $(interpretar $RAM_PERC 'ram')"
-            
-            if command -v nvidia-smi &>/dev/null; then
-                echo -ne "\e[K${NEGRITA}${VERDE_GPU}    🎮 USO VRAM:   ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " -> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
-                echo -ne "\e[K${NEGRITA}${ROJO_GPU}    🔥 TEMP GPU:   ${RESET}"; dibujar_barra $LAST_GPU_TEMP "temp"; echo -e " -> $(interpretar $LAST_GPU_TEMP 'gpu_temp')"
-            fi
-
-            if [ "$SWAP_TOTAL" -gt 0 ]; then
-                echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    --- USO SWAP:  ${RESET}"; dibujar_barra $SWAP_PERC "uso"; echo -e " -> $(interpretar $SWAP_PERC 'swap')"
-            fi
-
-            echo -ne "\e[K${NEGRITA}${CIAN_BRILLANTE}    *** USO DISCO: ${RESET}"; dibujar_barra $D_PERC "uso"; echo -e " -> $(interpretar $D_PERC 'disco')"
-            
-            echo -e "\e[K${AZUL_CLARO}- 💻 SISTEMA -${RESET}"
-            echo -e "\e[K   ${NEGRITA}${AMARILLO}CPU:${RESET} ${BLANCO}${CPU_MODEL} ${RESET}${CIAN_BRILLANTE}${CPU_CORES}${RESET} hilos ${RESET}"
-            echo -e "\e[K   ${BLANCO}Now:${RESET} ${CIAN_BRILLANTE}${CPU_GHZ}${RESET} GHz${NEGRITA}${BLANCO} | ${RESET}${CIAN_BRILLANTE}${CPU_DETAIL}${RESET}"
-            echo -e "\e[K   ${NEGRITA}${AMARILLO}RAM:${RESET}   ${VERDE_BRILLANTE}${G_USED}GB${RESET} usados / ${BLANCO}${G_TOTAL}GB${RESET} total (Disp: ${AZUL_BRILLANTE}${G_DISP}GB${RESET})"
-            echo -e "\e[K   ${NEGRITA}${AMARILLO}DISCO:${RESET} ${VERDE_BRILLANTE}${D_USADO}${RESET} usados / ${BLANCO}${D_TOTAL}${RESET} total (Libre: ${AZUL_BRILLANTE}${D_LIBRE}${RESET})"
-
-            obtener_resumen_inicio
-            obtener_info_arranque
-            obtener_info_gpu
-            obtener_info_red
-            obtener_info_seguridad
-
-            echo -ne "\e[J"
-        )
+        renderizar_pantalla
         
-        echo -e "$OUTPUT"
         read -t 2.9 -n 1 -s key
     done
 }
