@@ -30,7 +30,7 @@ ROJO_GPU='\e[38;5;209m'       # Rojo para alta temperatura
 CIAN_GPU='\e[38;5;94m'        # Cian para GPU en general
 AZUL_GRISACEO='\e[38;5;244m'  # Gris azulado para util
 
-VER="V 1.8.2-STABLE"
+VER="V 1.9.0-STABLE"
 
 dibujar_barra() {
     local valor=$1
@@ -143,6 +143,112 @@ obtener_temp_cpu() {
     fi
 
     echo "${temp:-0}"
+}
+
+# --- FUNCIÓN MULTI-VENDOR DE GPU ---
+obtener_datos_gpu() {
+    # Inicialización de variables
+    GPU_TYPE="NONE"
+    GPU_MODEL="No detectada"
+    GPU_TEMP=0
+    GPU_FAN=0
+    GPU_MEM_USED_MB=0
+    GPU_MEM_TOTAL_MB=0
+    GPU_UTIL=0
+    GPU_EXTRA_INFO=""
+
+    # 1. Probar NVIDIA (nvidia-smi)
+    if command -v nvidia-smi &>/dev/null; then
+        local n_out
+        n_out=$(nvidia-smi --query-gpu=name,uuid,temperature.gpu,fan.speed,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1)
+        if [ -n "$n_out" ]; then
+            IFS=',' read -r g_model g_uuid g_temp g_fan g_used g_tot g_util <<< "$n_out"
+            GPU_TYPE="NVIDIA"
+            GPU_MODEL=$(echo "$g_model" | xargs)
+            GPU_TEMP=$(echo "$g_temp" | tr -dc '0-9')
+            GPU_FAN=$(echo "$g_fan" | tr -dc '0-9')
+            GPU_MEM_USED_MB=$(echo "$g_used" | tr -dc '0-9')
+            GPU_MEM_TOTAL_MB=$(echo "$g_tot" | tr -dc '0-9')
+            GPU_UTIL=$(echo "$g_util" | tr -dc '0-9')
+            
+            g_uuid=$(echo "$g_uuid" | xargs)
+            if [ -n "$g_uuid" ] && [ "$g_uuid" != "N/A" ]; then
+                GPU_EXTRA_INFO=" (UUID: ${g_uuid:0:12}...)"
+            fi
+            return
+        fi
+    fi
+
+    # 2. Probar AMD a través de Sysfs (Nativo Kernel AMDGPU)
+    for card in /sys/class/drm/card[0-9]*; do
+        if [ -f "$card/device/vendor" ]; then
+            local vendor=$(cat "$card/device/vendor" 2>/dev/null)
+            if [ "$vendor" = "0x1002" ]; then # Vendor ID de AMD
+                GPU_TYPE="AMD"
+                
+                # Nombre del modelo vía lspci
+                if command -v lspci &>/dev/null; then
+                    GPU_MODEL=$(lspci -d 1002: 2>/dev/null | head -n1 | sed -E 's/.*VGA compatible controller: AMD\/ATI //; s/.*Display controller: AMD\/ATI //' | cut -d'(' -f1 | xargs)
+                fi
+                [ -z "$GPU_MODEL" ] && GPU_MODEL="AMD Radeon Graphics"
+
+                # VRAM
+                if [ -f "$card/device/mem_info_vram_used" ] && [ -f "$card/device/mem_info_vram_total" ]; then
+                    local v_used=$(cat "$card/device/mem_info_vram_used" 2>/dev/null)
+                    local v_tot=$(cat "$card/device/mem_info_vram_total" 2>/dev/null)
+                    GPU_MEM_USED_MB=$(( v_used / 1024 / 1024 ))
+                    GPU_MEM_TOTAL_MB=$(( v_tot / 1024 / 1024 ))
+                fi
+
+                # Utilización GPU
+                if [ -f "$card/device/gpu_busy_percent" ]; then
+                    GPU_UTIL=$(cat "$card/device/gpu_busy_percent" 2>/dev/null | tr -dc '0-9')
+                fi
+
+                # Temperatura y Fan vía hwmon de AMD
+                if [ -d "$card/device/hwmon" ]; then
+                    local hwmon_dir=$(ls -d "$card/device/hwmon/hwmon"* 2>/dev/null | head -n 1)
+                    if [ -n "$hwmon_dir" ]; then
+                        if [ -f "$hwmon_dir/temp1_input" ]; then
+                            local raw_t=$(cat "$hwmon_dir/temp1_input" 2>/dev/null)
+                            GPU_TEMP=$(( raw_t / 1000 ))
+                        fi
+                        if [ -f "$hwmon_dir/pwm1" ] && [ -f "$hwmon_dir/pwm1_max" ]; then
+                            local pwm=$(cat "$hwmon_dir/pwm1" 2>/dev/null)
+                            local pwm_max=$(cat "$hwmon_dir/pwm1_max" 2>/dev/null)
+                            if [ "${pwm_max:-0}" -gt 0 ]; then
+                                GPU_FAN=$(( pwm * 100 / pwm_max ))
+                            fi
+                        fi
+                    fi
+                fi
+                return
+            fi
+        fi
+    done
+
+    # 3. Probar Intel a través de Sysfs
+    for card in /sys/class/drm/card[0-9]*; do
+        if [ -f "$card/device/vendor" ]; then
+            local vendor=$(cat "$card/device/vendor" 2>/dev/null)
+            if [ "$vendor" = "0x8086" ]; then # Vendor ID de Intel
+                GPU_TYPE="INTEL"
+                if command -v lspci &>/dev/null; then
+                    GPU_MODEL=$(lspci -d 8086: 2>/dev/null | grep -iE 'vga|3d|display' | head -n1 | sed -E 's/.*: Intel Corporation //' | cut -d'(' -f1 | xargs)
+                fi
+                [ -z "$GPU_MODEL" ] && GPU_MODEL="Intel HD/Iris/Arc Graphics"
+
+                if [ -f "$card/gt/gt0/rps_act_freq_mhz" ] && [ -f "$card/gt/gt0/rps_max_freq_mhz" ]; then
+                    local act=$(cat "$card/gt/gt0/rps_act_freq_mhz" 2>/dev/null)
+                    local max=$(cat "$card/gt/gt0/rps_max_freq_mhz" 2>/dev/null)
+                    if [ "${max:-0}" -gt 0 ]; then
+                        GPU_UTIL=$(( act * 100 / max ))
+                    fi
+                fi
+                return
+            fi
+        fi
+    done
 }
 
 obtener_resumen_inicio() {
@@ -269,49 +375,20 @@ obtener_info_arranque() {
 }
 
 obtener_info_gpu() {
-    if ! command -v nvidia-smi &>/dev/null; then
-        echo -e "\e[K${CIAN_GPU}- 🎮 GPU (NVIDIA) - N/A${RESET}"
-        return
-    fi
-    
-    local nvidia_output
-    nvidia_output=$(nvidia-smi --query-gpu=name,uuid,temperature.gpu,fan.speed,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1)
-    
-    if [ $? -ne 0 ] || [ -z "$nvidia_output" ]; then
-        echo -e "\e[K${CIAN_GPU}- 🎮 GPU (NVIDIA) - No detectada o sin driver${RESET}"
+    if [ "$GPU_TYPE" = "NONE" ]; then
+        echo -e "\e[K${CIAN_GPU}- 🎮 GPU - No detectada o sin controladores nativos${RESET}"
         return
     fi
 
-    IFS=',' read -r gpu_model gpu_uuid gpu_temp gpu_fan gpu_mem_used gpu_mem_total gpu_util <<< "$nvidia_output"
+    echo -e "\e[K${AZUL_CLARO}- 🎮 DETALLES DE GPU (${GPU_TYPE})${GPU_EXTRA_INFO}:${RESET}"
+    echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${GPU_MODEL}${RESET}"
 
-    gpu_model=$(echo "$gpu_model" | xargs)
-    gpu_uuid=$(echo "$gpu_uuid" | xargs)
-    gpu_temp=$(echo "$gpu_temp" | tr -dc '0-9')
-    gpu_fan=$(echo "$gpu_fan" | tr -dc '0-9')
-    gpu_mem_used=$(echo "$gpu_mem_used" | tr -dc '0-9')
-    gpu_mem_total=$(echo "$gpu_mem_total" | tr -dc '0-9')
-    gpu_util=$(echo "$gpu_util" | tr -dc '0-9')
-
-    : "${gpu_temp:=0}"
-    : "${gpu_fan:=0}"
-    : "${gpu_mem_used:=0}"
-    : "${gpu_mem_total:=0}"
-    : "${gpu_util:=0}"
-
-    local uuid_display=""
-    if [ -n "$gpu_uuid" ] && [ "$gpu_uuid" != "N/A" ]; then
-        uuid_display=" (UUID: ${gpu_uuid:0:12}...)"
-    fi
-
-    echo -e "\e[K${AZUL_CLARO}- 🎮 DETALLES DE GPU$uuid_display:${RESET}"
-    echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${gpu_model}${RESET}"
-
-    if [ "$gpu_mem_total" -gt 0 ]; then
-        local mem_g_used=$(awk "BEGIN {printf \"%.2f\", $gpu_mem_used/1024}")
-        local mem_g_total=$(awk "BEGIN {printf \"%.2f\", $gpu_mem_total/1024}")
-        echo -e "\e[K   ${NEGRITA}${BLANCO}VRAM Memoria:${RESET} ${VERDE_GPU}${mem_g_used} GB${RESET} / ${CIAN_GPU}${mem_g_total} GB${RESET} | ${AZUL_GRISACEO}FAN: ${CIAN_GPU}${gpu_fan}%${RESET} | ${AZUL_GRISACEO}Carga Core/NPU: ${CIAN_GPU}${gpu_util}%${RESET}"
+    if [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
+        local mem_g_used=$(awk "BEGIN {printf \"%.2f\", $GPU_MEM_USED_MB/1024}")
+        local mem_g_total=$(awk "BEGIN {printf \"%.2f\", $GPU_MEM_TOTAL_MB/1024}")
+        echo -e "\e[K   ${NEGRITA}${BLANCO}VRAM Memoria:${RESET} ${VERDE_GPU}${mem_g_used} GB${RESET} / ${CIAN_GPU}${mem_g_total} GB${RESET} | ${AZUL_GRISACEO}FAN: ${CIAN_GPU}${GPU_FAN}%${RESET} | ${AZUL_GRISACEO}Carga Core/NPU: ${CIAN_GPU}${GPU_UTIL}%${RESET}"
     else
-        echo -e "\e[K   ${NEGRITA}${BLANCO}Estado:${RESET} ${CIAN_GPU}Sin lectura VRAM${RESET} | ${AZUL_GRISACEO}FAN: ${gpu_fan}%${RESET}"
+        echo -e "\e[K   ${NEGRITA}${BLANCO}Estado:${RESET} ${CIAN_GPU}Sin lectura VRAM / Memoria Compartida${RESET} | ${AZUL_GRISACEO}FAN: ${GPU_FAN}%${RESET} | ${AZUL_GRISACEO}Carga: ${GPU_UTIL}%${RESET}"
     fi
 }
 
@@ -420,6 +497,9 @@ obtener_info_seguridad() {
 }
 
 renderizar_pantalla() {
+    # Cargar métricas actualizadas de la GPU
+    obtener_datos_gpu
+
     echo -ne "\e[H"
     echo -e "\e[K ${AZUL_BRILLANTE}--- ⚡ ${COLOR_LOGO}DASH4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}FULL DASHBOARD${RESET} ${AZUL_OSCURO}| ${COLOR_VER}${VER}${RESET} ${BLANCO}:${HORA_ACTUAL}: ${AZUL_BRILLANTE}⚡---\e[0m"
     echo -e "\e[K ${AZUL_BRILLANTE} - ${RESET}AUTO-REFRESCO: ${CIAN}3s${RESET} | ENTER=${CIAN}Actualizar ${RESET}| CTRL+C=${CIAN}Salir${RESET}${AZUL_BRILLANTE} - "
@@ -486,20 +566,10 @@ renderizar_pantalla() {
     local D_PERC=$(echo $DISCO_DATA | awk '{print $4}' | tr -d '%')
     D_PERC=${D_PERC:-0}
 
-    # Consultar métricas GPU si existe nvidia-smi
-    local LAST_GPU_TEMP=0
+    # Calcular porcentaje VRAM si aplica
     local LAST_GPU_VRAM_PCT=0
-    if command -v nvidia-smi &>/dev/null; then
-        local gpu_data=$(nvidia-smi --query-gpu=temperature.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
-        if [ -n "$gpu_data" ]; then
-            IFS=',' read -r t u tot <<< "$gpu_data"
-            LAST_GPU_TEMP=$(echo "$t" | tr -dc '0-9')
-            u=$(echo "$u" | tr -dc '0-9')
-            tot=$(echo "$tot" | tr -dc '0-9')
-            if [ "${tot:-0}" -gt 0 ]; then
-                LAST_GPU_VRAM_PCT=$(( u * 100 / tot ))
-            fi
-        fi
+    if [ "${GPU_MEM_TOTAL_MB:-0}" -gt 0 ]; then
+        LAST_GPU_VRAM_PCT=$(( GPU_MEM_USED_MB * 100 / GPU_MEM_TOTAL_MB ))
     fi
 
     echo -e "\e[K${AZUL_CLARO}- 📊 RENDIMIENTO EN TIEMPO REAL -${RESET}"
@@ -507,9 +577,14 @@ renderizar_pantalla() {
     echo -ne "\e[K${NEGRITA}${ROJO_BRILLANTE}    ### TEMP CPU:  ${RESET}"; dibujar_barra $CPU_TEMP "temp"; echo -e " -> $(interpretar $CPU_TEMP 'cpu_temp')"
     echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    ### USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " --> $(interpretar $RAM_PERC 'ram')"
     
-    if command -v nvidia-smi &>/dev/null; then
-        echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:  ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " --> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
-        echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:  ${RESET}"; dibujar_barra $LAST_GPU_TEMP "temp"; echo -e " -> $(interpretar $LAST_GPU_TEMP 'gpu_temp')"
+    # Renderizar barras de GPU solo si existe alguna detectada
+    if [ "$GPU_TYPE" != "NONE" ]; then
+        if [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
+            echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:  ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " --> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
+        fi
+        if [ "$GPU_TEMP" -gt 0 ]; then
+            echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:  ${RESET}"; dibujar_barra $GPU_TEMP "temp"; echo -e " -> $(interpretar $GPU_TEMP 'gpu_temp')"
+        fi
     fi
 
     if [ "$SWAP_TOTAL" -gt 0 ]; then
