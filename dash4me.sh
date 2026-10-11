@@ -30,7 +30,7 @@ ROJO_GPU='\e[38;5;209m'       # Rojo para alta temperatura
 CIAN_GPU='\e[38;5;94m'        # Cian para GPU en general
 AZUL_GRISACEO='\e[38;5;244m'  # Gris azulado para util
 
-VER="V 1.9.0-STABLE"
+VER="V 1.9.1-STABLE"
 
 dibujar_barra() {
     local valor=$1
