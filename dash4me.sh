@@ -383,7 +383,7 @@ obtener_info_gpu() {
     echo -e "\e[K${AZUL_CLARO}- 🎮 DETALLES DE GPU (${GPU_TYPE})${GPU_EXTRA_INFO}:${RESET}"
     echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${GPU_MODEL}${RESET}"
 
-    if [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
+    if [[ "$GPU_MEM_TOTAL_MB" =~ ^[0-9]+$ ]] && [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
         local mem_g_used=$(awk "BEGIN {printf \"%.2f\", $GPU_MEM_USED_MB/1024}")
         local mem_g_total=$(awk "BEGIN {printf \"%.2f\", $GPU_MEM_TOTAL_MB/1024}")
         echo -e "\e[K   ${NEGRITA}${BLANCO}VRAM Memoria:${RESET} ${VERDE_GPU}${mem_g_used} GB${RESET} / ${CIAN_GPU}${mem_g_total} GB${RESET} | ${AZUL_GRISACEO}FAN: ${CIAN_GPU}${GPU_FAN}%${RESET} | ${AZUL_GRISACEO}Carga Core/NPU: ${CIAN_GPU}${GPU_UTIL}%${RESET}"
@@ -577,12 +577,12 @@ renderizar_pantalla() {
     echo -ne "\e[K${NEGRITA}${ROJO_BRILLANTE}    ### TEMP CPU:  ${RESET}"; dibujar_barra $CPU_TEMP "temp"; echo -e " -> $(interpretar $CPU_TEMP 'cpu_temp')"
     echo -ne "\e[K${NEGRITA}${AZUL_BRILLANTE}    ### USO RAM:   ${RESET}"; dibujar_barra $RAM_PERC "uso"; echo -e " --> $(interpretar $RAM_PERC 'ram')"
     
-    # Renderizar barras de GPU solo si existe alguna detectada
+    # Renderizar barras de GPU solo si existe alguna detectada y es un número válido
     if [ "$GPU_TYPE" != "NONE" ]; then
-        if [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
+        if [[ "$GPU_MEM_TOTAL_MB" =~ ^[0-9]+$ ]] && [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
             echo -ne "\e[K${NEGRITA}${VERDE_GPU}    ### USO VRAM:  ${RESET}"; dibujar_barra $LAST_GPU_VRAM_PCT "uso"; echo -e " --> $(interpretar $LAST_GPU_VRAM_PCT 'vram')"
         fi
-        if [ "$GPU_TEMP" -gt 0 ]; then
+        if [[ "$GPU_TEMP" =~ ^[0-9]+$ ]] && [ "$GPU_TEMP" -gt 0 ]; then
             echo -ne "\e[K${NEGRITA}${ROJO_GPU}    ### TEMP GPU:  ${RESET}"; dibujar_barra $GPU_TEMP "temp"; echo -e " -> $(interpretar $GPU_TEMP 'gpu_temp')"
         fi
     fi
