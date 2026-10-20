@@ -30,7 +30,7 @@ ROJO_GPU='\e[38;5;209m'       # Rojo para alta temperatura
 CIAN_GPU='\e[38;5;94m'        # Cian para GPU en general
 AZUL_GRISACEO='\e[38;5;244m'  # Gris azulado para util
 
-VER="V 1.9.1-STABLE"
+VER="V 1.9.2-alfa"
 
 dibujar_barra() {
     local valor=$1
@@ -157,21 +157,23 @@ obtener_datos_gpu() {
     GPU_UTIL=0
     GPU_EXTRA_INFO=""
 
-    # 1. Probar NVIDIA (nvidia-smi)
+    # 1. Probar NVIDIA (nvidia-smi) de forma segura
     if command -v nvidia-smi &>/dev/null; then
         local n_out
         n_out=$(nvidia-smi --query-gpu=name,uuid,temperature.gpu,fan.speed,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1)
-        if [ -n "$n_out" ]; then
+        
+        # Verificamos que la salida exista y QUE NO SEA UN MENSAJE DE ERROR (evitando el apóstrofe de "couldn't")
+        if [ -n "$n_out" ] && echo "$n_out" | grep -qv "failed"; then
             IFS=',' read -r g_model g_uuid g_temp g_fan g_used g_tot g_util <<< "$n_out"
             GPU_TYPE="NVIDIA"
-            GPU_MODEL=$(echo "$g_model" | xargs)
-            GPU_TEMP=$(echo "$g_temp" | tr -dc '0-9')
-            GPU_FAN=$(echo "$g_fan" | tr -dc '0-9')
-            GPU_MEM_USED_MB=$(echo "$g_used" | tr -dc '0-9')
-            GPU_MEM_TOTAL_MB=$(echo "$g_tot" | tr -dc '0-9')
-            GPU_UTIL=$(echo "$g_util" | tr -dc '0-9')
+            GPU_MODEL=$(printf '%s' "$g_model" | xargs)
+            GPU_TEMP=$(printf '%s' "$g_temp" | tr -dc '0-9')
+            GPU_FAN=$(printf '%s' "$g_fan" | tr -dc '0-9')
+            GPU_MEM_USED_MB=$(printf '%s' "$g_used" | tr -dc '0-9')
+            GPU_MEM_TOTAL_MB=$(printf '%s' "$g_tot" | tr -dc '0-9')
+            GPU_UTIL=$(printf '%s' "$g_util" | tr -dc '0-9')
             
-            g_uuid=$(echo "$g_uuid" | xargs)
+            g_uuid=$(printf '%s' "$g_uuid" | xargs)
             if [ -n "$g_uuid" ] && [ "$g_uuid" != "N/A" ]; then
                 GPU_EXTRA_INFO=" (UUID: ${g_uuid:0:12}...)"
             fi
