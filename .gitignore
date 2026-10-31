@@ -15,3 +15,6 @@ basura/
 temp/
 
 Obsoletos_pruebas/
+
+# Archivos de agentes (no se versionan)
+AGENTS.md

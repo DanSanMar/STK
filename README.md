@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-5.9.4-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.0.0-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v5.9.7) casi tenemos la 6...
+# 🛠️ STK - System Tool Kit (v6.0.0)
 
 </div>
 
@@ -21,7 +21,7 @@
 
 ## 🚀 Características Principales
 
-* **Abstracción de Paquetes:** Motor de detección inteligente que unifica la sintaxis de `apt`, `dnf`, `pacman` y `zypper`.
+* **Abstracción de Paquetes:** Motor de detección inteligente que unifica la sintaxis de `apt`, `dnf`, `pacman` y `zypper`, con soporte para `rpm-ostree` en sistemas inmutables.
 * **Interfaz Dinámica:** Menús interactivos potenciados por `fzf` con previsualizaciones en tiempo real.
 * **Monitor de Rendimiento:** Tablero visual en tiempo real con barras de estado para **CPU**, **RAM** y **Disco**.
 * **Gestión de Backups Pro:** Sistema de copias de seguridad con verificación de espacio, integridad **SHA256** y rotación automática.
@@ -37,12 +37,12 @@
 
 ### 1. Motor de Detección de Distribuciones
 El script lee las variables de `/etc/os-release` con lógica de caída escalonada (*fallback*) para garantizar compatibilidad completa en distros basadas en Debian, Arch, RedHat y SUSE.
-* **Sistemas Compatibles:** Debian, Ubuntu, Linux Mint, Kali Linux, Fedora, RHEL, CentOS, Rocky Linux, Arch Linux, Manjaro, openSUSE y entornos integrados bajo **WSL2**.
+* **Sistemas Compatibles:** Debian, Ubuntu, Linux Mint, Kali Linux, Fedora, RHEL, CentOS, Rocky Linux, Arch Linux, Manjaro, openSUSE, entornos integrados bajo **WSL2** y sistemas inmutables basados en OSTree (Fedora Silverblue, Kinoite y COSMIC Atomic).
 
 ### 2. Gestión Inteligente de Dependencias y Entornos
 * **Verificación de Herramientas:** Comprueba automáticamente la disponibilidad de las 13 utilidades esenciales del sistema (`fzf`, `xsltproc`, `host`, `tput`, `free`, `curl`, `wget`, `tar`, `hostname`, `jq`, `rsync`, `crontab`).
 * **Sintaxis y Compatibilidad JS:** Detecta dinámicamente el motor de JavaScript disponible en la máquina (`js`, `js128`, `js115`, `qjs`, `gjs`, `node`, `nodejs`) y genera un enlace simbólico de compatibilidad en `/usr/local/bin/js` cuando es necesario.
-* **Resolución Automática:** Ofrece la instalación guiada de herramientas faltantes adaptándose al gestor de paquetes de la distribución detectada.
+* **Resolución Automática:** Ofrece la instalación guiada de herramientas faltantes adaptándose al gestor de paquetes de la distribución detectada, incluido `rpm-ostree` en sistemas inmutables.
 
 ### 3. Optimización de Rendimiento
 * **Mínimo Overhead:** Basado en herramientas nativas de administración del sistema (`awk`, `sed`, `grep`, `du`, `jq`).
@@ -113,11 +113,41 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
     sudo ./stk2.sh
     ```
 
+### 🧊 Entornos inmutables (Fedora Silverblue / Kinoite / COSMIC Atomic)
+
+STK detecta automáticamente los sistemas basados en OSTree (`/run/ostree-booted`) y usa
+`rpm-ostree` en lugar de `dnf` para instalar las dependencias. La pregunta de siempre
+(`s` instalar automáticamente / `i` ver instrucciones / `n` continuar) sigue funcionando.
+
+Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herramientas.
+
+- Si `rpm-ostree` puede aplicar los paquetes en vivo, STK continúa sin reiniciar.
+- Si no, prepara una nueva capa y te pide reiniciar. Después del reinicio, vuelve a ejecutar STK.
+- Instalación manual de todas las dependencias:
+  ```bash
+  sudo rpm-ostree install --idempotent --allow-inactive \
+      fzf libxslt bind-utils ncurses procps-ng curl wget tar hostname nodejs jq rsync cronie
+  sudo systemctl reboot
+  ```
+- Para no tocar la imagen base, también puedes ejecutar STK dentro de un **Toolbox** o
+  **Distrobox** de Fedora.
+- El módulo `stop4me.sh` instala UFW con `rpm-ostree` cuando no está presente. En Fedora,
+  recuerda que `firewalld` puede estar activo y entrar en conflicto con UFW.
+- `stk_cron.sh` necesita `cronie`; instálalo con `stk2.sh` o con
+  `sudo rpm-ostree install --idempotent --allow-inactive cronie`. Para las notificaciones de
+  escritorio se usa `notify-send` (`libnotify`), que suele venir ya instalado en el escritorio.
+
 ---
 
 ## 📝 Registro de Cambios
 
-### 📝 v5.9.7 (Actual)
+### 📝 v6.0.0 (Actual)
+* **Nuevo:** Soporte para sistemas inmutables basados en OSTree (`rpm-ostree`): Fedora Silverblue, Kinoite y COSMIC Atomic.
+* **Mejora:** Detección automática del entorno inmutable e instalación de dependencias con `rpm-ostree` (`--apply-live`), con preparación de capas y aviso de reinicio cuando es necesario.
+* **Mejora:** Ramas específicas de `rpm-ostree` para actualizar el sistema, instalar/desinstalar programas, limpiar metadatos y ejecutar el modo automático.
+* **Módulo UFW:** `stop4me.sh` instala UFW con `rpm-ostree` y avisa si hace falta reiniciar.
+
+### 📝 v5.9.7
 * **Nuevo:** Soporte para ejecución directa por línea de comandos mediante banderas CLI (`-m`, `-a`, `-u`, `-c`, `-l`, `-b`, `-A`, `-v`, `-h`).
 * **Mejora:** Sistema interactivo de ayuda (`--help`) para recordar el uso de las flags desde la terminal.
 * **Optimización:** Resolución dinámica y creación de enlace simbólico de compatibilidad para el intérprete de JavaScript (`js`).

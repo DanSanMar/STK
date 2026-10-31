@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL MÓDULO ---
-V="1.5"
+V="1.6"
 DESCRIPCION="Instalación, Gestión y Configuración de Cortafuegos UFW para Linux"
 AUTOR="DanSanMar"
 
@@ -76,6 +76,13 @@ case "$OS_ID" in
         ;;
 esac
 
+# --- DETECCIÓN DE SISTEMAS INMUTABLES (OSTREE / RPM-OSTREE) ---
+IMMUTABLE=false
+if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
+    IMMUTABLE=true
+    [ "$Package" = "unknown" ] && Package="dnf"
+fi
+
 # --- LOGO ASCII ---
 mostrar_logo_stop4me() {
     echo -e "${ROJO}  ███████╗████████╗██████╗ ██████╗  ██╗  ██╗███╗   ███╗███████╗${RESET}"
@@ -89,6 +96,9 @@ mostrar_logo_stop4me() {
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Gestor de Paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
+    if [ "$IMMUTABLE" = true ]; then
+        echo -e "${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+    fi
     
     if command -v ufw &>/dev/null; then
         local st_ufw
@@ -133,18 +143,42 @@ verificar_e_instalar_ufw() {
         clear
         mostrar_logo_stop4me
         pintar "$AMARILLO" "⚠️ No se detectó el cortafuegos 'ufw' instalado en el sistema."
-        echo -ne "${CIAN}¿Desea instalar UFW automáticamente usando $Package? (s/N): ${RESET}"
+
+        local gestor_mostrar="$Package"
+        [ "$IMMUTABLE" = true ] && gestor_mostrar="rpm-ostree (inmutable)"
+        echo -ne "${CIAN}¿Desea instalar UFW automáticamente usando $gestor_mostrar? (s/N): ${RESET}"
         read -r inst_conf
 
         if [[ "$inst_conf" =~ ^[sS]$ ]]; then
-            echo -e "\n${AZUL}🔄 Instalando UFW...${RESET}"
-            case "$Package" in
-                apt) apt update -y && apt install -y ufw ;;
-                dnf) dnf install -y ufw ;;
-                pacman) pacman -S --noconfirm ufw ;;
-                zypper) zypper install -y ufw ;;
-                *) pintar "$ROJO" "❌ No se puede instalar UFW automáticamente." ; return 1 ;;
-            esac
+            if [ "$IMMUTABLE" = true ]; then
+                echo -e "\n${AZUL}🔄 Instalando UFW en una capa rpm-ostree...${RESET}"
+                if rpm-ostree install --idempotent --allow-inactive --apply-live ufw && command -v ufw &>/dev/null; then
+                    pintar "$VERDE_BRILLANTE" "✔ UFW aplicado en la sesión actual."
+                else
+                    echo -e "${AMARILLO}⚠️ No se pudo aplicar en vivo. Preparando la capa para el próximo arranque...${RESET}"
+                    if ! rpm-ostree install --idempotent --allow-inactive ufw; then
+                        pintar "$ROJO" "❌ Error instalando UFW con rpm-ostree."
+                        registrar_log "$LOG_ERR" "Fallo al preparar UFW con rpm-ostree."
+                        read -p "Presione Enter para volver..."
+                        return 1
+                    fi
+                    if ! command -v ufw &>/dev/null; then
+                        pintar "$AMARILLO" "🔄 Reinicia el sistema y vuelve a ejecutar STOP4ME."
+                        registrar_log "$LOG_INFO" "UFW preparado con rpm-ostree; reinicio pendiente."
+                        read -p "Presione Enter para volver..."
+                        return 1
+                    fi
+                fi
+            else
+                echo -e "\n${AZUL}🔄 Instalando UFW...${RESET}"
+                case "$Package" in
+                    apt) apt update -y && apt install -y ufw ;;
+                    dnf) dnf install -y ufw ;;
+                    pacman) pacman -S --noconfirm ufw ;;
+                    zypper) zypper install -y ufw ;;
+                    *) pintar "$ROJO" "❌ No se puede instalar UFW automáticamente." ; return 1 ;;
+                esac
+            fi
 
             if command -v ufw &>/dev/null; then
                 pintar "$VERDE_BRILLANTE" "✔ UFW instalado con éxito."

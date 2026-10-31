@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="5.9.9 dash4me y modo_auto en test"
+V="6.0.0"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -186,11 +186,84 @@ case "$OS_ID" in
         ;;
 esac
 
+# --- DETECCIÓN DE SISTEMAS INMUTABLES (OSTREE / RPM-OSTREE) ---
+# Fedora Silverblue, Kinoite, COSMIC Atomic, CoreOS y derivados.
+IMMUTABLE=false
+REINICIO_REQUERIDO=false
+INSTALACION_OK=false
+if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
+    IMMUTABLE=true
+    # rpm-ostree implica un sistema basado en RPM; usa los mapeos de Fedora/RHEL.
+    [ "$Package" = "unknown" ] && Package="dnf"
+fi
+
 # --- FUNCIONES AUXILIARES ---
+
+crear_enlace_js() {
+    command -v js &>/dev/null && return 0
+
+    local candidatos=(js128 js115 qjs gjs node nodejs)
+    local target target_path
+    for target in "${candidatos[@]}"; do
+        target_path=$(command -v "$target" 2>/dev/null) || continue
+        echo -e "${AMARILLO}🔗 Creando enlace de compatibilidad para 'js' -> $target_path${RESET}"
+
+        if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+            ln -sf "$target_path" /usr/local/bin/js
+        fi
+        # En sistemas inmutables /usr/bin es de solo lectura: se omite.
+        if [ "$IMMUTABLE" != true ] && [ -w /usr/bin ]; then
+            ln -sf "$target_path" /usr/bin/js 2>/dev/null
+        fi
+
+        hash -r 2>/dev/null
+        return 0
+    done
+
+    return 1
+}
 
 install_tools() {
     local tools_to_install=("$@")
-    
+    local tool pkg
+    local paquetes=()
+
+    # Traducir herramientas a paquetes y evitar duplicados
+    for tool in "${tools_to_install[@]}"; do
+        pkg=$(get_package_name "$tool")
+        [[ " ${paquetes[*]} " == *" $pkg "* ]] || paquetes+=("$pkg")
+    done
+
+    # --- SISTEMAS INMUTABLES (Fedora Silverblue/Kinoite/COSMIC, CoreOS...) ---
+    if [ "$IMMUTABLE" = true ]; then
+        echo -e "\n${AZUL}🔄 Actualizando metadatos de rpm-ostree...${RESET}"
+        rpm-ostree refresh-md &>/dev/null || true
+
+        echo -e "${AZUL}📦 Instalando en una capa inmutable: ${paquetes[*]}...${RESET}"
+        if rpm-ostree install --idempotent --allow-inactive --apply-live "${paquetes[@]}"; then
+            echo -e "${VERDE_BRILLANTE}✔ Paquetes aplicados en la sesión actual.${RESET}"
+        else
+            echo -e "${AMARILLO}⚠️ No se pudo aplicar en vivo. Preparando la capa para el próximo arranque...${RESET}"
+            if rpm-ostree install --idempotent --allow-inactive "${paquetes[@]}"; then
+                REINICIO_REQUERIDO=true
+                echo -e "${AMARILLO}🔄 Reinicia el sistema para usar las herramientas instaladas.${RESET}"
+                if [[ " ${tools_to_install[*]} " =~ " crontab " ]]; then
+                    echo -e "${AMARILLO}📅 Tras reiniciar, habilita cron: sudo systemctl enable --now crond${RESET}"
+                fi
+            else
+                pintar "$ROJO" "❌ No se pudieron instalar los paquetes con rpm-ostree."
+                registrar_log "$LOG_ERR" "Fallo al instalar dependencias con rpm-ostree: ${paquetes[*]}"
+                return 1
+            fi
+        fi
+
+        if [[ " ${tools_to_install[*]} " =~ " crontab " ]]; then
+            systemctl enable --now crond &>/dev/null || true
+        fi
+        return 0
+    fi
+
+    # --- SISTEMAS TRADICIONALES ---
     echo -e "\n${AZUL}🔄 Actualizando repositorios ($Package)...${RESET}"
     case "$Package" in
         "apt") apt update -y ;;
@@ -199,8 +272,7 @@ install_tools() {
         "zypper") zypper refresh ;;
     esac
 
-    for tool in "${tools_to_install[@]}"; do
-        pkg=$(get_package_name "$tool")
+    for pkg in "${paquetes[@]}"; do
         echo -e "${AZUL}📦 Instalando paquete: $pkg...${RESET}"
         case "$Package" in
             "apt") apt install -y "$pkg" ;;
@@ -220,14 +292,48 @@ install_tools() {
         esac
     fi
 }
+
 mostrar_instrucciones() {
     clear
     local pkg_upper
     pkg_upper=$(echo "$Package" | tr '[:lower:]' '[:upper:]')
 
+    if [ "$IMMUTABLE" = true ]; then
+        pkg_upper="RPM-OSTREE / SISTEMA INMUTABLE"
+    fi
+
     echo -e "\n${AZUL}══════════════════════════════════════════════════${RESET}"
     echo -e "${BLANCO} 📖 GUÍA DE INSTALACIÓN MANUAL PARA TU SISTEMA (${pkg_upper})${RESET}"
     echo -e "${AZUL}══════════════════════════════════════════════════${RESET}\n"
+
+    if [ "$IMMUTABLE" = true ]; then
+        local tool pkg
+        local paquetes=()
+        for tool in "${missing_tools[@]}"; do
+            pkg=$(get_package_name "$tool")
+            [[ " ${paquetes[*]} " == *" $pkg "* ]] || paquetes+=("$pkg")
+
+            if [[ "$tool" != "$pkg" ]]; then
+                echo -e "${AMARILLO}🛠  Comando faltante: ${BLANCO}$tool${AMARILLO} (Paquete: ${BLANCO}$pkg${AMARILLO})${RESET}"
+            else
+                echo -e "${AMARILLO}🛠  Herramienta: ${BLANCO}$tool${RESET}"
+            fi
+        done
+        echo -e "${AZUL}--------------------------------------------------${RESET}"
+        echo -e "${AMARILLO}📦 Instala todo en una sola capa:${RESET}"
+        echo -e "   ${VERDE}sudo rpm-ostree install --idempotent --allow-inactive ${paquetes[*]}${RESET}"
+        echo -e "   ${VERDE}sudo systemctl reboot${RESET}"
+        echo ""
+        echo -e "${AMARILLO}⚡ O aplica en vivo (si tu rpm-ostree lo soporta):${RESET}"
+        echo -e "   ${VERDE}sudo rpm-ostree install --idempotent --allow-inactive --apply-live ${paquetes[*]}${RESET}"
+        echo ""
+        echo -e "${CIAN}💡 Alternativa: ejecuta STK dentro de un Toolbox/Distrobox de Fedora.${RESET}"
+        if [[ " ${missing_tools[*]} " =~ " crontab " ]]; then
+            echo -e "${AMARILLO}📅 Tras reiniciar, habilita cron:${RESET} ${VERDE}sudo systemctl enable --now crond${RESET}"
+        fi
+        echo -e "${AZUL}--------------------------------------------------${RESET}"
+        return
+    fi
 
     for tool in "${missing_tools[@]}"; do
         pkg=$(get_package_name "$tool")
@@ -257,8 +363,17 @@ get_package_name() {
     local tool="$1"
 
     case "$tool" in
-        "xsltproc"|"fzf")
+        "fzf")
             echo "$tool"
+            ;;
+        "xsltproc")
+            case "$Package" in
+                apt)    echo "xsltproc" ;;
+                pacman) echo "libxslt" ;;
+                dnf)    echo "libxslt" ;;
+                zypper) echo "libxslt-tools" ;;
+                *)      echo "$tool" ;;
+            esac
             ;;
         "crontab")
             case "$Package" in
@@ -274,18 +389,20 @@ get_package_name() {
             esac
             ;;
         "tput")
-            if [[ "$Package" == "apt" ]]; then
-                echo "ncurses-bin"
-            else
-                echo "ncurses"
-            fi
+            case "$Package" in
+                apt)    echo "ncurses-bin" ;;
+                zypper) echo "ncurses-utils" ;;
+                *)      echo "ncurses" ;;
+            esac
             ;;
         "free")
-            if [[ "$Package" == "pacman" ]]; then
-                echo "procps-ng"
-            else
-                echo "procps"
-            fi
+            case "$Package" in
+                apt)    echo "procps" ;;
+                pacman) echo "procps-ng" ;;
+                dnf)    echo "procps-ng" ;;
+                zypper) echo "procps" ;;
+                *)      echo "$tool" ;;
+            esac
             ;;
         "hostname")
             if [[ "$Package" == "pacman" ]]; then
@@ -388,49 +505,39 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
     read -r confirm
 
     if [[ "$confirm" == "s" ]]; then
-        install_tools "${missing_tools[@]}"
+        if install_tools "${missing_tools[@]}"; then
+            INSTALACION_OK=true
+        else
+            pintar "$AMARILLO" "⚠️ La instalación automática no terminó correctamente."
+        fi
         check_dependencies
 
-        # Crear enlace de compatibilidad dinámico para 'js' si no existe
-        if ! command -v js &>/dev/null; then
-            js_candidates=(js128 js115 qjs gjs node nodejs)
-            for target in "${js_candidates[@]}"; do
-                if command -v "$target" &>/dev/null; then
-                    target_path=$(command -v "$target")
-                    echo -e "${AMARILLO}🔗 Creando enlace de compatibilidad para 'js' -> $target_path${RESET}"
-                    ln -sf "$target_path" /usr/local/bin/js
-                    break
-                fi
-            done
-        fi
+        crear_enlace_js
 
         if ! command -v fzf &>/dev/null; then
+            if [ "$IMMUTABLE" = true ] && [ "$INSTALACION_OK" = true ]; then
+                if [ "$REINICIO_REQUERIDO" = true ]; then
+                    echo -e "${AMARILLO}⚠️ fzf quedó preparado en una nueva capa de rpm-ostree.${RESET}"
+                else
+                    echo -e "${AMARILLO}⚠️ fzf no está disponible en esta sesión.${RESET}"
+                fi
+                echo -e "${AMARILLO}🔄 Reinicia el sistema y vuelve a ejecutar STK.${RESET}"
+                registrar_log "$LOG_INFO" "Dependencias preparadas con rpm-ostree; reinicio pendiente."
+                read -p "Presiona Enter para salir..."
+                exit 0
+            fi
             echo -e "${ROJO}❌ Error crítico: fzf no se pudo instalar o no está en el PATH. Si lo has instalado con Git puede haber problemas con la ruta y el uso de sudo. Puedes instalarlo de forma automatica para solucionarlo y tener ambos sin problema.${RESET}"
             registrar_log "$LOG_ERR" "Error crítico: fzf no pudo ser instalado."
             exit 1
         fi
 
-        # Crear enlace de compatibilidad dinámico para 'js' si no existe
-        if ! command -v js &>/dev/null; then
-            js_candidates=(js128 js115 qjs gjs node nodejs)
-            for target in "${js_candidates[@]}"; do
-                if command -v "$target" &>/dev/null; then
-                    target_path=$(command -v "$target")
-                    echo -e "${AMARILLO}🔗 Creando enlace de compatibilidad para 'js' -> $target_path${RESET}"
-                    
-                    # Crear symlink en /usr/local/bin y /usr/bin por compatibilidad global de PATH
-                    ln -sf "$target_path" /usr/local/bin/js
-                    ln -sf "$target_path" /usr/bin/js 2>/dev/null
-                    
-                    # Actualizar la tabla de comandos de la sesión activa de bash
-                    hash -r 2>/dev/null
-                    break
-                fi
-            done
-        fi
-
         if [ ${#missing_tools[@]} -gt 0 ]; then
-            echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
+            if [ "$IMMUTABLE" = true ] && [ "$INSTALACION_OK" = true ]; then
+                echo -e "${AMARILLO}⚠️ Aún faltan herramientas: ${missing_tools[*]}.${RESET}"
+                echo -e "${AMARILLO}🔄 Si se han preparado con rpm-ostree, reinicia el sistema para aplicarlas.${RESET}"
+            else
+                echo -e "${ROJO}⚠️ Advertencia: Aún faltan herramientas: ${missing_tools[*]}. El script podría fallar.${RESET}"
+            fi
             read -p "Presiona Enter para continuar de todos modos..."
         else
             registrar_log "$LOG_INFO" "Todas las dependencias instaladas con éxito."
@@ -456,6 +563,9 @@ mostrar_logo() {
     #OS_ID:-"Desconocido" Forma sencilla de decir: si no tiene valor imprime: "Desconocido"
     echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Package de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
+    if [ "$IMMUTABLE" = true ]; then
+        echo -e "${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+    fi
     echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
     echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -629,7 +739,9 @@ modo_auto() {
     # --------------------------------------------------------------------------
     # PASO 1: ACTUALIZACIÓN DEL SISTEMA (MODO VERBOSO)
     # --------------------------------------------------------------------------
-    pintar "$AZUL_BRILLANTE" "📌 [1/4] Ejecutando Actualización del Sistema ($Package)..."
+    local ETIQUETA_GESTOR="$Package"
+    [ "$IMMUTABLE" = true ] && ETIQUETA_GESTOR="rpm-ostree"
+    pintar "$AZUL_BRILLANTE" "📌 [1/4] Ejecutando Actualización del Sistema ($ETIQUETA_GESTOR)..."
     echo ""
     
     local LOG_TEMP_ACT
@@ -637,39 +749,44 @@ modo_auto() {
     local ESTADO_ACT=1
     local PKGS_ACTUALIZADOS=()
 
-    case "$Package" in
-        apt)
-            # Guardar lista de paquetes actualizables antes de ejecutar
-            mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
+    if [ "$IMMUTABLE" = true ]; then
+        rpm-ostree upgrade 2>&1 | tee "$LOG_TEMP_ACT"
+        ESTADO_ACT=${PIPESTATUS[0]}
+    else
+        case "$Package" in
+            apt)
+                # Guardar lista de paquetes actualizables antes de ejecutar
+                mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
 
-            # Usamos 'tee' para volcar la salida a pantalla y al archivo de log al mismo tiempo
-            apt-get update -y 2>&1 | tee "$LOG_TEMP_ACT" && \
-            apt-get full-upgrade -y 2>&1 | tee -a "$LOG_TEMP_ACT" && \
-            apt-get autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
-            ESTADO_ACT=${PIPESTATUS[0]}
-            ;;
+                # Usamos 'tee' para volcar la salida a pantalla y al archivo de log al mismo tiempo
+                apt-get update -y 2>&1 | tee "$LOG_TEMP_ACT" && \
+                apt-get full-upgrade -y 2>&1 | tee -a "$LOG_TEMP_ACT" && \
+                apt-get autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+                ESTADO_ACT=${PIPESTATUS[0]}
+                ;;
 
-        pacman)
-            pacman -Syu --noconfirm 2>&1 | tee "$LOG_TEMP_ACT"
-            ESTADO_ACT=${PIPESTATUS[0]}
-            if [ $ESTADO_ACT -eq 0 ]; then
-                mapfile -t PKGS_ACTUALIZADOS < <(grep -E "upgraded|actualizado" "$LOG_TEMP_ACT" | awk '{print $2}')
-            fi
-            ;;
+            pacman)
+                pacman -Syu --noconfirm 2>&1 | tee "$LOG_TEMP_ACT"
+                ESTADO_ACT=${PIPESTATUS[0]}
+                if [ $ESTADO_ACT -eq 0 ]; then
+                    mapfile -t PKGS_ACTUALIZADOS < <(grep -E "upgraded|actualizado" "$LOG_TEMP_ACT" | awk '{print $2}')
+                fi
+                ;;
 
-        dnf)
-            dnf upgrade --refresh -y 2>&1 | tee "$LOG_TEMP_ACT" && dnf autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
-            ESTADO_ACT=${PIPESTATUS[0]}
-            if [ $ESTADO_ACT -eq 0 ]; then
-                mapfile -t PKGS_ACTUALIZADOS < <(grep -E "Upgraded:|Upgrade" "$LOG_TEMP_ACT" | awk '{print $2}')
-            fi
-            ;;
+            dnf)
+                dnf upgrade --refresh -y 2>&1 | tee "$LOG_TEMP_ACT" && dnf autoremove -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+                ESTADO_ACT=${PIPESTATUS[0]}
+                if [ $ESTADO_ACT -eq 0 ]; then
+                    mapfile -t PKGS_ACTUALIZADOS < <(grep -E "Upgraded:|Upgrade" "$LOG_TEMP_ACT" | awk '{print $2}')
+                fi
+                ;;
 
-        zypper)
-            zypper refresh 2>&1 | tee "$LOG_TEMP_ACT" && zypper update -y 2>&1 | tee -a "$LOG_TEMP_ACT"
-            ESTADO_ACT=${PIPESTATUS[0]}
-            ;;
-    esac
+            zypper)
+                zypper refresh 2>&1 | tee "$LOG_TEMP_ACT" && zypper update -y 2>&1 | tee -a "$LOG_TEMP_ACT"
+                ESTADO_ACT=${PIPESTATUS[0]}
+                ;;
+        esac
+    fi
 
     # --- Flatpak ---
     local RES_FLATPAK=""
@@ -709,13 +826,17 @@ modo_auto() {
 
     echo ""
     if [ $ESTADO_ACT -eq 0 ]; then
-        local total_pkgs=$(( ${#PKGS_ACTUALIZADOS[@]} + ${#FLATPAKS_ACT[@]} + ${#SNAPS_ACT[@]} ))
-        RES_ACTUALIZACION="✔ Sistema al día ($Package: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
-        [ -n "$RES_SNAP" ] && RES_ACTUALIZACION="$RES_ACTUALIZACION | $RES_SNAP"
-        RES_ACTUALIZACION="$RES_ACTUALIZACION)"
+        if [ "$IMMUTABLE" = true ]; then
+            RES_ACTUALIZACION="✔ Imagen del sistema preparada (rpm-ostree). Reinicia para aplicar."
+        else
+            local total_pkgs=$(( ${#PKGS_ACTUALIZADOS[@]} + ${#FLATPAKS_ACT[@]} + ${#SNAPS_ACT[@]} ))
+            RES_ACTUALIZACION="✔ Sistema al día ($ETIQUETA_GESTOR: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
+            [ -n "$RES_SNAP" ] && RES_ACTUALIZACION="$RES_ACTUALIZACION | $RES_SNAP"
+            RES_ACTUALIZACION="$RES_ACTUALIZACION)"
+        fi
         pintar "$VERDE" "   └─ $RES_ACTUALIZACION"
     else
-        RES_ACTUALIZACION="❌ Error en la actualización del gestor principal ($Package)."
+        RES_ACTUALIZACION="❌ Error en la actualización del gestor principal ($ETIQUETA_GESTOR)."
         pintar "$ROJO" "   └─ $RES_ACTUALIZACION"
     fi
     rm -f "$LOG_TEMP_ACT"
@@ -831,7 +952,7 @@ modo_auto() {
         echo -e "\n${AMARILLO}📦 Detalle de Paquetes Actualizados:${RESET}"
         
         if [ ${#PKGS_ACTUALIZADOS[@]} -gt 0 ]; then
-            echo -e "   ${AZUL_BRILLANTE}• Sistema ($Package):${RESET} ${PKGS_ACTUALIZADOS[*]}"
+            echo -e "   ${AZUL_BRILLANTE}• Sistema ($ETIQUETA_GESTOR):${RESET} ${PKGS_ACTUALIZADOS[*]}"
         fi
         if [ ${#FLATPAKS_ACT[@]} -gt 0 ]; then
             echo -e "   ${AZUL_BRILLANTE}• Flatpak:${RESET} ${FLATPAKS_ACT[*]}"
@@ -1121,38 +1242,49 @@ Actualizar_sistema() {
     echo ""
 
     local ESTADO_ACTUALIZACION=0
+    local ETIQUETA_GESTOR="$Package"
+    [ "$IMMUTABLE" = true ] && ETIQUETA_GESTOR="rpm-ostree"
 
     # 1. Actualización según el gestor principal del sistema
-    case "$Package" in
-        apt)
-            pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
-            DEBIAN_FRONTEND=noninteractive apt-get update -y && \
-            DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y && \
-            apt-get autoremove -y
-            ESTADO_ACTUALIZACION=$?
-            ;;
-        dnf)
-            pintar $VERDE "Actualizando sistema (DNF)..."
-            dnf upgrade --refresh -y && dnf autoremove -y
-            ESTADO_ACTUALIZACION=$?
-            ;;
-        pacman)
-            pintar $VERDE "Sincronizando repositorios y sistema (PACMAN)..."
-            pacman -Syu --noconfirm
-            ESTADO_ACTUALIZACION=$?
-            ;;
-        zypper)
-            pintar $VERDE "Refrescando y actualizando (ZYPPER)..."
-            zypper refresh && zypper update -y
-            ESTADO_ACTUALIZACION=$?
-            ;;
-        *)
-            pintar $ROJO "❌ Error: No se pudo identificar un gestor de paquetes compatible."
-            read -p "Presione Enter para volver..."
-            trap - SIGINT
-            return 1
-            ;;
-    esac
+    if [ "$IMMUTABLE" = true ]; then
+        pintar $VERDE "Actualizando la imagen del sistema (RPM-OSTREE)..."
+        rpm-ostree upgrade
+        ESTADO_ACTUALIZACION=$?
+        if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
+            pintar $AMARILLO "🔄 Reinicia el sistema para aplicar la nueva imagen."
+        fi
+    else
+        case "$Package" in
+            apt)
+                pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
+                DEBIAN_FRONTEND=noninteractive apt-get update -y && \
+                DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y && \
+                apt-get autoremove -y
+                ESTADO_ACTUALIZACION=$?
+                ;;
+            dnf)
+                pintar $VERDE "Actualizando sistema (DNF)..."
+                dnf upgrade --refresh -y && dnf autoremove -y
+                ESTADO_ACTUALIZACION=$?
+                ;;
+            pacman)
+                pintar $VERDE "Sincronizando repositorios y sistema (PACMAN)..."
+                pacman -Syu --noconfirm
+                ESTADO_ACTUALIZACION=$?
+                ;;
+            zypper)
+                pintar $VERDE "Refrescando y actualizando (ZYPPER)..."
+                zypper refresh && zypper update -y
+                ESTADO_ACTUALIZACION=$?
+                ;;
+            *)
+                pintar $ROJO "❌ Error: No se pudo identificar un gestor de paquetes compatible."
+                read -p "Presione Enter para volver..."
+                trap - SIGINT
+                return 1
+                ;;
+        esac
+    fi
 
     # 2. Actualización opcional para paquetes Flatpak (si está instalado)
     if command -v flatpak &>/dev/null; then
@@ -1171,11 +1303,16 @@ Actualizar_sistema() {
     # 4. Evaluación del resultado y registro en logs
     echo ""
     if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
-        pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
-        registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($Package)."
+        if [ "$IMMUTABLE" = true ]; then
+            pintar $VERDE_BRILLANTE "✔ Imagen del sistema preparada. Reinicia para aplicar los cambios."
+            registrar_log "$LOG_INFO" "Actualización rpm-ostree preparada; reinicio pendiente."
+        else
+            pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
+            registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($ETIQUETA_GESTOR)."
+        fi
     else
         pintar $ROJO "✘ Hubo un error durante la actualización."
-        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $Package."
+        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $ETIQUETA_GESTOR."
     fi
 
     # Restaurar la trampa de señal por defecto antes de salir
@@ -1204,38 +1341,60 @@ instalar_programa() {
     fi
   
     echo ""
-    echo -e "${AMARILLO}➤ Package de paquetes para la instalación:${RESET} ${AZUL}$Package${RESET}"
+    local GESTOR_MOSTRAR="$Package"
+    [ "$IMMUTABLE" = true ] && GESTOR_MOSTRAR="rpm-ostree (inmutable)"
+    echo -e "${AMARILLO}➤ Package de paquetes para la instalación:${RESET} ${AZUL}$GESTOR_MOSTRAR${RESET}"
     echo ""
 
+    local ESTADO_INSTALACION=1
+
     # 2. Ejecución de comandos (CORREGIDOS)
-    case "$Package" in
-        apt)
-            pintar $VERDE "Actualizando índices e instalando/actualizando $programa..."
-            apt update
-            apt install "$programa" -y  # Corregido "insall" por "install"
-            ;;
-        dnf)
-            pintar $VERDE "Instalando/actualizando $programa..."
-            dnf install "$programa" -y
-            ;;
-        pacman)
-            pintar $VERDE "Instalando/actualizando $programa..."
-            # CORRECCIÓN: pacman no usa "install", usa "-S"
-            pacman -S --noconfirm "$programa" 
-            ;;
-        zypper)
-            pintar $VERDE "Instalando/actualizando $programa..."
-            zypper install -y "$programa"
-            ;;
-        *)
-            pintar $ROJO "❌ Error: No se pudo identificar un Package compatible."
-            read -p "Presione Enter para volver..."
-            return 1
-            ;;
-    esac
+    if [ "$IMMUTABLE" = true ]; then
+        pintar $AMARILLO "💡 En sistemas inmutables, para aplicaciones de escritorio se recomienda Flatpak."
+        pintar $VERDE "Instalando/actualizando $programa en una capa rpm-ostree..."
+        if rpm-ostree install --idempotent --allow-inactive --apply-live "$programa"; then
+            ESTADO_INSTALACION=0
+        else
+            rpm-ostree install --idempotent --allow-inactive "$programa"
+            ESTADO_INSTALACION=$?
+            if [ $ESTADO_INSTALACION -eq 0 ]; then
+                pintar $AMARILLO "🔄 Reinicia el sistema para usar $programa."
+            fi
+        fi
+    else
+        case "$Package" in
+            apt)
+                pintar $VERDE "Actualizando índices e instalando/actualizando $programa..."
+                apt update
+                apt install "$programa" -y  # Corregido "insall" por "install"
+                ESTADO_INSTALACION=$?
+                ;;
+            dnf)
+                pintar $VERDE "Instalando/actualizando $programa..."
+                dnf install "$programa" -y
+                ESTADO_INSTALACION=$?
+                ;;
+            pacman)
+                pintar $VERDE "Instalando/actualizando $programa..."
+                # CORRECCIÓN: pacman no usa "install", usa "-S"
+                pacman -S --noconfirm "$programa"
+                ESTADO_INSTALACION=$?
+                ;;
+            zypper)
+                pintar $VERDE "Instalando/actualizando $programa..."
+                zypper install -y "$programa"
+                ESTADO_INSTALACION=$?
+                ;;
+            *)
+                pintar $ROJO "❌ Error: No se pudo identificar un Package compatible."
+                read -p "Presione Enter para volver..."
+                return 1
+                ;;
+        esac
+    fi
 
     # 3. Resultado final
-    if [ $? -eq 0 ]; then
+    if [ $ESTADO_INSTALACION -eq 0 ]; then
         pintar $VERDE_BRILLANTE "✔ ¡$programa se ha instalado/actualizado correctamente!"
         registrar_log "$LOG_INFO" "Programa instalado: $programa"
     else
@@ -1268,30 +1427,45 @@ desinstalar_programa() {
     echo -e "${ROJO}➤ Preparando para eliminar:${RESET} ${AZUL}$programa${RESET}"
     echo ""
 
-    case "$Package" in
-        apt)
-            pintar $VERDE "Eliminando y limpiando configuraciones (APT)..."
-            apt purge "$programa" -y && apt autoremove -y
-            ;;
-        dnf)
-            pintar $VERDE "Eliminando paquete (DNF)..."
-            dnf remove "$programa" -y
-            ;;
-        pacman)
-            pintar $VERDE "Eliminando paquete y dependencias no usadas (PACMAN)..."
-            pacman -Rs --noconfirm "$programa"
-            ;;
-        zypper)
-            pintar $VERDE "Eliminando paquete (ZYPPER)..."
-            zypper remove -y "$programa"
-            ;;
-        *)
-            pintar $ROJO "❌ Package no compatible."
-            return 1
-            ;;
-    esac
+    local ESTADO_DESINSTALACION=1
 
-    if [ $? -eq 0 ]; then
+    if [ "$IMMUTABLE" = true ]; then
+        pintar $VERDE "Eliminando $programa de la capa rpm-ostree..."
+        rpm-ostree uninstall "$programa"
+        ESTADO_DESINSTALACION=$?
+        if [ $ESTADO_DESINSTALACION -eq 0 ]; then
+            pintar $AMARILLO "🔄 Reinicia el sistema para aplicar la eliminación."
+        fi
+    else
+        case "$Package" in
+            apt)
+                pintar $VERDE "Eliminando y limpiando configuraciones (APT)..."
+                apt purge "$programa" -y && apt autoremove -y
+                ESTADO_DESINSTALACION=$?
+                ;;
+            dnf)
+                pintar $VERDE "Eliminando paquete (DNF)..."
+                dnf remove "$programa" -y
+                ESTADO_DESINSTALACION=$?
+                ;;
+            pacman)
+                pintar $VERDE "Eliminando paquete y dependencias no usadas (PACMAN)..."
+                pacman -Rs --noconfirm "$programa"
+                ESTADO_DESINSTALACION=$?
+                ;;
+            zypper)
+                pintar $VERDE "Eliminando paquete (ZYPPER)..."
+                zypper remove -y "$programa"
+                ESTADO_DESINSTALACION=$?
+                ;;
+            *)
+                pintar $ROJO "❌ Package no compatible."
+                return 1
+                ;;
+        esac
+    fi
+
+    if [ $ESTADO_DESINSTALACION -eq 0 ]; then
         registrar_log "$LOG_WARN" "Programa eliminado: $programa"
         pintar $VERDE_BRILLANTE "✔ ¡$programa ha sido eliminado correctamente!"
     else
@@ -1528,37 +1702,42 @@ super_limpieza() {
     fi
 
     # 4. Limpieza del gestor de paquetes según la distro
-    case "$Package" in
-        apt)
-            apt-get install -f -y >/dev/null 2>&1
-            apt-get autoremove --purge -y >/dev/null 2>&1
-            apt-get autoclean -y >/dev/null 2>&1
-            apt-get clean >/dev/null 2>&1
-            ;;
-        dnf)
-            dnf clean all >/dev/null 2>&1
-            dnf autoremove -y >/dev/null 2>&1
-            ;;
-        pacman)
-            # Limpia paquetes no instalados y antiguas versiones de la caché
-            pacman -Sc --noconfirm >/dev/null 2>&1
-            # Elimina paquetes huérfanos si existen
-            local huerfanos=$(pacman -Qtdq 2>/dev/null)
-            if [ -n "$huerfanos" ]; then
-                pacman -Rns $huerfanos --noconfirm >/dev/null 2>&1
-            fi
-            ;;
-        zypper)
-            zypper clean --all >/dev/null 2>&1
-            zypper clean --packages >/dev/null 2>&1
-            ;;
-        *)
-            kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-            printf "\r\e[K"
-            pintar $ROJO "❌ Limpieza automática no soportada para $Package"
-            return 1
-            ;;
-    esac
+    if [ "$IMMUTABLE" = true ]; then
+        # Solo metadatos: no eliminar deployments pendientes ni la capa actual.
+        rpm-ostree cleanup -m >/dev/null 2>&1
+    else
+        case "$Package" in
+            apt)
+                apt-get install -f -y >/dev/null 2>&1
+                apt-get autoremove --purge -y >/dev/null 2>&1
+                apt-get autoclean -y >/dev/null 2>&1
+                apt-get clean >/dev/null 2>&1
+                ;;
+            dnf)
+                dnf clean all >/dev/null 2>&1
+                dnf autoremove -y >/dev/null 2>&1
+                ;;
+            pacman)
+                # Limpia paquetes no instalados y antiguas versiones de la caché
+                pacman -Sc --noconfirm >/dev/null 2>&1
+                # Elimina paquetes huérfanos si existen
+                local huerfanos=$(pacman -Qtdq 2>/dev/null)
+                if [ -n "$huerfanos" ]; then
+                    pacman -Rns $huerfanos --noconfirm >/dev/null 2>&1
+                fi
+                ;;
+            zypper)
+                zypper clean --all >/dev/null 2>&1
+                zypper clean --packages >/dev/null 2>&1
+                ;;
+            *)
+                kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
+                printf "\r\e[K"
+                pintar $ROJO "❌ Limpieza automática no soportada para $Package"
+                return 1
+                ;;
+        esac
+    fi
 
     # 5. Limpieza profunda de papeleras de usuarios (evaluando dinámicamente)
     find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
