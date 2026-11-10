@@ -411,7 +411,7 @@ ver_estado_y_reglas() {
         pintar "$AMARILLO" "⚠️ El cortafuegos se encuentra actualmente DESACTIVADO."
     else
         echo -e "${VERDE_BRILLANTE}📋 REGLAS NUMERADAS ACTIVAS:${RESET}\n"
-        ufw status numbered
+        ufw status verbose
     fi
     
     echo ""
