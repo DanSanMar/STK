@@ -7,19 +7,23 @@
 # Pensado para ejecutarse solo (sudo ./proc4me.sh) o integrarse después en STK.
 # ==============================================================================
 
-V="1.0"
+V="1.2"
 DESCRIPCION="Investigador de procesos, puertos, persistencia y amenazas silenciosas en Linux"
 AUTOR="DanSanMar"
 
-# --- CONFIGURACIÓN DE COLORES (Estilo STK) ---
+# --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
 VERDE_BRILLANTE='\e[92m'
 VERDE='\e[32m'
 AMARILLO='\e[33m'
+AMARILLO_BRILLANTE='\e[93m'
 AZUL='\e[34m'
 AZUL_BRILLANTE='\e[94m'
+AZUL_OSCURO='\e[0;34m'
+AZUL_CLARO='\e[38;5;117m'
 CIAN='\e[36m'
+CIAN_BRILLANTE='\e[96m'
 MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
@@ -79,6 +83,18 @@ uid_a_usuario() {
     printf '%s' "$nombre"
 }
 
+# Devuelve la propiedad de una ruta al usuario que invocó el script con sudo.
+# Así las carpetas y exportaciones creadas como root siguen siendo accesibles.
+devolver_propietario_usuario() {
+    local ruta="$1"
+    local usuario grupo
+
+    [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] || return 0
+    usuario="$SUDO_USER"
+    grupo=$(id -gn "$usuario" 2>/dev/null) || grupo="$usuario"
+    chown "$usuario:$grupo" "$ruta" 2>/dev/null || true
+}
+
 estado_tcp() {
     case "$1" in
         01) echo "ESTABLISHED" ;;
@@ -109,16 +125,537 @@ fzf_estilo() {
         --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff"
 }
 
+# Menú FZF con el logo como cabecera viva: se refresca cada 5 segundos.
 proc4me_fzf_menu() {
     local prompt_text="$1"
-    local header_text="$2"
+    local titulo="$2"
+    local altura="${3:-~90%}"
+    local logo logo_cmd
+
+    logo=$(logo_texto)
+    printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
+
     fzf --ansi \
-        --height=18 \
+        --height="$altura" \
+        --layout=reverse \
+        --no-sort \
+        --header-first \
+        --border=rounded \
+        --border-label=" $titulo " \
+        --prompt="➤ $prompt_text: " \
+        --header="$logo" \
+        --bind "every(5):bg-transform-header:$logo_cmd" \
+        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
+}
+
+# ==============================================================================
+# --- GUÍAS EDUCATIVAS Y PREVIEWS ---
+# ==============================================================================
+
+texto_educativo() {
+    local categoria="$1"
+    case "$categoria" in
+        tmp)
+            cat <<'EOF'
+QUÉ ES: ejecutables o scripts en /tmp, /var/tmp, /dev/shm o /run.
+POR QUÉ IMPORTA: el malware suele ejecutarse desde directorios temporales
+para no dejar un binario persistente en disco.
+FALSOS POSITIVOS: instaladores, contenedores, herramientas de desarrollo,
+scripts propios y cachés de aplicaciones.
+QUÉ REVISAR: quién creó el archivo, su hash, su contenido, si hay un proceso
+ejecutándolo y a qué paquete pertenece.
+EOF
+            ;;
+        oculto)
+            cat <<'EOF'
+QUÉ ES: archivos cuyo nombre empieza por punto en directorios temporales.
+POR QUÉ IMPORTA: ocultar un archivo es una técnica simple para pasar
+desapercibido en /tmp, /var/tmp o /dev/shm.
+FALSOS POSITIVOS: configuraciones temporales de aplicaciones, cachés,
+archivos de sesión y restos de instaladores.
+QUÉ REVISAR: contenido, fecha de creación, proceso que lo abrió y si el
+nombre imita a un archivo legítimo.
+EOF
+            ;;
+        reciente)
+            cat <<'EOF'
+QUÉ ES: archivos modificados en las últimas 48 h en rutas críticas.
+POR QUÉ IMPORTA: un cambio reciente en /etc, /usr/bin o /usr/sbin puede
+indicar manipulación, persistencia o una actualización a medias.
+FALSOS POSITIVOS: actualizaciones legítimas del sistema, gestores de
+paquetes, configuración editada por el administrador.
+QUÉ REVISAR: paquete propietario, fecha exacta, hash y si el cambio
+coincide con una instalación conocida.
+EOF
+            ;;
+        suid)
+            cat <<'EOF'
+QUÉ ES: binarios con bit SUID o SGID activo.
+POR QUÉ IMPORTA: se ejecutan con los privilegios del propietario (a menudo
+root). Un SUID mal ubicado o modificado es una vía clásica de escalada.
+FALSOS POSITIVOS: sudo, passwd, su, mount, ping, fusermount y utilidades
+del sistema con SUID legítimo.
+QUÉ REVISAR: ruta, propietario, paquete, fecha y si aparece fuera de
+/usr/bin, /usr/sbin, /bin o /sbin.
+EOF
+            ;;
+        capability)
+            cat <<'EOF'
+QUÉ ES: capacidades POSIX asignadas a un ejecutable.
+POR QUÉ IMPORTA: otorgan privilegios concretos sin necesidad de SUID.
+Una capability amplia (cap_sys_admin, cap_setuid, cap_net_raw) puede
+abusarse para escalar o manipular la red.
+FALSOS POSITIVOS: ping, NetworkManager, Wireshark, tcpdump, herramientas
+de virtualización y contenedores.
+QUÉ REVISAR: paquete propietario, ruta y si la capability es realmente
+necesaria para esa herramienta.
+EOF
+            ;;
+        deleted)
+            cat <<'EOF'
+QUÉ ES: archivos borrados que siguen abiertos por un proceso.
+POR QUÉ IMPORTA: el malware puede borrar su binario del disco y seguir
+ejecutándose desde memoria; también ocurre tras actualizar un servicio.
+FALSOS POSITIVOS: servicios actualizados sin reiniciar, logs rotados,
+navegadores y aplicaciones de larga duración.
+QUÉ REVISAR: proceso propietario, ruta original, si el binario existe en
+disco y si el proceso se inició antes o después de una actualización.
+EOF
+            ;;
+        integrity)
+            cat <<'EOF'
+QUÉ ES: diferencias entre los archivos instalados y el manifiesto del paquete.
+POR QUÉ IMPORTA: revela binarios o configuraciones del sistema modificados
+fuera del gestor de paquetes, una señal típica de manipulación.
+FALSOS POSITIVOS: configuraciones editadas a mano, archivos generados en
+tiempo de ejecución y actualizaciones parciales.
+QUÉ REVISAR: reinstala el paquete afectado, compara con una copia limpia y
+revisa la fecha del cambio.
+EOF
+            ;;
+        cron)
+            cat <<'EOF'
+QUÉ ES: tareas programadas de usuarios y del sistema.
+POR QUÉ IMPORTA: cron es una de las técnicas de persistencia más usadas:
+ejecuta comandos al arrancar o cada cierto tiempo.
+FALSOS POSITIVOS: mantenimiento, backups, rotación de logs, tareas de STK
+y scripts legítimos del administrador.
+QUÉ REVISAR: autor de la entrada, ruta del script, contenido, frecuencia y
+si el archivo pertenece a un paquete.
+EOF
+            ;;
+        systemd)
+            cat <<'EOF'
+QUÉ ES: unidades, servicios y timers de systemd.
+POR QUÉ IMPORTA: permiten ejecutar código automáticamente, a menudo como
+root, y sobrevivir a reinicios.
+FALSOS POSITIVOS: servicios del sistema, unidades de paquetes, timers de
+actualización y servicios de usuario.
+QUÉ REVISAR: ExecStart, usuario, ruta del binario, si está habilitado y si
+la unidad vive en /etc/systemd/system (personalizada).
+EOF
+            ;;
+        ld_preload)
+            cat <<'EOF'
+QUÉ ES: librerías compartidas que se cargan antes que el resto.
+POR QUÉ IMPORTA: LD_PRELOAD o /etc/ld.so.preload permiten interceptar
+funciones de la libc y ocultar procesos, archivos o conexiones.
+FALSOS POSITIVOS: aceleración gráfica, instrumentación, profiling,
+accesibilidad y algunas aplicaciones de escritorio.
+QUÉ REVISAR: ruta, propietario, paquete, hash y si la ruta está en un
+directorio temporal o no pertenece a ningún paquete.
+EOF
+            ;;
+        ssh)
+            cat <<'EOF'
+QUÉ ES: claves autorizadas, configuración SSH y registros de acceso.
+POR QUÉ IMPORTA: una clave no autorizada en authorized_keys es una puerta
+trasera persistente y silenciosa.
+FALSOS POSITIVOS: administración legítima, automatización y claves de
+usuarios reales.
+QUÉ REVISAR: huella de la clave, fecha de modificación, usuario, IP de
+origen y si la clave corresponde a un acceso conocido.
+EOF
+            ;;
+        ssh_sudo)
+            cat <<'EOF'
+QUÉ ES: claves SSH, configuración de sshd y reglas de sudoers.
+POR QUÉ IMPORTA: ambos mecanismos conceden acceso o privilegios y son
+objetivos habituales de persistencia y escalada.
+FALSOS POSITIVOS: administración legítima, grupos de soporte y reglas
+necesarias para tareas concretas.
+QUÉ REVISAR: claves desconocidas, NOPASSWD, ALL, usuarios inesperados y
+opciones débiles como PasswordAuthentication yes.
+EOF
+            ;;
+        sudoers)
+            cat <<'EOF'
+QUÉ ES: reglas que determinan quién puede ejecutar qué como root.
+POR QUÉ IMPORTA: una regla mal configurada o añadida por un atacante
+concede escalada de privilegios inmediata.
+FALSOS POSITIVOS: reglas de administración, grupos de soporte y
+automatizaciones legítimas.
+QUÉ REVISAR: NOPASSWD, ALL, usuarios o grupos inesperados y archivos en
+/etc/sudoers.d que no pertenezcan a un paquete.
+EOF
+            ;;
+        persistencia)
+            cat <<'EOF'
+QUÉ ES: mecanismos que hacen que un programa se ejecute al arrancar o
+periódicamente (cron, systemd, rc.local, LD_PRELOAD, SSH, etc.).
+POR QUÉ IMPORTA: la persistencia es lo que permite a una amenaza sobrevivir
+a reinicios y volver a activarse sin intervención.
+QUÉ REVISAR: autor, ruta, contenido, frecuencia y paquete propietario.
+Desconfía de rutas en /tmp, /dev/shm, comandos ofuscados o descargas
+canalizadas a un shell.
+EOF
+            ;;
+        usuario)
+            cat <<'EOF'
+QUÉ ES: cuentas locales del sistema.
+POR QUÉ IMPORTA: una cuenta con UID 0 o con shell válida puede ser una
+puerta trasera; las cuentas de servicio no deberían tener shell.
+FALSOS POSITIVOS: cuentas de servicio legítimas, usuarios reales y cuentas
+creadas por paquetes.
+QUÉ REVISAR: UID, shell, home, grupos, último acceso y si la cuenta debería
+existir.
+EOF
+            ;;
+        sesion)
+            cat <<'EOF'
+QUÉ ES: sesiones activas y últimos accesos al sistema.
+POR QUÉ IMPORTA: una sesión desconocida puede indicar acceso no autorizado
+o un proceso que mantiene una conexión abierta.
+FALSOS POSITIVOS: sesiones de administración, SSH legítimo, terminales
+abiertas y servicios que usan utmp.
+QUÉ REVISAR: usuario, origen (IP), hora, TTY y si coincide con tu actividad.
+EOF
+            ;;
+        ssh_log)
+            cat <<'EOF'
+QUÉ ES: registros de autenticación SSH (accesos, fallos, usuarios inválidos).
+POR QUÉ IMPORTA: muchos fallos seguidos sugieren fuerza bruta; un acceso
+aceptado desde una IP desconocida puede ser un compromiso.
+FALSOS POSITIVOS: errores de usuarios legítimos, escaneos de Internet y
+automatizaciones.
+QUÉ REVISAR: IP de origen, usuario, hora, método de autenticación y
+patrones repetidos.
+EOF
+            ;;
+        ssh_config)
+            cat <<'EOF'
+QUÉ ES: configuración efectiva de sshd.
+POR QUÉ IMPORTA: opciones débiles (root login, contraseñas, puertos
+inesperados) amplían la superficie de ataque.
+FALSOS POSITIVOS: configuraciones heredadas o adaptadas a un entorno
+concreto.
+QUÉ REVISAR: PermitRootLogin, PasswordAuthentication, Port, AllowUsers y
+DenyUsers.
+EOF
+            ;;
+        modulo)
+            cat <<'EOF'
+QUÉ ES: módulos cargados en el kernel.
+POR QUÉ IMPORTA: un módulo malicioso o no firmado puede ocultar procesos,
+archivos y conexiones (rootkit).
+FALSOS POSITIVOS: drivers de terceros, DKMS, virtualización, VPN y
+controladores de hardware.
+QUÉ REVISAR: modinfo, firma, ruta, si está en /lib/modules/$(uname -r) y
+el estado tainted del kernel.
+EOF
+            ;;
+        dmesg)
+            cat <<'EOF'
+QUÉ ES: mensajes recientes del kernel.
+POR QUÉ IMPORTA: taint, fallos de verificación de módulos, errores de
+hardware y denegaciones pueden revelar manipulación o inestabilidad.
+FALSOS POSITIVOS: mensajes normales de hardware, suspend/resume y drivers
+propietarios.
+QUÉ REVISAR: líneas con taint, module verification failed, rootkit, OOM o
+denegaciones inesperadas.
+EOF
+            ;;
+        rootkit_tool)
+            cat <<'EOF'
+QUÉ ES: herramientas externas de detección de rootkits.
+POR QUÉ IMPORTA: complementan a PROC4ME con firmas y comprobaciones
+específicas que este script no implementa.
+QUÉ REVISAR: instala rkhunter, chkrootkit o unhide solo si los necesitas y
+contrasta siempre sus resultados con un análisis manual.
+EOF
+            ;;
+        kernel)
+            cat <<'EOF'
+QUÉ ES: información del kernel, módulos, taint y hardening.
+POR QUÉ IMPORTA: un kernel tainted o con protecciones débiles facilita la
+instalación de módulos y la ocultación de actividad.
+QUÉ REVISAR: tainted, kptr_restrict, dmesg_restrict, módulos fuera del
+árbol y mensajes de verificación.
+EOF
+            ;;
+        puerto)
+            cat <<'EOF'
+QUÉ ES: un socket en escucha.
+POR QUÉ IMPORTA: cada puerto abierto es una superficie de ataque; los
+puertos en 0.0.0.0 o :: están expuestos en todas las interfaces.
+FALSOS POSITIVOS: servicios legítimos (SSH, Docker, bases de datos,
+navegadores, mDNS).
+QUÉ REVISAR: PID, ruta del ejecutable, paquete propietario, si escucha solo
+en localhost y si el firewall lo permite.
+EOF
+            ;;
+        conexion)
+            cat <<'EOF'
+QUÉ ES: una conexión de red establecida.
+POR QUÉ IMPORTA: puede ser tráfico normal o un canal de mando y control,
+exfiltración o una reverse shell.
+FALSOS POSITIVOS: navegación, actualizaciones, sincronización en la nube y
+servicios de mensajería.
+QUÉ REVISAR: proceso, IP remota, puerto, hora de inicio y reputación del
+destino.
+EOF
+            ;;
+        socket_oculto)
+            cat <<'EOF'
+QUÉ ES: un puerto TCP visible en /proc/net pero que ss no muestra.
+POR QUÉ IMPORTA: puede indicar ocultación deliberada de un socket.
+FALSOS POSITIVOS: carreras entre la lectura de /proc y ss, namespaces de
+contenedores y diferencias de versión.
+QUÉ REVISAR: repite con ss -lntp, lsof -i y compara namespaces de red;
+analiza desde un medio confiable si persiste.
+EOF
+            ;;
+        proceso_oculto)
+            cat <<'EOF'
+QUÉ ES: un PID visible en /proc que ps no muestra.
+POR QUÉ IMPORTA: apunta a manipulación de libproc, hooking o un rootkit.
+FALSOS POSITIVOS: procesos efímeros que desaparecen entre las dos lecturas
+(PROC4ME ya los filtra).
+QUÉ REVISAR: analiza desde un medio confiable, compara con un ps estático y
+revisa módulos y taint del kernel.
+EOF
+            ;;
+        top)
+            cat <<'EOF'
+QUÉ ES: procesos ordenados por consumo de CPU o memoria.
+POR QUÉ IMPORTA: un proceso desconocido con consumo alto puede ser minería,
+un bucle infinito o una exfiltración.
+FALSOS POSITIVOS: navegadores, compilaciones, contenedores, indexadores y
+procesos del sistema.
+QUÉ REVISAR: PID, usuario, comando completo, tiempo de ejecución y si el
+consumo se mantiene en el tiempo.
+EOF
+            ;;
+        proceso)
+            cat <<'EOF'
+QUÉ ES: un proceso en ejecución con su PID, usuario y comando.
+POR QUÉ IMPORTA: los atacantes suelen usar nombres que imitan procesos
+legítimos o ejecutarse desde rutas inusuales.
+FALSOS POSITIVOS: servicios del sistema, aplicaciones de escritorio y
+procesos de contenedores.
+QUÉ REVISAR: ejecutable real, PPID, usuario, fecha de inicio, línea de
+comandos completa, sockets abiertos y paquete propietario.
+EOF
+            ;;
+        reverse_shell)
+            cat <<'EOF'
+QUÉ ES: un intérprete (bash, sh, python, perl, nc...) con una conexión de red.
+POR QUÉ IMPORTA: es el patrón típico de una reverse shell: el atacante
+obtiene una consola interactiva desde la víctima hacia su servidor.
+FALSOS POSITIVOS: herramientas de administración remota, túneles SSH,
+agentes de monitorización y scripts de automatización.
+QUÉ REVISAR: IP remota y reputación, usuario que lo ejecuta, padre del
+proceso, hora de inicio, descriptores y si el binario pertenece a un paquete.
+EOF
+            ;;
+        *)
+            cat <<'EOF'
+Selecciona una línea para ver su contexto.
+Usa el sentido común: un hallazgo no es malware por sí solo.
+Contrasta con el paquete propietario, la fecha y el proceso asociado.
+EOF
+            ;;
+    esac
+}
+
+extraer_ruta_de_linea() {
+    local linea="$1"
+    # Se detiene en espacio o ':' para soportar salidas tipo "ruta:contenido".
+    if [[ "$linea" =~ (/[^[:space:]:]+) ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    fi
+}
+
+preview_educativo() {
+    local categoria="$1"
+    shift
+    local linea="$*"
+    local ruta pkg usuario modulo pid_cand unidad
+
+    echo -e "${CIAN}════════════════════════════════════════════════════════════${RESET}"
+    echo -e "${VERDE_BRILLANTE} GUÍA DE LECTURA${RESET}"
+    echo -e "${CIAN}════════════════════════════════════════════════════════════${RESET}"
+    texto_educativo "$categoria"
+    echo ""
+    echo -e "${AMARILLO}── LÍNEA SELECCIONADA ──${RESET}"
+    printf '%s\n' "$linea"
+
+    case "$categoria" in
+        tmp|oculto|reciente|suid|capability|deleted|ssh|ld_preload|ssh_sudo|cron|systemd|sudoers|integrity)
+            ruta=$(extraer_ruta_de_linea "$linea")
+            if [ -n "$ruta" ] && [ -e "$ruta" ]; then
+                echo ""
+                echo -e "${AMARILLO}── CONTEXTO DEL ARCHIVO ──${RESET}"
+                ls -l "$ruta" 2>/dev/null
+                if command -v file >/dev/null 2>&1; then
+                    file -b "$ruta" 2>/dev/null | head -n 1
+                fi
+                pkg=$(propietario_paquete "$ruta")
+                [ -n "$pkg" ] && echo "Paquete: $pkg"
+                if command -v getcap >/dev/null 2>&1; then
+                    getcap "$ruta" 2>/dev/null
+                fi
+                if [ "$categoria" = "ssh" ] && command -v ssh-keygen >/dev/null 2>&1; then
+                    echo ""
+                    echo -e "${AMARILLO}── HUELLAS SSH ──${RESET}"
+                    ssh-keygen -lf "$ruta" 2>/dev/null | head -n 5
+                fi
+                if [ "$categoria" = "ld_preload" ] && [ -f "$ruta" ]; then
+                    echo "sha256: $(sha256sum "$ruta" 2>/dev/null | awk '{print $1}')"
+                fi
+                if { [ "$categoria" = "cron" ] || [ "$categoria" = "systemd" ] || [ "$categoria" = "sudoers" ]; } && [ -f "$ruta" ] && [ -r "$ruta" ]; then
+                    echo ""
+                    echo -e "${AMARILLO}── CONTENIDO DEL ARCHIVO ──${RESET}"
+                    head -n 30 "$ruta" 2>/dev/null
+                fi
+            elif [ "$categoria" = "systemd" ]; then
+                unidad=$(printf '%s' "$linea" | grep -oE '[A-Za-z0-9@._:-]+\.(service|timer|socket|path)' | head -n 1)
+                if [ -n "$unidad" ]; then
+                    echo ""
+                    echo -e "${AMARILLO}── CONTEXTO DE LA UNIDAD ──${RESET}"
+                    if command -v systemctl >/dev/null 2>&1; then
+                        systemctl status "$unidad" --no-pager -n 8 2>/dev/null | head -n 20
+                        echo ""
+                        systemctl cat "$unidad" 2>/dev/null | head -n 30
+                    fi
+                fi
+            fi
+            ;;
+        usuario)
+            usuario=$(printf '%s' "$linea" | awk '{print $1}')
+            if [ -n "$usuario" ] && getent passwd "$usuario" >/dev/null 2>&1; then
+                echo ""
+                echo -e "${AMARILLO}── CONTEXTO DEL USUARIO ──${RESET}"
+                getent passwd "$usuario"
+                id "$usuario" 2>/dev/null
+                last -n 1 "$usuario" 2>/dev/null | head -n 1
+            fi
+            ;;
+        modulo)
+            modulo=$(printf '%s' "$linea" | awk '{print $1}')
+            if [ -n "$modulo" ]; then
+                echo ""
+                echo -e "${AMARILLO}── CONTEXTO DEL MÓDULO ──${RESET}"
+                if command -v modinfo >/dev/null 2>&1; then
+                    modinfo "$modulo" 2>/dev/null | head -n 15
+                fi
+                lsmod 2>/dev/null | awk -v m="$modulo" 'NR==1 || $1==m'
+            fi
+            ;;
+        proceso|proceso_oculto|top|reverse_shell)
+            pid_cand=$(printf '%s' "$linea" | cut -f1 | awk '{print $1}')
+            if [[ "$pid_cand" =~ ^[0-9]+$ ]] && [ -d "/proc/$pid_cand" ]; then
+                echo ""
+                echo -e "${AMARILLO}── DETALLE DEL PROCESO ──${RESET}"
+                detalle_pid "$pid_cand"
+            else
+                echo ""
+                echo -e "${AZUL}Esta línea no tiene un PID válido o el proceso ya terminó.${RESET}"
+            fi
+            ;;
+        *)
+            ;;
+    esac
+}
+
+preview_puerto() {
+    local pid="$1"
+
+    texto_educativo "puerto"
+    echo ""
+
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [ -d "/proc/$pid" ]; then
+        echo -e "${AMARILLO}── DETALLE DEL PROCESO ──${RESET}"
+        detalle_pid "$pid"
+    else
+        echo -e "${AZUL}Esta línea no tiene un PID asociado o ya no existe.${RESET}"
+    fi
+}
+
+# Lista FZF con panel de explicación educativa.
+fzf_lista_educativa() {
+    local categoria="$1"
+    local titulo="$2"
+    local prompt="${3:-🔍 Seleccione una línea: }"
+    local preview_cmd
+
+    printf -v preview_cmd 'bash %q --preview-educativo %q {}' "$SELF_PATH" "$categoria"
+
+    fzf --ansi \
+        --height=85% \
+        --min-height=20 \
         --layout=reverse \
         --border=rounded \
-        --prompt="➤ $prompt_text: " \
-        --header="$header_text" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff"
+        --border-label=" $titulo " \
+        --prompt="$prompt" \
+        --preview "$preview_cmd" \
+        --preview-window="right:55%:wrap" \
+        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
+}
+
+ver_lista_educativa() {
+    local categoria="$1"
+    local titulo="$2"
+    local datos="$3"
+
+    if [ -z "$datos" ]; then
+        ok "No se encontraron resultados para esta categoría."
+        return 1
+    fi
+
+    printf '%s\n' "$datos" | fzf_lista_educativa "$categoria" "$titulo"
+}
+
+# Elimina encabezados y líneas vacías de los informes de texto.
+filtrar_lineas_lista() {
+    grep -vE '^[[:space:]]*(===|---|\(|$)' \
+        | grep -vE '^\[[a-zA-Z0-9._-]+\]$' \
+        | grep -vE '^[[:space:]]*Module[[:space:]]+Size[[:space:]]+Used' \
+        | grep -vE '^[[:space:]]*COMMAND[[:space:]]+PID' \
+        | grep -vE '^[[:space:]]*(PID|USER|Netid|Proto|State)[[:space:]]'
+}
+
+# Convierte bloques "--- ruta ---" en líneas "ruta<TAB>contenido" para que el
+# preview pueda localizar el archivo y mostrar su contexto.
+etiquetar_bloques() {
+    local etiqueta="" line
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^---\ (.+)\ ---$ ]]; then
+            etiqueta="${BASH_REMATCH[1]}"
+            continue
+        fi
+        if [[ "$line" == "==="* || "$line" =~ ^\[[a-zA-Z0-9._-]+\]$ ]]; then
+            etiqueta=""
+            printf '%s\n' "$line"
+            continue
+        fi
+        [ -z "$line" ] && continue
+        if [ -n "$etiqueta" ]; then
+            printf '%s\t%s\n' "$etiqueta" "$line"
+        else
+            printf '%s\n' "$line"
+        fi
+    done
 }
 
 # --- DETECCIÓN DEL SISTEMA ---
@@ -219,21 +756,51 @@ preparar_directorios() {
     fi
 }
 
-# --- LOGO ---
+# --- LOGO ANIMADO (estilo dash4me) ---
+# Paleta cíclica de 10 colores; el índice 0 se usa como base.
+PALETA_LOGO=(
+    "$ROJO"
+    "$AZUL_BRILLANTE"
+    "$VERDE_BRILLANTE"
+    "$AMARILLO_BRILLANTE"
+    "$CIAN_BRILLANTE"
+    "$ROJO_BRILLANTE"
+    "$AZUL_CLARO"
+    "$VERDE"
+    "$AMARILLO"
+    "$CIAN"
+)
+actualizar_colores_logo() {
+    # El color avanza una posición cada 5 segundos (epoch / 5).
+    local epoch
+    epoch=$(date +%s 2>/dev/null)
+    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
+
+    local base=$(( (epoch / 5) % 10 ))
+
+    COLOR_LOGO="${PALETA_LOGO[$base]}"
+    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % 10 ))]}"
+    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % 10 ))]}"
+}
+
+# Devuelve el logo sin la línea en blanco inicial (para usarlo como header de FZF).
+logo_texto() {
+    actualizar_colores_logo
+
+    local hora
+    hora=$(date '+%H:%M:%S')
+
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}PROC4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}PROC & THREAT INVESTIGATOR${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
+    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}$(hostname 2>/dev/null)${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${USER:-root}${RESET}  ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET}"
+    echo -e " ${AMARILLO}➤ Modo:${RESET} ${AZUL}Investigación (acciones destructivas con confirmación)${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+}
+
 mostrar_logo_proc4me() {
-    echo -e "${ROJO}  ██████╗ ██████╗  ██████╗  ██████╗ ██╗  ██╗███╗   ███╗███████╗${RESET}"
-    echo -e "${ROJO_BRILLANTE}  ██╔══██╗██╔══██╗██╔═══██╗██╔════╝ ██║  ██║████╗ ████║██╔════╝${RESET}"
-    echo -e "${AMARILLO}  ██████╔╝██████╔╝██║   ██║██║      ███████║██╔████╔██║█████╗  ${RESET}"
-    echo -e "${AMARILLO}  ██╔═══╝ ██╔══██╗██║   ██║██║      ██╔══██║██║╚██╔╝██║██╔══╝  ${RESET}"
-    echo -e "${VERDE}  ██║     ██║  ██║╚██████╔╝╚██████╗ ██║  ██║██║ ╚═╝ ██║███████╗${RESET}"
-    echo -e "${VERDE_BRILLANTE}  ╚═╝     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝${RESET}"
-    echo -e "${ROJO_BRILLANTE}  PROC4ME - PROC & THREAT INVESTIGATOR    ${RESET}\n${AZUL_BRILLANTE}  v${V}${RESET}"
-    echo -e "${AZUL}  By: ${AUTOR}${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
-    echo -e "${AMARILLO}➤ Host:${RESET} ${AZUL}$(hostname 2>/dev/null)${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${USER:-root}${RESET}"
-    echo -e "${AMARILLO}➤ Modo:${RESET} ${AZUL}Investigación (acciones destructivas con confirmación)${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    logo_texto
 }
 
 salir_proc4me() {
@@ -887,6 +1454,18 @@ preview_campo1() {
     printf "bash '%s' --pid {1} 2>/dev/null" "$SELF_PATH"
 }
 
+preview_proceso_campo1() {
+    printf "bash '%s' --preview-educativo proceso {} 2>/dev/null" "$SELF_PATH"
+}
+
+preview_reverse_shell() {
+    printf "bash '%s' --preview-educativo reverse_shell {} 2>/dev/null" "$SELF_PATH"
+}
+
+preview_puerto_campo1() {
+    printf "bash '%s' --preview-puerto {1} 2>/dev/null" "$SELF_PATH"
+}
+
 preview_patron_pid() {
     printf "pid=\$(echo {} | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n1); [ -n \"\$pid\" ] && bash '%s' --pid \"\$pid\" 2>/dev/null" "$SELF_PATH"
 }
@@ -1084,7 +1663,7 @@ listar_todos_procesos() {
         | fzf --ansi --height=80% --reverse --border=rounded \
             --prompt="🔍 Seleccione PID para inspeccionar: " \
             --header="PID PPID USUARIO %CPU %MEM STAT ETIMES COMMAND" \
-            --preview "$(preview_campo1)" \
+            --preview "$(preview_proceso_campo1)" \
             --preview-window="right:60%:wrap")
 
     if [ -n "$sel" ]; then
@@ -1115,7 +1694,7 @@ mostrar_procesos_sospechosos() {
         --delimiter='\t' --with-nth=1,2,3,4 \
         --prompt="🔍 Seleccione proceso sospechoso: " \
         --header="PID | USUARIO | MOTIVO | EJECUTABLE / CMD" \
-        --preview "$(preview_campo1)" \
+        --preview "$(preview_proceso_campo1)" \
         --preview-window="right:60%:wrap")
 
     if [ -n "$sel" ]; then
@@ -1148,7 +1727,7 @@ mostrar_procesos_ram() {
         --delimiter='\t' --with-nth=1,2,3,4 \
         --prompt="🔍 Seleccione proceso: " \
         --header="PID | USUARIO | MOTIVO | EJECUTABLE / CMD" \
-        --preview "$(preview_campo1)" \
+        --preview "$(preview_proceso_campo1)" \
         --preview-window="right:60%:wrap")
 
     if [ -n "$sel" ]; then
@@ -1179,7 +1758,7 @@ mostrar_reverse_shells() {
         --delimiter='\t' --with-nth=1,2,3,4,5,6 \
         --prompt="🔍 Seleccione conexión sospechosa: " \
         --header="PID | USUARIO | PROCESO | LOCAL | REMOTO | ESTADO" \
-        --preview "$(preview_campo1)" \
+        --preview "$(preview_reverse_shell)" \
         --preview-window="right:60%:wrap")
 
     if [ -n "$sel" ]; then
@@ -1199,16 +1778,7 @@ mostrar_procesos_ocultos() {
 
     local datos
     datos=$(detectar_procesos_ocultos)
-    if [ -z "$datos" ]; then
-        ok "No se detectaron procesos ocultos por comparación /proc vs ps."
-    else
-        alerta "Se detectaron PIDs visibles en /proc que no aparecen en ps:"
-        printf '%s\n' "$datos" | while IFS= read -r pid; do
-            [ -n "$pid" ] && printf '  • PID %s\n' "$pid"
-        done
-        echo ""
-        info "Esto puede indicar manipulación de libproc o un rootkit."
-    fi
+    ver_lista_educativa proceso_oculto "PIDS OCULTOS (/proc vs ps)" "$datos"
     pausa
 }
 
@@ -1217,11 +1787,14 @@ mostrar_top_procesos() {
     mostrar_logo_proc4me
     seccion "TOP PROCESOS POR CPU Y MEMORIA"
 
-    echo -e "${AMARILLO}--- TOP CPU ---${RESET}"
-    ps -eo pid,ppid,user,%cpu,%mem,stat,etimes,comm,args --sort=-%cpu 2>/dev/null | head -n 16
-    echo ""
-    echo -e "${AMARILLO}--- TOP MEMORIA ---${RESET}"
-    ps -eo pid,ppid,user,%cpu,%mem,stat,etimes,comm,args --sort=-%mem 2>/dev/null | head -n 16
+    local cpu mem
+    cpu=$(ps -eo pid,ppid,user,%cpu,%mem,stat,etimes,comm,args --sort=-%cpu 2>/dev/null \
+        | head -n 21 | filtrar_lineas_lista)
+    mem=$(ps -eo pid,ppid,user,%cpu,%mem,stat,etimes,comm,args --sort=-%mem 2>/dev/null \
+        | head -n 21 | filtrar_lineas_lista)
+
+    ver_lista_educativa top "TOP CPU (selecciona para inspeccionar)" "$cpu"
+    ver_lista_educativa top "TOP MEMORIA (selecciona para inspeccionar)" "$mem"
     pausa
 }
 
@@ -1236,7 +1809,7 @@ inspector_pid() {
         | fzf --ansi --height=80% --reverse --border=rounded \
             --prompt="🔍 Seleccione PID para inspeccionar: " \
             --header="PID PPID USUARIO %CPU %MEM STAT ETIMES COMMAND" \
-            --preview "$(preview_campo1)" \
+            --preview "$(preview_proceso_campo1)" \
             --preview-window="right:60%:wrap")
 
     if [ -n "$sel" ]; then
@@ -1272,7 +1845,7 @@ seleccionar_pid_de_ss() {
     sel=$(printf '%s\n' "$datos" | fzf --ansi --height=80% --reverse --border=rounded \
         --prompt="$prompt" \
         --header="$header" \
-        --preview "$(preview_campo1)" \
+        --preview "$(preview_puerto_campo1)" \
         --preview-window="right:60%:wrap")
 
     [ -z "$sel" ] && return 1
@@ -1359,10 +1932,260 @@ mostrar_sockets_ocultos() {
         ok "No se detectaron discrepancias TCP entre ss y /proc/net."
     else
         alerta "Se detectaron puertos TCP en /proc/net que ss no muestra:"
-        printf '%s\n' "$datos"
-        echo ""
+        ver_lista_educativa socket_oculto "SOCKETS OCULTOS (ss vs /proc/net)" "$datos"
         info "Puede ser un fallo de ss o un intento de ocultación."
     fi
+    pausa
+}
+
+# ==============================================================================
+# --- VISTAS EDUCATIVAS DE UN VISTAZO ---
+# ==============================================================================
+
+ver_archivos_tmp() {
+    clear
+    mostrar_logo_proc4me
+    seccion "EJECUTABLES EN /tmp Y RAM"
+    local datos
+    datos=$(detectar_archivos_tmp | filtrar_lineas_lista)
+    ver_lista_educativa tmp "EJECUTABLES EN TEMPORALES" "$datos"
+    pausa
+}
+
+ver_archivos_ocultos() {
+    clear
+    mostrar_logo_proc4me
+    seccion "ARCHIVOS OCULTOS EN TEMPORALES"
+    local datos
+    datos=$(detectar_archivos_ocultos_tmp | filtrar_lineas_lista)
+    ver_lista_educativa oculto "ARCHIVOS OCULTOS EN TEMPORALES" "$datos"
+    pausa
+}
+
+ver_cambios_recientes() {
+    clear
+    mostrar_logo_proc4me
+    seccion "CAMBIOS RECIENTES (48h)"
+    local datos
+    datos=$(detectar_cambios_recientes | filtrar_lineas_lista)
+    ver_lista_educativa reciente "CAMBIOS RECIENTES EN RUTAS CRÍTICAS" "$datos"
+    pausa
+}
+
+ver_suid() {
+    clear
+    mostrar_logo_proc4me
+    seccion "BINARIOS SUID / SGID"
+    local datos
+    datos=$(detectar_suid | filtrar_lineas_lista)
+    ver_lista_educativa suid "BINARIOS SUID / SGID" "$datos"
+    pausa
+}
+
+ver_capabilities() {
+    clear
+    mostrar_logo_proc4me
+    seccion "CAPABILITIES"
+    local datos
+    datos=$(detectar_capabilities | filtrar_lineas_lista)
+    ver_lista_educativa capability "CAPABILITIES ASIGNADAS" "$datos"
+    pausa
+}
+
+ver_archivos_borrados() {
+    clear
+    mostrar_logo_proc4me
+    seccion "ARCHIVOS BORRADOS ABIERTOS"
+    local datos
+    datos=$(detectar_archivos_borrados_abiertos | filtrar_lineas_lista)
+    ver_lista_educativa deleted "ARCHIVOS BORRADOS PERO ABIERTOS" "$datos"
+    pausa
+}
+
+ver_integridad() {
+    clear
+    mostrar_logo_proc4me
+    seccion "INTEGRIDAD DE PAQUETES"
+    echo -ne "${AMARILLO}Este análisis puede tardar varios minutos. ¿Continuar? (s/N): ${RESET}"
+    read -r resp
+    if [[ ! "$resp" =~ ^[sS]$ ]]; then
+        info "Análisis cancelado."
+        pausa
+        return
+    fi
+    local datos
+    datos=$(verificar_integridad_paquetes | filtrar_lineas_lista)
+    ver_lista_educativa integrity "INTEGRIDAD DE PAQUETES" "$datos"
+    pausa
+}
+
+ver_persistencia_cron() {
+    clear
+    mostrar_logo_proc4me
+    seccion "CRON Y TAREAS PROGRAMADAS"
+    local datos
+    datos=$(datos_persistencia_cron | etiquetar_bloques | filtrar_lineas_lista)
+    ver_lista_educativa cron "CRON Y TAREAS PROGRAMADAS" "$datos"
+    pausa
+}
+
+ver_persistencia_systemd() {
+    clear
+    mostrar_logo_proc4me
+    seccion "SYSTEMD: UNIDADES Y TIMERS"
+    local datos
+    datos=$(datos_persistencia_systemd | etiquetar_bloques | filtrar_lineas_lista)
+    ver_lista_educativa systemd "SYSTEMD: UNIDADES Y TIMERS" "$datos"
+    pausa
+}
+
+ver_persistencia_ld_preload() {
+    clear
+    mostrar_logo_proc4me
+    seccion "LD_PRELOAD Y LIBRERÍAS"
+    local datos
+    datos=$(datos_persistencia_ld_preload | etiquetar_bloques | filtrar_lineas_lista)
+    ver_lista_educativa ld_preload "LD_PRELOAD Y LIBRERÍAS" "$datos"
+    pausa
+}
+
+ver_persistencia_ssh_sudo() {
+    clear
+    mostrar_logo_proc4me
+    seccion "SSH, AUTHORIZED_KEYS Y SUDOERS"
+    local datos
+    datos=$(datos_persistencia_ssh_sudo | etiquetar_bloques | filtrar_lineas_lista)
+    ver_lista_educativa ssh_sudo "SSH, AUTHORIZED_KEYS Y SUDOERS" "$datos"
+    pausa
+}
+
+ver_persistencia_reciente() {
+    clear
+    mostrar_logo_proc4me
+    seccion "PERSISTENCIA MODIFICADA RECIENTEMENTE"
+    local datos
+    datos=$(datos_persistencia_reciente | filtrar_lineas_lista)
+    ver_lista_educativa persistencia "PERSISTENCIA MODIFICADA RECIENTEMENTE" "$datos"
+    pausa
+}
+
+ver_usuarios_uid0() {
+    clear
+    mostrar_logo_proc4me
+    seccion "USUARIOS CON UID 0"
+    local datos
+    datos=$(datos_usuarios_uid0 | filtrar_lineas_lista)
+    ver_lista_educativa usuario "USUARIOS CON UID 0" "$datos"
+    pausa
+}
+
+ver_usuarios_shell() {
+    clear
+    mostrar_logo_proc4me
+    seccion "USUARIOS CON SHELL VÁLIDA"
+    local datos
+    datos=$(datos_usuarios_shell | filtrar_lineas_lista)
+    ver_lista_educativa usuario "USUARIOS CON SHELL VÁLIDA" "$datos"
+    pausa
+}
+
+ver_sesiones() {
+    clear
+    mostrar_logo_proc4me
+    seccion "SESIONES ACTIVAS"
+    local datos
+    datos=$(datos_sesiones | filtrar_lineas_lista)
+    ver_lista_educativa sesion "SESIONES ACTIVAS" "$datos"
+    pausa
+}
+
+ver_ultimos_accesos() {
+    clear
+    mostrar_logo_proc4me
+    seccion "ÚLTIMOS ACCESOS Y FALLOS"
+    local datos
+    datos=$(datos_ultimos_accesos | filtrar_lineas_lista)
+    ver_lista_educativa sesion "ÚLTIMOS ACCESOS Y FALLOS" "$datos"
+    pausa
+}
+
+ver_ssh_logs() {
+    clear
+    mostrar_logo_proc4me
+    seccion "REGISTROS SSH RECIENTES"
+    local datos
+    datos=$(datos_ssh_logs | filtrar_lineas_lista)
+    ver_lista_educativa ssh_log "REGISTROS SSH RECIENTES" "$datos"
+    pausa
+}
+
+ver_ssh_keys() {
+    clear
+    mostrar_logo_proc4me
+    seccion "AUTHORIZED_KEYS"
+    local datos
+    datos=$(datos_ssh_keys | filtrar_lineas_lista)
+    ver_lista_educativa ssh "AUTHORIZED_KEYS" "$datos"
+    pausa
+}
+
+ver_sudoers() {
+    clear
+    mostrar_logo_proc4me
+    seccion "SUDOERS"
+    local datos
+    datos=$(datos_sudoers | filtrar_lineas_lista)
+    ver_lista_educativa sudoers "REGLAS DE SUDOERS" "$datos"
+    pausa
+}
+
+ver_ssh_config() {
+    clear
+    mostrar_logo_proc4me
+    seccion "CONFIGURACIÓN SSH"
+    local datos
+    datos=$(datos_ssh_config | filtrar_lineas_lista)
+    ver_lista_educativa ssh_config "CONFIGURACIÓN SSH EFECTIVA" "$datos"
+    pausa
+}
+
+ver_kernel_info() {
+    clear
+    mostrar_logo_proc4me
+    seccion "INFORMACIÓN DEL KERNEL"
+    local datos
+    datos=$(datos_kernel_info | filtrar_lineas_lista)
+    ver_lista_educativa kernel "INFORMACIÓN DEL KERNEL" "$datos"
+    pausa
+}
+
+ver_modulos() {
+    clear
+    mostrar_logo_proc4me
+    seccion "MÓDULOS DEL KERNEL"
+    local datos
+    datos=$(datos_modulos | filtrar_lineas_lista)
+    ver_lista_educativa modulo "MÓDULOS DEL KERNEL" "$datos"
+    pausa
+}
+
+ver_dmesg() {
+    clear
+    mostrar_logo_proc4me
+    seccion "DMESG RECIENTE"
+    local datos
+    datos=$(datos_dmesg | filtrar_lineas_lista)
+    ver_lista_educativa dmesg "MENSAJES RECIENTES DEL KERNEL" "$datos"
+    pausa
+}
+
+ver_rootkit_tools() {
+    clear
+    mostrar_logo_proc4me
+    seccion "HERRAMIENTAS ROOTKIT"
+    local datos
+    datos=$(datos_rootkit_tools | filtrar_lineas_lista)
+    ver_lista_educativa rootkit_tool "HERRAMIENTAS ROOTKIT DISPONIBLES" "$datos"
     pausa
 }
 
@@ -1373,7 +2196,6 @@ mostrar_sockets_ocultos() {
 menu_procesos() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 📋 Listar todos los procesos (FZF)
 2. 🚨 Procesos sospechosos
 3. 🧠 Binarios borrados / memfd / RAM
@@ -1383,8 +2205,8 @@ menu_procesos() {
 7. 🕵️ Inspector de PID
 8. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Procesos" "PROCESOS Y MEMORIA")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Procesos" "PROCESOS Y MEMORIA")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
             1) listar_todos_procesos ;;
@@ -1402,7 +2224,6 @@ menu_procesos() {
 menu_puertos() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 🔌 Puertos en escucha
 2. 🌐 Puertos públicos (0.0.0.0 / ::)
 3. 🔗 Conexiones establecidas
@@ -1411,8 +2232,8 @@ menu_puertos() {
 6. ℹ️ Nota sobre puertos y firewall
 7. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Puertos" "PUERTOS, SOCKETS Y CONEXIONES")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Puertos" "PUERTOS, SOCKETS Y CONEXIONES")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
             1) mostrar_puertos_escucha ;;
@@ -1471,7 +2292,6 @@ mostrar_persistencia_todo() {
 menu_persistencia() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 📋 Ver toda la persistencia
 2. ⏰ Cron y tareas programadas
 3. ⚙️ Systemd (unidades y timers)
@@ -1480,16 +2300,16 @@ menu_persistencia() {
 6. 🕒 Archivos de persistencia modificados recientemente
 7. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Persistencia" "PERSISTENCIA Y ARRANQUE AUTOMÁTICO")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Persistencia" "PERSISTENCIA Y ARRANQUE AUTOMÁTICO")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
             1) mostrar_persistencia_todo ;;
-            2) clear; mostrar_logo_proc4me; seccion "CRON Y TAREAS"; datos_persistencia_cron; pausa ;;
-            3) clear; mostrar_logo_proc4me; seccion "SYSTEMD"; datos_persistencia_systemd; pausa ;;
-            4) clear; mostrar_logo_proc4me; seccion "LD_PRELOAD"; datos_persistencia_ld_preload; pausa ;;
-            5) clear; mostrar_logo_proc4me; seccion "SSH Y SUDOERS"; datos_persistencia_ssh_sudo; pausa ;;
-            6) clear; mostrar_logo_proc4me; seccion "MODIFICADOS RECIENTEMENTE"; datos_persistencia_reciente; pausa ;;
+            2) ver_persistencia_cron ;;
+            3) ver_persistencia_systemd ;;
+            4) ver_persistencia_ld_preload ;;
+            5) ver_persistencia_ssh_sudo ;;
+            6) ver_persistencia_reciente ;;
             7|*) return 0 ;;
         esac
     done
@@ -1498,7 +2318,6 @@ menu_persistencia() {
 menu_archivos() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 📂 Ejecutables y scripts en /tmp y RAM
 2. 👁️ Archivos ocultos en directorios temporales
 3. 🕒 Cambios recientes en directorios críticos
@@ -1508,29 +2327,17 @@ menu_archivos() {
 7. 🧾 Integridad de paquetes (profundo)
 8. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Archivos" "ARCHIVOS, RAM Y BINARIOS")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Archivos" "ARCHIVOS, RAM Y BINARIOS")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
-            1) clear; mostrar_logo_proc4me; seccion "EJECUTABLES EN /tmp Y RAM"; detectar_archivos_tmp; pausa ;;
-            2) clear; mostrar_logo_proc4me; seccion "ARCHIVOS OCULTOS EN TEMPORALES"; detectar_archivos_ocultos_tmp; pausa ;;
-            3) clear; mostrar_logo_proc4me; seccion "CAMBIOS RECIENTES (48h)"; detectar_cambios_recientes; pausa ;;
-            4) clear; mostrar_logo_proc4me; seccion "BINARIOS SUID / SGID"; detectar_suid; pausa ;;
-            5) clear; mostrar_logo_proc4me; seccion "CAPABILITIES"; detectar_capabilities; pausa ;;
-            6) clear; mostrar_logo_proc4me; seccion "ARCHIVOS BORRADOS ABIERTOS"; detectar_archivos_borrados_abiertos; pausa ;;
-            7)
-                clear
-                mostrar_logo_proc4me
-                seccion "INTEGRIDAD DE PAQUETES"
-                echo -ne "${AMARILLO}Este análisis puede tardar varios minutos. ¿Continuar? (s/N): ${RESET}"
-                read -r resp
-                if [[ "$resp" =~ ^[sS]$ ]]; then
-                    verificar_integridad_paquetes
-                else
-                    info "Análisis cancelado."
-                fi
-                pausa
-                ;;
+            1) ver_archivos_tmp ;;
+            2) ver_archivos_ocultos ;;
+            3) ver_cambios_recientes ;;
+            4) ver_suid ;;
+            5) ver_capabilities ;;
+            6) ver_archivos_borrados ;;
+            7) ver_integridad ;;
             8|*) return 0 ;;
         esac
     done
@@ -1568,7 +2375,6 @@ mostrar_usuarios_todo() {
 menu_usuarios() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 👤 Usuarios con UID 0
 2. 🐚 Usuarios con shell válida
 3. 🖥️ Sesiones activas
@@ -1580,18 +2386,18 @@ menu_usuarios() {
 9. 📋 Ver todo
 10. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Usuarios" "USUARIOS, SESIONES Y ACCESOS")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Usuarios" "USUARIOS, SESIONES Y ACCESOS")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
-            1) clear; mostrar_logo_proc4me; seccion "UID 0"; datos_usuarios_uid0; pausa ;;
-            2) clear; mostrar_logo_proc4me; seccion "USUARIOS CON SHELL"; datos_usuarios_shell; pausa ;;
-            3) clear; mostrar_logo_proc4me; seccion "SESIONES ACTIVAS"; datos_sesiones; pausa ;;
-            4) clear; mostrar_logo_proc4me; seccion "ÚLTIMOS ACCESOS"; datos_ultimos_accesos; pausa ;;
-            5) clear; mostrar_logo_proc4me; seccion "REGISTROS SSH"; datos_ssh_logs; pausa ;;
-            6) clear; mostrar_logo_proc4me; seccion "AUTHORIZED_KEYS"; datos_ssh_keys; pausa ;;
-            7) clear; mostrar_logo_proc4me; seccion "SUDOERS"; datos_sudoers; pausa ;;
-            8) clear; mostrar_logo_proc4me; seccion "CONFIGURACIÓN SSH"; datos_ssh_config; pausa ;;
+            1) ver_usuarios_uid0 ;;
+            2) ver_usuarios_shell ;;
+            3) ver_sesiones ;;
+            4) ver_ultimos_accesos ;;
+            5) ver_ssh_logs ;;
+            6) ver_ssh_keys ;;
+            7) ver_sudoers ;;
+            8) ver_ssh_config ;;
             9) mostrar_usuarios_todo ;;
             10|*) return 0 ;;
         esac
@@ -1618,7 +2424,6 @@ mostrar_kernel_todo() {
 menu_kernel() {
     while true; do
         clear
-        mostrar_logo_proc4me
         local opciones="1. 🧠 Información y estado tainted
 2. 🧩 Módulos cargados y fuera del árbol
 3. 📜 dmesg reciente
@@ -1626,19 +2431,244 @@ menu_kernel() {
 5. 📋 Ver todo
 6. ↩ Volver"
         local sel
-        sel=$(echo -e "$opciones" | fzf_estilo "Kernel" "KERNEL, MÓDULOS Y ROOTKITS")
-                [ -z "$sel" ] && return 0
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Kernel" "KERNEL, MÓDULOS Y ROOTKITS")
+        [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
-            1) clear; mostrar_logo_proc4me; seccion "KERNEL"; datos_kernel_info; pausa ;;
-            2) clear; mostrar_logo_proc4me; seccion "MÓDULOS"; datos_modulos; pausa ;;
-            3) clear; mostrar_logo_proc4me; seccion "DMESG"; datos_dmesg; pausa ;;
-            4) clear; mostrar_logo_proc4me; seccion "HERRAMIENTAS ROOTKIT"; datos_rootkit_tools; pausa ;;
+            1) ver_kernel_info ;;
+            2) ver_modulos ;;
+            3) ver_dmesg ;;
+            4) ver_rootkit_tools ;;
             5) mostrar_kernel_todo ;;
             6|*) return 0 ;;
         esac
     done
 }
+
+# Pregunta por una carpeta usando FZF; permite navegar y crear directorios.
+# Devuelve la ruta elegida por stdout, o nada si se cancela.
+elegir_directorio_fzf() {
+    local dir="${1:-}"
+    local sel sub opciones nombre_carpeta
+
+    if [ -z "$dir" ]; then
+        if [ -n "${SUDO_USER:-}" ]; then
+            dir=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+        fi
+        [ -n "$dir" ] && [ -d "$dir" ] || dir="${HOME:-/tmp}"
+    fi
+
+    while true; do
+        opciones="✔ Usar esta carpeta
+⬆ Subir un nivel
+🏠 Ir al inicio del usuario
+📁 /tmp
+➕ Crear nueva carpeta aquí"
+
+        while IFS= read -r sub; do
+            [ -n "$sub" ] && opciones+=$'\n'"📁 $sub"
+        done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+
+        sel=$(printf '%s\n' "$opciones" | proc4me_fzf_menu "Carpeta" "ELEGIR DESTINO | $dir" "~75%")
+        [ -z "$sel" ] && return 1
+
+        case "$sel" in
+            "✔ Usar esta carpeta")
+                printf '%s\n' "$dir"
+                return 0
+                ;;
+            "⬆ Subir un nivel")
+                dir=$(dirname "$dir")
+                ;;
+            "🏠 Ir al inicio del usuario")
+                if [ -n "${SUDO_USER:-}" ]; then
+                    dir=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+                fi
+                [ -n "$dir" ] && [ -d "$dir" ] || dir="${HOME:-/tmp}"
+                ;;
+            "📁 /tmp")
+                dir="/tmp"
+                ;;
+            "➕ Crear nueva carpeta aquí")
+                echo -ne "${AMARILLO}Nombre de la nueva carpeta: ${RESET}" >&2
+                read -r nombre_carpeta
+                if [ -z "$nombre_carpeta" ]; then
+                    continue
+                fi
+                if [[ "$nombre_carpeta" == */* ]]; then
+                    echo "El nombre no puede contener '/'." >&2
+                    sleep 1
+                    continue
+                fi
+                if mkdir -p "$dir/$nombre_carpeta" 2>/dev/null; then
+                    devolver_propietario_usuario "$dir/$nombre_carpeta"
+                    dir="$dir/$nombre_carpeta"
+                else
+                    echo "No se pudo crear la carpeta en $dir." >&2
+                    sleep 1
+                fi
+                ;;
+            "📁 "*)
+                dir="$dir/${sel#📁 }"
+                ;;
+        esac
+    done
+}
+
+# Exporta un informe de texto a Markdown eligiendo carpeta y nombre.
+exportar_informe_markdown() {
+    local ruta="$1"
+    local base dir nombre destino resp
+
+    base=$(basename "$ruta" .txt)
+    dir=$(elegir_directorio_fzf)
+    if [ -z "$dir" ]; then
+        info "Exportación cancelada."
+        pausa
+        return 1
+    fi
+
+    echo -e "${AMARILLO}Carpeta destino:${RESET} $dir"
+    echo -ne "${AMARILLO}Nombre del archivo Markdown [${base}.md]: ${RESET}"
+    read -r nombre
+    [ -z "$nombre" ] && nombre="${base}.md"
+    [[ "$nombre" == *.* ]] || nombre="${nombre}.md"
+    if [[ "$nombre" == */* ]]; then
+        alerta "El nombre no puede contener '/'. La carpeta ya se eligió antes."
+        pausa
+        return 1
+    fi
+
+    destino="$dir/$nombre"
+    if [ -e "$destino" ]; then
+        echo -ne "${AMARILLO}El archivo ya existe. ¿Sobrescribir? (s/N): ${RESET}"
+        read -r resp
+        [[ "$resp" =~ ^[sS]$ ]] || { info "Exportación cancelada."; pausa; return 1; }
+    fi
+
+    if convertir_informe_markdown "$ruta" "$destino"; then
+        devolver_propietario_usuario "$destino"
+        ok "Informe exportado a: $destino"
+        registrar_log "$LOG_INFO" "Informe exportado a Markdown: $destino"
+    else
+        alerta "No se pudo exportar el informe a $destino."
+    fi
+    pausa
+}
+
+# Copia el informe original (.txt) eligiendo carpeta y nombre.
+exportar_informe_txt() {
+    local ruta="$1"
+    local base dir nombre destino resp
+
+    base=$(basename "$ruta")
+    dir=$(elegir_directorio_fzf)
+    if [ -z "$dir" ]; then
+        info "Copia cancelada."
+        pausa
+        return 1
+    fi
+
+    echo -e "${AMARILLO}Carpeta destino:${RESET} $dir"
+    echo -ne "${AMARILLO}Nombre del archivo [${base}]: ${RESET}"
+    read -r nombre
+    [ -z "$nombre" ] && nombre="$base"
+    [[ "$nombre" == *.* ]] || nombre="${nombre}.txt"
+    if [[ "$nombre" == */* ]]; then
+        alerta "El nombre no puede contener '/'. La carpeta ya se eligió antes."
+        pausa
+        return 1
+    fi
+
+    destino="$dir/$nombre"
+    if [ -e "$destino" ]; then
+        echo -ne "${AMARILLO}El archivo ya existe. ¿Sobrescribir? (s/N): ${RESET}"
+        read -r resp
+        [[ "$resp" =~ ^[sS]$ ]] || { info "Copia cancelada."; pausa; return 1; }
+    fi
+
+    if cp -f "$ruta" "$destino" 2>/dev/null; then
+        devolver_propietario_usuario "$destino"
+        ok "Informe copiado a: $destino"
+        registrar_log "$LOG_INFO" "Informe copiado a: $destino"
+    else
+        alerta "No se pudo copiar el informe a $destino."
+    fi
+    pausa
+}
+
+menu_acciones_informe() {
+    local archivo="$1"
+    local ruta="$REPORT_DIR/$archivo"
+
+    if [ ! -r "$ruta" ]; then
+        alerta "El informe ya no existe o no se puede leer: $archivo"
+        pausa
+        return
+    fi
+
+    while true; do
+        clear
+        mostrar_logo_proc4me
+        seccion "INFORME: $archivo"
+        echo -e " ${AZUL}Ruta:${RESET} $ruta"
+        echo -e " ${AZUL}Tamaño:${RESET} $(du -h "$ruta" 2>/dev/null | cut -f1)  ${AZUL}Líneas:${RESET} $(wc -l < "$ruta" 2>/dev/null)"
+
+        local opciones="1. 👁️ Ver contenido completo
+2. 📝 Exportar a Markdown (elegir carpeta y nombre)
+3. 💾 Copiar informe .txt (elegir carpeta y nombre)
+4. ↩ Volver"
+        local sel
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Informe" "ACCIONES SOBRE EL INFORME" "~60%")
+        [ -z "$sel" ] && return 0
+
+        case ${sel%%.*} in
+            1)
+                clear
+                mostrar_logo_proc4me
+                seccion "INFORME: $archivo"
+                if command -v less >/dev/null 2>&1; then
+                    less -R "$ruta"
+                else
+                    cat "$ruta"
+                fi
+                pausa
+                ;;
+            2) exportar_informe_markdown "$ruta" ;;
+            3) exportar_informe_txt "$ruta" ;;
+            4|*) return 0 ;;
+        esac
+    done
+}
+
+seleccionar_informe() {
+    local datos sel archivo preview_cmd
+
+    datos=$(listar_informes)
+    if [ -z "$datos" ]; then
+        ok "Todavía no hay informes en $REPORT_DIR."
+        pausa
+        return
+    fi
+
+    printf -v preview_cmd 'bash %q --preview-informe {4}' "$SELF_PATH"
+
+    sel=$(printf '%s\n' "$datos" | fzf --ansi \
+        --height=85% --min-height=20 \
+        --layout=reverse \
+        --border=rounded \
+        --border-label=" INFORMES DISPONIBLES " \
+        --prompt="🔍 Seleccione un informe: " \
+        --header="FECHA | HORA | TAMAÑO | ARCHIVO   (Enter: ver / exportar)" \
+        --preview "$preview_cmd" \
+        --preview-window="right:60%:wrap" \
+        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff")
+
+    [ -z "$sel" ] && return
+    archivo=$(printf '%s' "$sel" | awk '{print $NF}')
+    [ -n "$archivo" ] && menu_acciones_informe "$archivo"
+}
+
 
 menu_ayuda() {
     clear
@@ -1650,8 +2680,15 @@ menu_ayuda() {
 
  QUÉ HACE:
    • Analiza procesos, memoria, puertos, persistencia, archivos, usuarios y kernel.
-   • Genera informes en /var/log/proc4me/.
+   • Guarda los informes en texto en /var/log/proc4me/.
+   • Permite verlos y exportarlos a Markdown o copiarlos donde elijas.
    • Permite enviar señales a procesos con confirmación explícita.
+   • Muestra una guía educativa y contexto en el panel de vista previa de cada lista.
+
+ CÓMO LEER LAS LISTAS:
+   • Selecciona una línea con las flechas para ver su explicación y contexto.
+   • La guía indica qué es, por qué importa, falsos positivos y qué revisar.
+   • Un hallazgo no es malware por sí solo: contrasta ruta, paquete, fecha y proceso.
 
  QUÉ NO HACE:
    • No instala herramientas automáticamente.
@@ -1970,6 +3007,150 @@ evaluar_integridad() {
         "Revise los binarios modificados y reinstale los paquetes afectados."
 }
 
+# Convierte un informe de texto de PROC4ME en Markdown estructurado.
+# Uso: convertir_informe_markdown ORIGEN [DESTINO]
+convertir_informe_markdown() {
+    local origen="$1"
+    local destino="${2:-${1%.txt}.md}"
+
+    [ -r "$origen" ] || return 1
+    mkdir -p "$(dirname "$destino")" 2>/dev/null || return 1
+
+    awk '
+    function flush(   i, l, clave, valor) {
+        if (seccion == "") { n = 0; return }
+        if (seccion == "FIN DEL INFORME") {
+            print "\n---\n"
+            n = 0
+            return
+        }
+        if (seccion == "HALLAZGOS") {
+            if (n == 0) {
+                print "\n_Sin hallazgos con los criterios actuales._\n"
+            } else {
+                print ""
+                for (i = 1; i <= n; i++) {
+                    l = buf[i]
+                    if (l ~ /^\[(CRITICO|ALTO|MEDIO|BAJO)\]/) {
+                        sub(/^\[/, "**[", l)
+                        sub(/\] /, "]** — ", l)
+                        print "- " l
+                    } else if (l ~ /^[[:space:]]+Recomendación:/) {
+                        sub(/^[[:space:]]+/, "", l)
+                        clave = l
+                        sub(/: .*/, "", clave)
+                        valor = l
+                        sub(/^[^:]+: /, "", valor)
+                        print "  - **" clave ":** " valor
+                    } else if (l != "") {
+                        print "  " l
+                    }
+                }
+                print ""
+            }
+        } else if (seccion == "RESUMEN DE RIESGO") {
+            print ""
+            for (i = 1; i <= n; i++) {
+                l = buf[i]
+                if (l ~ /^[^:]+: /) {
+                    clave = l
+                    sub(/: .*/, "", clave)
+                    sub(/^[[:space:]]+/, "", clave)
+                    gsub(/[[:space:]]+$/, "", clave)
+                    valor = l
+                    sub(/^[^:]+: /, "", valor)
+                    print "- **" clave ":** " valor
+                } else if (l != "") {
+                    print l
+                }
+            }
+            print ""
+        } else {
+            if (n == 0) {
+                print "\n_Sin datos._\n"
+            } else {
+                print "\n~~~text"
+                for (i = 1; i <= n; i++) print buf[i]
+                print "~~~\n"
+            }
+        }
+        n = 0
+    }
+
+    BEGIN { seccion = ""; primer = 1; n = 0 }
+
+    /^={20,}$/ {
+        flush()
+        if ((getline t) > 0) seccion = t
+        getline s
+        if (seccion != "FIN DEL INFORME") print "\n## " seccion
+        next
+    }
+
+    {
+        if (seccion == "") {
+            if (primer) {
+                print "# " $0
+                primer = 0
+            } else if ($0 ~ /^[[:space:]]*═+[[:space:]]*$/) {
+                next
+            } else if ($0 ~ /^[[:space:]]*DETALLE DEL PROCESO PID [0-9]+[[:space:]]*$/) {
+                l = $0
+                sub(/^[[:space:]]+/, "", l)
+                print "\n## " l
+            } else if ($0 ~ /^[[:space:]]*(Árbol de procesos|Conexiones de red|Mapas de memoria sospechosos|Entorno relevante):/) {
+                l = $0
+                sub(/^[[:space:]]+/, "", l)
+                print "\n### " l
+            } else if ($0 ~ /^[^:]+: /) {
+                clave = $0
+                sub(/: .*/, "", clave)
+                sub(/^[[:space:]]+/, "", clave)
+                gsub(/[[:space:]]+$/, "", clave)
+                valor = $0
+                sub(/^[^:]+: /, "", valor)
+                print "- **" clave ":** " valor
+            } else if ($0 != "") {
+                print $0
+            }
+        } else {
+            buf[++n] = $0
+        }
+    }
+
+    END { flush() }
+    ' "$origen" > "$destino"
+
+    chmod 640 "$destino" 2>/dev/null
+    [ -s "$destino" ]
+}
+
+listar_informes() {
+    find "$REPORT_DIR" -maxdepth 1 -type f -name 'proc4me_*.txt' \
+        -printf '%TY-%Tm-%Td %TH:%TM %10s %f\n' 2>/dev/null | sort -r
+}
+
+preview_informe() {
+    local nombre="${1##*/}"
+    local ruta="$REPORT_DIR/$nombre"
+    local total
+
+    if [ ! -r "$ruta" ]; then
+        echo "Informe no encontrado o sin permisos: $nombre"
+        return 1
+    fi
+
+    echo -e "${CIAN}INFORME:${RESET} $nombre"
+    echo -e "${CIAN}────────────────────────────────────────────────────────────${RESET}"
+    head -n 80 "$ruta" 2>/dev/null
+    total=$(wc -l < "$ruta" 2>/dev/null)
+    if [ "${total:-0}" -gt 80 ]; then
+        echo ""
+        echo -e "${AMARILLO}... informe truncado en la vista previa ($total líneas).${RESET}"
+        echo -e "${AZUL}Ábrelo desde el menú para verlo completo.${RESET}"
+    fi
+}
+
 generar_informe() {
     local tipo="${1:-Auditoría}"
     local score nivel reporte
@@ -2232,15 +3413,11 @@ proc4me_main_menu() {
 
     while true; do
         clear
-        mostrar_logo_proc4me
 
-        local host kernel procesos puertos fecha resumen
-        host=$(hostname 2>/dev/null)
-        kernel=$(uname -r 2>/dev/null)
+        local procesos puertos resumen
         procesos=$(ps -e --no-headers 2>/dev/null | wc -l)
         puertos=$(ss -tulnH 2>/dev/null | wc -l)
-        fecha=$(date '+%Y-%m-%d %H:%M')
-        resumen="HOST: $host | KERNEL: $kernel | PROCESOS: $procesos | PUERTOS: $puertos | FECHA: $fecha"
+        resumen="PROCESOS: $procesos | PUERTOS: $puertos"
 
         local opciones="1. 🚨 | ESCANEO RÁPIDO       | Detección de amenazas en menos de 1 minuto
 2. 🧠 | PROCESOS Y MEMORIA   | Procesos, RAM, binarios borrados, memfd
@@ -2251,11 +3428,12 @@ proc4me_main_menu() {
 7. 🧩 | KERNEL Y ROOTKITS    | Módulos, dmesg, herramientas opcionales
 8. 📊 | AUDITORÍA COMPLETA   | Todos los checks + informe
 9. 🕵️ | INSPECTOR DE PID     | Ver y actuar sobre un proceso
-10. ℹ️ | AYUDA Y LIMITACIONES
-11. ↩ | SALIR"
+10. 📄 | INFORMES             | Ver y exportar a Markdown o .txt
+11. ℹ️ | AYUDA Y LIMITACIONES
+12. ↩ | SALIR"
 
         local sel
-        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Selección" "PANEL DE CONTROL - PROC4ME | $resumen")
+        sel=$(echo -e "$opciones" | proc4me_fzf_menu "Selección" "PANEL DE CONTROL - PROC4ME | $resumen" "~95%")
         [ -z "$sel" ] && { salir_proc4me; break; }
 
         case ${sel%%.*} in
@@ -2268,8 +3446,9 @@ proc4me_main_menu() {
             7) menu_kernel ;;
             8) auditoria_completa "si" ;;
             9) inspector_pid ;;
-            10) menu_ayuda ;;
-            11) salir_proc4me; break ;;
+            10) seleccionar_informe ;;
+            11) menu_ayuda ;;
+            12) salir_proc4me; break ;;
             *) ;;
         esac
     done
@@ -2293,6 +3472,7 @@ mostrar_ayuda_cli() {
     echo -e "  ${VERDE}--help${RESET}        Muestra esta ayuda y sale."
     echo ""
     echo -e "${AMARILLO}Sin argumentos:${RESET} abre el menú interactivo con FZF."
+    echo -e "  Selecciona una línea en las listas para ver su guía educativa y contexto."
     echo ""
     echo -e "${AZUL}Informes:${RESET} ${REPORT_DIR}"
     echo -e "${AZUL}Log de acciones:${RESET} ${LOG_FILE}"
@@ -2306,6 +3486,29 @@ mostrar_ayuda_cli() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "$1" in
+        --logo-header)
+            # Uso interno: FZF lo invoca cada 5 s para refrescar la cabecera.
+            detectar_sistema
+            logo_texto
+            exit 0
+            ;;
+        --preview-educativo)
+            # Uso interno: panel de explicación de una línea seleccionada.
+            detectar_sistema
+            preview_educativo "$2" "${@:3}"
+            exit 0
+            ;;
+        --preview-puerto)
+            # Uso interno: explicación de puerto + detalle del proceso.
+            detectar_sistema
+            preview_puerto "$2"
+            exit 0
+            ;;
+        --preview-informe)
+            # Uso interno: vista previa de un informe guardado.
+            preview_informe "$2"
+            exit 0
+            ;;
         --pid)
             verificar_root
             detalle_pid "$2"
