@@ -1,28 +1,37 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL MÓDULO ---
-V="1.6"
+V="1.7"
 DESCRIPCION="Instalación, Gestión y Configuración de Cortafuegos UFW para Linux"
 AUTOR="DanSanMar"
 
-# --- CONFIGURACIÓN DE COLORES (Estilo STK) ---
+# --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
 VERDE_BRILLANTE='\e[92m'
 VERDE='\e[32m'
 AMARILLO='\e[33m'
+AMARILLO_BRILLANTE='\e[93m'
 AZUL='\e[34m'
 AZUL_BRILLANTE='\e[94m'
+AZUL_OSCURO='\e[0;34m'
+AZUL_CLARO='\e[38;5;117m'
 CIAN='\e[36m'
+CIAN_BRILLANTE='\e[96m'
 MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
+BLANCO='\e[97m'
+GRIS_CLARO='\e[37m'
 
 # --- CONFIGURACIÓN DE LOGS DE GESTIÓN ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
 LOG_INFO="INFO"
 LOG_WARN="WARN"
 LOG_ERR="ERROR"
+
+# --- RUTA ABSOLUTA DEL PROPIO SCRIPT (para vistas previas y recarga de FZF) ---
+SELF_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 registrar_log() {
     local NIVEL="${1:-INFO}"
@@ -83,48 +92,110 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
     [ "$Package" = "unknown" ] && Package="dnf"
 fi
 
-# --- LOGO ASCII ---
-mostrar_logo_stop4me() {
-    echo -e "${ROJO}  ███████╗████████╗██████╗ ██████╗  ██╗  ██╗███╗   ███╗███████╗${RESET}"
-    echo -e "${ROJO_BRILLANTE}  ██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗ ██║  ██║████╗ ████║██╔════╝${RESET}"
-    echo -e "${AMARILLO}  ███████╗   ██║   ██║   ██║██████╔╝ ███████║██╔████╔██║█████╗  ${RESET}"
-    echo -e "${AMARILLO}  ╚════██║   ██║   ██║   ██║██╔═══╝  ╚════██║██║╚██╔╝██║██╔══╝  ${RESET}"
-    echo -e "${VERDE}  ███████║   ██║   ╚██████╔╝██║           ██║██║ ╚═╝ ██║███████╗${RESET}"
-    echo -e "${VERDE_BRILLANTE}  ╚══════╝   ╚═╝    ╚═════╝ ╚═╝           ╚═╝╚═╝     ╚═╝╚══════╝${RESET}"
-    echo -e "${VERDE_BRILLANTE}  UFW FIREWALL MANAGER - STOP4ME    ${RESET}\n${AZUL_BRILLANTE}  v${V}${RESET}"
-    echo -e "${AZUL}  By: ${AUTOR}${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Gestor de Paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
+# --- LOGO DINÁMICO BASADO EN SEGUNDOS ---
+actualizar_colores_logo() {
+    local SEGUNDOS
+    SEGUNDOS=$(date +"%S" 2>/dev/null)
+    [[ "$SEGUNDOS" =~ ^[0-9]+$ ]] || SEGUNDOS="0"
+
+    local ULTIMO_DIGITO="${SEGUNDOS: -1}"
+    case "$ULTIMO_DIGITO" in
+        1) COLOR_LOGO="$AZUL_BRILLANTE" ;;
+        2) COLOR_LOGO="$VERDE_BRILLANTE" ;;
+        3) COLOR_LOGO="$AMARILLO_BRILLANTE" ;;
+        4) COLOR_LOGO="$CIAN_BRILLANTE" ;;
+        5) COLOR_LOGO="$ROJO_BRILLANTE" ;;
+        6) COLOR_LOGO="$AZUL_CLARO" ;;
+        7) COLOR_LOGO="$VERDE" ;;
+        8) COLOR_LOGO="$AMARILLO" ;;
+        9) COLOR_LOGO="$CIAN" ;;
+        0) COLOR_LOGO="$ROJO" ;;
+        *) COLOR_LOGO="$BLANCO" ;;
+    esac
+
+    local DIGITO_VER=$(( (10#$SEGUNDOS + 5) % 10 ))
+    case "$DIGITO_VER" in
+        1) COLOR_VER="$ROJO_BRILLANTE" ;;
+        2) COLOR_VER="$CIAN" ;;
+        3) COLOR_VER="$VERDE" ;;
+        4) COLOR_VER="$AMARILLO" ;;
+        5) COLOR_VER="$AZUL_BRILLANTE" ;;
+        6) COLOR_VER="$VERDE_BRILLANTE" ;;
+        7) COLOR_VER="$AMARILLO_BRILLANTE" ;;
+        8) COLOR_VER="$CIAN_BRILLANTE" ;;
+        9) COLOR_VER="$AZUL_CLARO" ;;
+        0) COLOR_VER="$BLANCO" ;;
+        *) COLOR_VER="$CIAN" ;;
+    esac
+    
+    local DIGITO_DASH=$(( (10#$SEGUNDOS + 2) % 10 ))
+    case "$DIGITO_DASH" in
+        1) COLOR_DASH="$VERDE_BRILLANTE" ;;
+        2) COLOR_DASH="$AMARILLO_BRILLANTE" ;;
+        3) COLOR_DASH="$CIAN_BRILLANTE" ;;
+        4) COLOR_DASH="$ROJO_BRILLANTE" ;;
+        5) COLOR_DASH="$AZUL_CLARO" ;;
+        6) COLOR_DASH="$VERDE" ;;
+        7) COLOR_DASH="$AMARILLO" ;;
+        8) COLOR_DASH="$CIAN" ;;
+        9) COLOR_DASH="$ROJO" ;;
+        0) COLOR_DASH="$BLANCO" ;;
+        *) COLOR_DASH="$GRIS_CLARO" ;;
+    esac
+}
+
+logo_texto() {
+    actualizar_colores_logo
+    local hora
+    hora=$(date '+%H:%M:%S')
+
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STOP4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}TU GESTOR DE UFW${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e " ${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}  ${AMARILLO}Gestor:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
     if [ "$IMMUTABLE" = true ]; then
-        echo -e "${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+        echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
     fi
+    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}$(hostname 2>/dev/null)${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${USER:-root}${RESET}"
     
     if command -v ufw &>/dev/null; then
         local st_ufw
         st_ufw=$(ufw status 2>/dev/null | head -n 1)
         if [[ "$st_ufw" == *"active"* ]] && [[ "$st_ufw" != *"inactive"* ]]; then
-            echo -e "${AMARILLO}➤ Estado UFW:${RESET} ${VERDE_BRILLANTE}ACTIVO 🛡️${RESET}"
+            echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${VERDE_BRILLANTE}ACTIVO 🛡️${RESET}"
         else
-            echo -e "${AMARILLO}➤ Estado UFW:${RESET} ${ROJO_BRILLANTE}INACTIVO ⚠️${RESET}"
+            echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ROJO_BRILLANTE}INACTIVO ⚠️${RESET}"
         fi
     else
-        echo -e "${AMARILLO}➤ Estado UFW:${RESET} ${ROJO}NO INSTALADO ❌${RESET}"
+        echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ROJO}NO INSTALADO ❌${RESET}"
     fi
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
-# --- ESTILOS DE SELECCIÓN ---
-fzf_estilo() {
+mostrar_logo_stop4me() {
+    logo_texto
+}
+
+# --- ESTILOS DE SELECCIÓN (Estilo FZF vivo idéntico a proc4me) ---
+stop4me_fzf_menu() {
     local prompt_text="$1"
-    local header_text="$2"
+    local titulo="$2"
+    local altura="${3:-~90%}"
+    local logo logo_cmd
+
+    logo=$(logo_texto)
+    printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
+
     fzf --ansi \
-        --height=15 \
-        --reverse \
+        --height="$altura" \
+        --layout=reverse \
+        --no-sort \
+        --header-first \
         --border=rounded \
+        --border-label=" $titulo " \
         --prompt="➤ $prompt_text: " \
-        --header="$header_text" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff"
+        --header="$logo" \
+        --bind "every(5):bg-transform-header:$logo_cmd" \
+        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
 }
 
 salir_stop4me() {
@@ -197,21 +268,15 @@ verificar_e_instalar_ufw() {
 
 # --- FUNCIONES DE CONTROL UFW ---
 
-# ==============================================================================
-# --- GESTIÓN UNIFICADA DE REGLAS (UFW + FZF) ---
-# ==============================================================================
-
 gestionar_reglas_menu() {
     while true; do
         clear
         mostrar_logo_stop4me
         pintar "$MAGENTA" "--- 🔒 GESTIÓN INTERACTIVA DE REGLAS UFW ---"
 
-        # 1. Obtención y formateo limpio de reglas activas
         local raw_rules
         raw_rules=$(ufw status numbered 2>/dev/null | grep -E '^\[ *[0-9]+\]')
 
-        # 2. Construcción de la lista para FZF
         local fzf_input="[+] ➕ AÑADIR NUEVA REGLA (Puerto / IP / Servicio)\n"
         if [ -n "$raw_rules" ]; then
             fzf_input+="$raw_rules"
@@ -219,34 +284,28 @@ gestionar_reglas_menu() {
             fzf_input+="    (No hay reglas activas registradas)"
         fi
 
-        # 3. Menú interactivo principal
         local sel_regla
-        sel_regla=$(echo -e "$fzf_input" | fzf_estilo "Seleccione regla o acción" "REGLAS ACTIVAS EN UFW (Seleccione para gestionar o eliminar)")
+        sel_regla=$(echo -e "$fzf_input" | stop4me_fzf_menu "Seleccione regla o acción" "REGLAS ACTIVAS EN UFW" "~80%")
 
-        # Cancelación o salida con ESC
         [ -z "$sel_regla" ] && break
 
-        # 4. Enrutamiento de acción según selección
         if [[ "$sel_regla" == *"[+] ➕"* ]]; then
             agregar_regla_unificada
         elif [[ "$sel_regla" =~ \[[[:space:]]*([0-9]+)\] ]]; then
-            # Extracción limpia del número de regla (maneja alineaciones [ 1] y [10])
             local num_regla="${BASH_REMATCH[1]}"
             gestionar_regla_existente "$num_regla" "$sel_regla"
         fi
     done
 }
 
-# --- AÑADIR REGLA (PUERTO, IP O COMBINADO) ---
 agregar_regla_unificada() {
     clear
     mostrar_logo_stop4me
     pintar "$CIAN" "--- ➕ CREAR NUEVA REGLA DE FILTRADO ---"
 
-    # Seleccionar Acción
     local opt_accion="1. 🟢 ALLOW (Permitir)\n2. 🔴 DENY (Bloquear/Denegar)\n3. 🚫 REJECT (Rechazar con respuesta)"
     local sel_acc
-    sel_acc=$(echo -e "$opt_accion" | fzf_estilo "Acción" "TIPO DE POLÍTICA")
+    sel_acc=$(echo -e "$opt_accion" | stop4me_fzf_menu "Acción" "TIPO DE POLÍTICA" "~70%")
     [ -z "$sel_acc" ] && return
 
     local accion=""
@@ -257,10 +316,9 @@ agregar_regla_unificada() {
         *) return ;;
     esac
 
-    # Seleccionar Criterio
     local opt_tipo="1. 🔌 Por Puerto / Servicio (ej: 80, 443/tcp, ssh)\n2. 🌐 Por Dirección IP / Subred (ej: 192.168.1.50, 10.0.0.0/24)\n3. 🎯 Por IP Y Puerto Específico"
     local sel_tipo
-    sel_tipo=$(echo -e "$opt_tipo" | fzf_estilo "Criterio" "APLICAR REGLA POR:")
+    sel_tipo=$(echo -e "$opt_tipo" | stop4me_fzf_menu "Criterio" "APLICAR REGLA POR" "~70%")
     [ -z "$sel_tipo" ] && return
 
     local cmd_args=()
@@ -296,7 +354,6 @@ agregar_regla_unificada() {
         *) return ;;
     esac
 
-    # Ejecución segura mediante array
     echo -e "\n${AZUL}🔄 Aplicando: ${AMARILLO}ufw ${cmd_args[*]}${RESET}"
     if ufw "${cmd_args[@]}"; then
         pintar "$VERDE_BRILLANTE" "✔ Regla aplicada con éxito."
@@ -308,14 +365,13 @@ agregar_regla_unificada() {
     read -p "Presione Enter para continuar..."
 }
 
-# --- SUBMENÚ PARA REGLA SELECCIONADA ---
 gestionar_regla_existente() {
     local num_regla="$1"
     local detalle_regla="$2"
 
     local opciones="1. ❌ Eliminar esta regla (#$num_regla)\n2. 📥 Insertar regla antes de esta (#$num_regla)\n3. ↩ Volver"
     local sel
-    sel=$(echo -e "$opciones" | fzf_estilo "Acción" "REGLA SELECCIONADA: $detalle_regla")
+    sel=$(echo -e "$opciones" | stop4me_fzf_menu "Acción" "REGLA SELECCIONADA" "~70%")
 
     case ${sel:0:1} in
         1)
@@ -336,11 +392,10 @@ gestionar_regla_existente() {
         2)
             echo -ne "\n${AMARILLO}Ingrese la acción (allow/deny): ${RESET}"
             read -r acc_ins
-            echo -ne "${AMARILLO}Ingrese la regla (ej: 80/tcp o from 192.168.1.1): ${RESET}"
+            echo -ne "\n${AMARILLO}Ingrese la regla (ej: 80/tcp o from 192.168.1.1): ${RESET}"
             read -r rule_ins
 
             if [ -n "$acc_ins" ] && [ -n "$rule_ins" ]; then
-                # Construcción y parseo seguro de argumentos
                 read -r -a extra_args <<< "$rule_ins"
                 if ufw insert "$num_regla" "$acc_ins" "${extra_args[@]}"; then
                     pintar "$VERDE_BRILLANTE" "✔ Regla insertada correctamente en la posición #$num_regla."
@@ -355,7 +410,7 @@ gestionar_regla_existente() {
             ;;
     esac
 }
-# Gestión estado UFW
+
 gestionar_estado_ufw() {
     clear
     mostrar_logo_stop4me
@@ -372,11 +427,10 @@ gestionar_estado_ufw() {
     fi
 
     local sel
-    sel=$(echo -e "$opciones" | fzf_estilo "Acción de Estado" "ESTADO DE UFW")
+    sel=$(echo -e "$opciones" | stop4me_fzf_menu "Acción de Estado" "ESTADO DE UFW" "~70%")
 
     case ${sel:0:1} in
-        0) ver_estado_y_reglas
-            ;;
+        0) ver_estado_y_reglas ;;
         1)
             if [[ "$st_ufw" == *"active"* ]] && [[ "$st_ufw" != *"inactive"* ]]; then
                 ufw --force disable
@@ -439,7 +493,6 @@ resetear_cortafuegos() {
     read -p "Presione Enter para continuar..."
 }
 
-# --- OBTENER LOGS DE TRÁFICO DEL KERNEL / UFW ---
 obtener_logs_trafico() {
     if [ -f /var/log/ufw.log ]; then
         cat /var/log/ufw.log
@@ -458,228 +511,218 @@ obtener_logs_trafico() {
 }
 
 detectar_escaneo_puertos() {
-        clear
-        mostrar_logo_stop4me
-                pintar "$ROJO_BRILLANTE" "--- DETECTOR DE ESCANEOS DE PUERTOS (PORT SCAN) ---"
-                echo -e "${AZUL}Analizando IPs que impactaron múltiples puertos distintos...${RESET}\n"
+    clear
+    mostrar_logo_stop4me
+    pintar "$ROJO_BRILLANTE" "--- DETECTOR DE ESCANEOS DE PUERTOS (PORT SCAN) ---"
+    echo -e "${AZUL}Analizando IPs que impactaron múltiples puertos distintos...${RESET}\n"
 
-                local raw_logs
-                raw_logs=$(obtener_logs_trafico | grep -E "BLOCK|DENY")
-                
-                if [ -z "$raw_logs" ]; then
-                    pintar "$VERDE_BRILLANTE" "✔ No hay registros suficientes para analizar escaneos."
-                else
-                    echo -e "${ROJO}EVENTOS | PUERTOS UNICOS | IP ORIGEN${RESET}"
-                    echo -e "${CIAN}--------------------------------------------------${RESET}"
-                    
-                    local reporte_escan
-                    reporte_escan=$(echo "$raw_logs" | awk '
-                        /SRC=/ && /DPT=/ {
-                            for(i=1;i<=NF;i++) {
-                                if($i ~ /^SRC=/) ip=substr($i,5)
-                                if($i ~ /^DPT=/) port=substr($i,5)
-                            }
-                            if(ip != "" && port != "") {
-                                count[ip]++
-                                ports[ip, port]=1
-                            }
-                        }
-                        END {
-                            for(ip in count) {
-                                unique=0
-                                for(k in ports) {
-                                    split(k, idx, SUBSEP)
-                                    if(idx[1] == ip) unique++
-                                }
-                                print count[ip], unique, ip
-                            }
-                        }' | sort -nr -k2)
+    local raw_logs
+    raw_logs=$(obtener_logs_trafico | grep -E "BLOCK|DENY")
+    
+    if [ -z "$raw_logs" ]; then
+        pintar "$VERDE_BRILLANTE" "✔ No hay registros suficientes para analizar escaneos."
+    else
+        echo -e "${ROJO}EVENTOS | PUERTOS UNICOS | IP ORIGEN${RESET}"
+        echo -e "${CIAN}--------------------------------------------------${RESET}"
+        
+        local reporte_escan
+        reporte_escan=$(echo "$raw_logs" | awk '
+            /SRC=/ && /DPT=/ {
+                for(i=1;i<=NF;i++) {
+                    if($i ~ /^SRC=/) ip=substr($i,5)
+                    if($i ~ /^DPT=/) port=substr($i,5)
+                }
+                if(ip != "" && port != "") {
+                    count[ip]++
+                    ports[ip, port]=1
+                }
+            }
+            END {
+                for(ip in count) {
+                    unique=0
+                    for(k in ports) {
+                        split(k, idx, SUBSEP)
+                        if(idx[1] == ip) unique++
+                    }
+                    print count[ip], unique, ip
+                }
+            }' | sort -nr -k2)
 
-                    if [ -z "$reporte_escan" ]; then
-                        pintar "$VERDE_BRILLANTE" "✔ No se detectaron patrones de escaneo de puertos activos."
-                    else
-                        echo "$reporte_escan" | awk '{printf "  %-7s|   %-13s|   %s\n", $1, $2, $3}'
-                        echo -e "${CIAN}--------------------------------------------------${RESET}"
-                        
-                        echo -ne "\n${AMARILLO}¿Desea bloquear alguna IP detectada? (s/N): ${RESET}"
-                        read -r bloq_conf
-                        if [[ "$bloq_conf" =~ ^[sS]$ ]]; then
-                            echo -ne "${AMARILLO}Ingrese la IP a bloquear en UFW: ${RESET}"
-                            read -r ip_block
-                            if [ -n "$ip_block" ]; then
-                                ufw deny from "$ip_block"
-                                registrar_log "$LOG_WARN" "IP bloqueada tras detectar escaneo: $ip_block"
-                                pintar "$VERDE_BRILLANTE" "✔ Regla 'DENY' aplicada correctamente para $ip_block"
-                            fi
-                        fi
-                    fi
+        if [ -z "$reporte_escan" ]; then
+            pintar "$VERDE_BRILLANTE" "✔ No se detectaron patrones de escaneo de puertos activos."
+        else
+            echo "$reporte_escan" | awk '{printf "  %-7s|   %-13s|   %s\n", $1, $2, $3}'
+            echo -e "${CIAN}--------------------------------------------------${RESET}"
+            
+            echo -ne "\n${AMARILLO}¿Desea bloquear alguna IP detectada? (s/N): ${RESET}"
+            read -r bloq_conf
+            if [[ "$bloq_conf" =~ ^[sS]$ ]]; then
+                echo -ne "${AMARILLO}Ingrese la IP a bloquear en UFW: ${RESET}"
+                read -r ip_block
+                if [ -n "$ip_block" ]; then
+                    ufw deny from "$ip_block"
+                    registrar_log "$LOG_WARN" "IP bloqueada tras detectar escaneo: $ip_block"
+                    pintar "$VERDE_BRILLANTE" "✔ Regla 'DENY' aplicada correctamente para $ip_block"
                 fi
-                read -p "Presione Enter para continuar..."
-                
+            fi
+        fi
+    fi
+    read -p "Presione Enter para continuar..."
 }
 
 detector_fuerza_bruta(){
     clear
     mostrar_logo_stop4me
-                pintar "$ROJO_BRILLANTE" "--- DETECTOR DE INTENTOS DE FUERZA BRUTA (SSH / AUTH) ---"
-                echo -e "${AZUL}Buscando accesos fallidos en /var/log/auth.log y systemd journal...${RESET}\n"
+    pintar "$ROJO_BRILLANTE" "--- DETECTOR DE INTENTOS DE FUERZA BRUTA (SSH / AUTH) ---"
+    echo -e "${AZUL}Buscando accesos fallidos en /var/log/auth.log y systemd journal...${RESET}\n"
 
-                local auth_logs=""
-                if [ -f /var/log/auth.log ]; then
-                    auth_logs=$(grep -E "Failed password|Invalid user" /var/log/auth.log 2>/dev/null)
-                elif command -v journalctl &>/dev/null; then
-                    auth_logs=$(journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null | grep -E "Failed password|Invalid user")
-                fi
+    local auth_logs=""
+    if [ -f /var/log/auth.log ]; then
+        auth_logs=$(grep -E "Failed password|Invalid user" /var/log/auth.log 2>/dev/null)
+    elif command -v journalctl &>/dev/null; then
+        auth_logs=$(journalctl -u ssh -u sshd --no-pager -n 2000 2>/dev/null | grep -E "Failed password|Invalid user")
+    fi
 
-                if [ -z "$auth_logs" ]; then
-                    pintar "$VERDE_BRILLANTE" "✔ No se encontraron intentos fallidos de autenticación recientes."
-                else
-                    echo -e "${ROJO}INTENTOS FALLIDOS | IP ATACANTE${RESET}"
-                    echo -e "${CIAN}--------------------------------------------------${RESET}"
-                    
-                    local bf_report
-                    bf_report=$(echo "$auth_logs" | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | awk '{print $2}' | sort | uniq -c | sort -nr)
-                    
-                    echo "$bf_report" | awk '{printf "  %-16s|   %s\n", $1, $2}'
-                    echo -e "${CIAN}--------------------------------------------------${RESET}"
+    if [ -z "$auth_logs" ]; then
+        pintar "$VERDE_BRILLANTE" "✔ No se encontraron intentos fallidos de autenticación recientes."
+    else
+        echo -e "${ROJO}INTENTOS FALLIDOS | IP ATACANTE${RESET}"
+        echo -e "${CIAN}--------------------------------------------------${RESET}"
+        
+        local bf_report
+        bf_report=$(echo "$auth_logs" | grep -oE "from [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | awk '{print $2}' | sort | uniq -c | sort -nr)
+        
+        echo "$bf_report" | awk '{printf "  %-16s|   %s\n", $1, $2}'
+        echo -e "${CIAN}--------------------------------------------------${RESET}"
 
-                    echo -ne "\n${AMARILLO}¿Desea bloquear permanentemente una IP agresora? (s/N): ${RESET}"
-                    read -r bloq_bf
-                    if [[ "$bloq_bf" =~ ^[sS]$ ]]; then
-                        echo -ne "${AMARILLO}Ingrese la IP a aplicar DENY: ${RESET}"
-                        read -r ip_bf
-                        if [ -n "$ip_bf" ]; then
-                            ufw deny from "$ip_bf"
-                            registrar_log "$LOG_WARN" "IP Bloqueada por Fuerza Bruta: $ip_bf"
-                            pintar "$VERDE_BRILLANTE" "✔ IP $ip_bf bloqueada en el cortafuegos."
-                        fi
-                    fi
-                fi
-                read -p "Presione Enter para continuar..."
-            
+        echo -ne "\n${AMARILLO}¿Desea bloquear permanentemente una IP agresora? (s/N): ${RESET}"
+        read -r bloq_bf
+        if [[ "$bloq_bf" =~ ^[sS]$ ]]; then
+            echo -ne "${AMARILLO}Ingrese la IP a aplicar DENY: ${RESET}"
+            read -r ip_bf
+            if [ -n "$ip_bf" ]; then
+                ufw deny from "$ip_bf"
+                registrar_log "$LOG_WARN" "IP Bloqueada por Fuerza Bruta: $ip_bf"
+                pintar "$VERDE_BRILLANTE" "✔ IP $ip_bf bloqueada en el cortafuegos."
+            fi
+        fi
+    fi
+    read -p "Presione Enter para continuar..."
 }
 
 informe_auditoria_seguridad(){
     clear
     mostrar_logo_stop4me
-                pintar "$MAGENTA" "--- GENERADOR DE INFORME DE AUDITORÍA DE SEGURIDAD---"
-                
-                local raw_blocks
-                raw_blocks=$(obtener_logs_trafico | grep -E "BLOCK|DENY")
+    pintar "$MAGENTA" "--- GENERADOR DE INFORME DE AUDITORÍA DE SEGURIDAD---"
+    
+    local raw_blocks
+    raw_blocks=$(obtener_logs_trafico | grep -E "BLOCK|DENY")
 
-                if [ -z "$raw_blocks" ]; then
-                    pintar "$AMARILLO" "⚠️ No se han encontrado registros de tráfico bloqueado."
-                    read -p "Presione Enter para volver..."
-                    return
-                fi
+    if [ -z "$raw_blocks" ]; then
+        pintar "$AMARILLO" "⚠️ No se han encontrado registros de tráfico bloqueado."
+        read -p "Presione Enter para volver..."
+        return
+    fi
 
-                # Generar estructura resumida para la vista de selección
-                local lista_ips
-                lista_ips=$(echo "$raw_blocks" | awk '
-                    /SRC=/ {
-                        for(i=1;i<=NF;i++) {
-                            if($i ~ /^SRC=/) ip=substr($i,5)
-                            if($i ~ /^PROTO=/) proto[ip]=$i
-                        }
-                        if(ip != "") count[ip]++
-                    }
-                    END {
-                        for(i in count) {
-                            printf "%-15s | Bloqueos: %-5d | Tipo: %s\n", i, count[i], proto[i]
-                        }
-                    }' | sort -k3 -nr)
+    local lista_ips
+    lista_ips=$(echo "$raw_blocks" | awk '
+        /SRC=/ {
+            for(i=1;i<=NF;i++) {
+                if($i ~ /^SRC=/) ip=substr($i,5)
+                if($i ~ /^PROTO=/) proto[ip]=$i
+            }
+            if(ip != "") count[ip]++
+        }
+        END {
+            for(i in count) {
+                printf "%-15s | Bloqueos: %-5d | Tipo: %s\n", i, count[i], proto[i]
+            }
+        }' | sort -k3 -nr)
 
-                if [ -z "$lista_ips" ]; then
-                    pintar "$AMARILLO" "No se pudieron extraer direcciones IP del log."
-                    read -p "Presione Enter para volver..."
-                    return
-                fi
+    if [ -z "$lista_ips" ]; then
+        pintar "$AMARILLO" "No se pudieron extraer direcciones IP del log."
+        read -p "Presione Enter para volver..."
+        return
+    fi
+    
+    local seleccion_ip
+    seleccion_ip=$(echo "$lista_ips" | fzf --ansi \
+        --height=18 \
+        --reverse \
+        --border=rounded \
+        --prompt="🎯 Seleccione IP para Informe Forense: " \
+        --header="IP ORIGEN        | IMPACTOS       | PROTOCOLO ULTIMO")
 
-                
-                local seleccion_ip
-                seleccion_ip=$(echo "$lista_ips" | fzf --ansi \
-                    --height=18 \
-                    --reverse \
-                    --border=rounded \
-                    --prompt="🎯 Seleccione IP para Informe Forense: " \
-                    --header="IP ORIGEN        | IMPACTOS       | PROTOCOLO ULTIMO")
+    if [ -n "$seleccion_ip" ]; then
+        local target_ip
+        target_ip=$(echo "$seleccion_ip" | awk '{print $1}')
 
-                if [ -n "$seleccion_ip" ]; then
-                    local target_ip
-                    target_ip=$(echo "$seleccion_ip" | awk '{print $1}')
+        clear
+        local logs_ip
+        logs_ip=$(echo "$raw_blocks" | grep "SRC=$target_ip")
 
-                    clear
-                    local logs_ip
-                    logs_ip=$(echo "$raw_blocks" | grep "SRC=$target_ip")
+        local total_intentos
+        total_intentos=$(echo "$logs_ip" | wc -l)
+        local primer_visto
+        primer_visto=$(echo "$logs_ip" | head -n 1 | awk '{print $1, $2, $3}')
+        local ultimo_visto
+        ultimo_visto=$(echo "$logs_ip" | tail -n 1 | awk '{print $1, $2, $3}')
+        local puertos_destino
+        puertos_destino=$(echo "$logs_ip" | grep -oE "DPT=[0-9]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
+        local protocolos
+        protocolos=$(echo "$logs_ip" | grep -oE "PROTO=[A-Z]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
+        local interfaces
+        interfaces=$(echo "$logs_ip" | grep -oE "IN=[a-zA-Z0-9_-]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
+        local mac_addr
+        mac_addr=$(echo "$logs_ip" | grep -oE "MAC=[a-fA-F0-9:]+" | head -n 1 | cut -d'=' -f2)
 
-                    # Métricas avanzadas
-                    local total_intentos
-                    total_intentos=$(echo "$logs_ip" | wc -l)
-                    local primer_visto
-                    primer_visto=$(echo "$logs_ip" | head -n 1 | awk '{print $1, $2, $3}')
-                    local ultimo_visto
-                    ultimo_visto=$(echo "$logs_ip" | tail -n 1 | awk '{print $1, $2, $3}')
-                    local puertos_destino
-                    puertos_destino=$(echo "$logs_ip" | grep -oE "DPT=[0-9]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
-                    local protocolos
-                    protocolos=$(echo "$logs_ip" | grep -oE "PROTO=[A-Z]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
-                    local interfaces
-                    interfaces=$(echo "$logs_ip" | grep -oE "IN=[a-zA-Z0-9_-]+" | cut -d'=' -f2 | sort -u | tr '\n' ' ')
-                    local mac_addr
-                    mac_addr=$(echo "$logs_ip" | grep -oE "MAC=[a-fA-F0-9:]+" | head -n 1 | cut -d'=' -f2)
+        local hostname_res="No resuelto / IP Pública"
+        if command -v host &>/dev/null; then
+            hostname_res=$(host "$target_ip" 2>/dev/null | head -n 1 | awk '{print $NF}')
+        fi
 
-                    # Intento de resolución DNS inversa
-                    local hostname_res="No resuelto / IP Pública"
-                    if command -v host &>/dev/null; then
-                        hostname_res=$(host "$target_ip" 2>/dev/null | head -n 1 | awk '{print $NF}')
-                    fi
+        echo -e "${CIAN}================================================================================${RESET}"
+        echo -e "${VERDE_BRILLANTE}                  INFORME DE AUDITORÍA: $target_ip${RESET}"
+        echo -e "${CIAN}================================================================================${RESET}"
+        echo -e " 📌 ${AMARILLO}Dominio / Hostname:${RESET}  ${AZUL}${hostname_res}${RESET}"
+        echo -e " 📊 ${AMARILLO}Volumen de Impactos:${RESET} ${ROJO_BRILLANTE}${total_intentos} paquetes bloqueados${RESET}"
+        echo -e " ⏱️  ${AMARILLO}Rango Temporal:${RESET}      ${CIAN}${primer_visto:-"N/A"}${RESET}  ➔  ${CIAN}${ultimo_visto:-"N/A"}${RESET}"
+        echo -e " 🔌 ${AMARILLO}Interfaces Afectadas:${RESET}${VERDE}${interfaces:-"N/A"}${RESET}"
+        echo -e " 🌐 ${AMARILLO}Protocolos Utilizados:${RESET}${MAGENTA}${protocolos:-"N/A"}${RESET}"
+        echo -e " 🎯 ${AMARILLO}Puertos Destino (DPT):${RESET}${AMARILLO}${puertos_destino:-"N/A"}${RESET}"
+        if [ -n "$mac_addr" ]; then
+            echo -e " 💻 ${AMARILLO}Dirección MAC Traza:${RESET}  ${AZUL}${mac_addr}${RESET}"
+        fi
+        echo -e "${CIAN}--------------------------------------------------------------------------------${RESET}"
+        echo -e "${AZUL}🔍 MUESTREO DE TRAZAS Y PAQUETES DETECTADOS (Filtrable con FZF):${RESET}\n"
 
-                    # Renderizado del Informe en pantalla
-                    echo -e "${CIAN}================================================================================${RESET}"
-                    echo -e "${VERDE_BRILLANTE}                  INFORME DE AUDITORÍA: $target_ip${RESET}"
-                    echo -e "${CIAN}================================================================================${RESET}"
-                    echo -e " 📌 ${AMARILLO}Dominio / Hostname:${RESET}  ${AZUL}${hostname_res}${RESET}"
-                    echo -e " 📊 ${AMARILLO}Volumen de Impactos:${RESET} ${ROJO_BRILLANTE}${total_intentos} paquetes bloqueados${RESET}"
-                    echo -e " ⏱️  ${AMARILLO}Rango Temporal:${RESET}      ${CIAN}${primer_visto:-"N/A"}${RESET}  ➔  ${CIAN}${ultimo_visto:-"N/A"}${RESET}"
-                    echo -e " 🔌 ${AMARILLO}Interfaces Afectadas:${RESET}${VERDE}${interfaces:-"N/A"}${RESET}"
-                    echo -e " 🌐 ${AMARILLO}Protocolos Utilizados:${RESET}${MAGENTA}${protocolos:-"N/A"}${RESET}"
-                    echo -e " 🎯 ${AMARILLO}Puertos Destino (DPT):${RESET}${AMARILLO}${puertos_destino:-"N/A"}${RESET}"
-                    if [ -n "$mac_addr" ]; then
-                        echo -e " 💻 ${AMARILLO}Dirección MAC Traza:${RESET}  ${AZUL}${mac_addr}${RESET}"
-                    fi
-                    echo -e "${CIAN}--------------------------------------------------------------------------------${RESET}"
-                    echo -e "${AZUL}🔍 MUESTREO DE TRAZAS Y PAQUETES DETECTADOS (Filtrable con FZF):${RESET}\n"
+        echo "$logs_ip" | awk '{
+            fecha=$1" "$2" "$3
+            for(i=1;i<=NF;i++) {
+                if($i ~ /^IN=/) iface=substr($i,4)
+                if($i ~ /^PROTO=/) proto=substr($i,7)
+                if($i ~ /^SPT=/) sport=substr($i,5)
+                if($i ~ /^DPT=/) dport=substr($i,5)
+                if($i ~ /^LEN=/) len=substr($i,5)
+                if($i ~ /^SYN|^ACK|^FIN|^RST/) flag=$i
+            }
+            if(flag == "") flag="N/A"
+            printf " %-15s | Int: %-5s | Proto: %-4s | Puertos: %-5s -> %-5s | Tam: %-4s B | Flag: %-4s\n", fecha, iface, proto, sport, dport, len, flag
+        }' | fzf --ansi --height=15 --reverse --border=rounded \
+            --prompt="🔍 Explorar logs de $target_ip: " \
+            --header="FECHA/HORA       | INTERFAZ  | PROTO | ORIGEN -> DESTINO     | TAMAÑO   | FLAGS"
 
-                    # Generador de tabla de trazabilidad completa
-                    echo "$logs_ip" | awk '{
-                        fecha=$1" "$2" "$3
-                        for(i=1;i<=NF;i++) {
-                            if($i ~ /^IN=/) iface=substr($i,4)
-                            if($i ~ /^PROTO=/) proto=substr($i,7)
-                            if($i ~ /^SPT=/) sport=substr($i,5)
-                            if($i ~ /^DPT=/) dport=substr($i,5)
-                            if($i ~ /^LEN=/) len=substr($i,5)
-                            if($i ~ /^SYN|^ACK|^FIN|^RST/) flag=$i
-                        }
-                        if(flag == "") flag="N/A"
-                        printf " %-15s | Int: %-5s | Proto: %-4s | Puertos: %-5s -> %-5s | Tam: %-4s B | Flag: %-4s\n", fecha, iface, proto, sport, dport, len, flag
-                    }' | fzf --ansi --height=15 --reverse --border=rounded \
-                        --prompt="🔍 Explorar logs de $target_ip: " \
-                        --header="FECHA/HORA       | INTERFAZ  | PROTO | ORIGEN -> DESTINO     | TAMAÑO   | FLAGS"
-
-                    echo -ne "\n${AMARILLO}¿Desea bloquear permanentemente la IP $target_ip en UFW? (s/N): ${RESET}"
-                    read -r conf_den
-                    if [[ "$conf_den" =~ ^[sS]$ ]]; then
-                        ufw deny from "$target_ip"
-                        registrar_log "$LOG_WARN" "IP bloqueada tras análisis forense: $target_ip"
-                        pintar "$VERDE_BRILLANTE" "✔ Regla 'DENY' aplicada correctamente para $target_ip"
-                    fi
-                fi
-                read -p "Presione Enter para continuar..."
-                
+        echo -ne "\n${AMARILLO}¿Desea bloquear permanentemente la IP $target_ip en UFW? (s/N): ${RESET}"
+        read -r conf_den
+        if [[ "$conf_den" =~ ^[sS]$ ]]; then
+            ufw deny from "$target_ip"
+            registrar_log "$LOG_WARN" "IP bloqueada tras análisis forense: $target_ip"
+            pintar "$VERDE_BRILLANTE" "✔ Regla 'DENY' aplicada correctamente para $target_ip"
+        fi
+    fi
+    read -p "Presione Enter para continuar..."
 }
 
-# --- AUDITORÍA AVANZADA DE TRÁFICO, ESCANEOS E INFORMES EXHAUSTIVOS ---
 analizar_trafico_red() {
     while true; do
         clear
@@ -692,7 +735,7 @@ analizar_trafico_red() {
 
         local opciones_tr="1. 🛑 Tráfico Bloqueado en Tiempo Real\n2. 📊 Auditoria de Seguridad de Logs\n3. ⚙️ Nivel de Registro de UFW\n4. 📋 Bitácora Interna de Gestión\n5. ↩ Volver"
         local sel_tr
-        sel_tr=$(echo -e "$opciones_tr" | fzf_estilo "Centro de Seguridad" "DETECCIÓN DE AMENAZAS")
+        sel_tr=$(echo -e "$opciones_tr" | stop4me_fzf_menu "Centro de Seguridad" "DETECCIÓN DE AMENAZAS" "~80%")
 
         case ${sel_tr:0:1} in
             1)
@@ -710,22 +753,18 @@ analizar_trafico_red() {
                 fi
                 read -p "Presione Enter para continuar..."
                 ;;
-
             2)
-                
                 detectar_escaneo_puertos
                 detector_fuerza_bruta
                 informe_auditoria_seguridad
                 ;;
-                         
-
             3)
                 clear
                 mostrar_logo_stop4me
                 pintar "$CIAN" "--- CONFIGURAR NIVEL DE REGISTRO (LOGGING) DE UFW ---"
                 local opt_log="1. 🔴 off (Desactivar registro)\n2. 🟢 low (Básico: registra paquetes bloqueados - Recomendado)\n3. 🟡 medium (Medio: incluye paquetes rechazados e inválidos)\n4. 🟠 high (Alto: registra todos los paquetes con limitación)\n5. ↩ Volver"
                 local sel_lvl
-                sel_lvl=$(echo -e "$opt_log" | fzf_estilo "Nivel Logging" "CONFIGURACIÓN UFW LOGGING")
+                sel_lvl=$(echo -e "$opt_log" | stop4me_fzf_menu "Nivel Logging" "CONFIGURACIÓN UFW LOGGING" "~70%")
 
                 case ${sel_lvl:0:1} in
                     1) ufw logging off ;;
@@ -739,14 +778,12 @@ analizar_trafico_red() {
                 pintar "$VERDE_BRILLANTE" "✔ Nivel de registro actualizado."
                 read -p "Presione Enter para continuar..."
                 ;;
-
             4) gestionar_logs_script ;;
             *) break ;;
         esac
     done
 }
 
-# --- BITÁCORA INTERNA DE MANTENIMIENTO ---
 gestionar_logs_script() {
     clear
     mostrar_logo_stop4me
@@ -760,7 +797,7 @@ gestionar_logs_script() {
 
     local filtro_opt="1. 📋 Ver todos los logs\n2. 🟢 Filtrar por INFO\n3. 🟡 Filtrar por ADVERTENCIAS (WARN)\n4. 🔴 Filtrar por ERRORES (ERROR)\n5. ↩ Volver"
     local sel_filtro
-    sel_filtro=$(echo -e "$filtro_opt" | fzf_estilo "Filtro Log" "ACCIONES DEL SCRIPT")
+    sel_filtro=$(echo -e "$filtro_opt" | stop4me_fzf_menu "Filtro Log" "ACCIONES DEL SCRIPT" "~70%")
 
     local tipo_filtro=""
     case ${sel_filtro:0:1} in
@@ -793,11 +830,10 @@ stop4me_main_menu() {
 
     while true; do
         clear
-        mostrar_logo_stop4me
 
         local opciones="1. ⚡ Estado / Activar / Desactivar / Recargar UFW\n2. 🔌 Gestión de Reglas por Puerto o Servicio o IP (ALLOW/DENY)\n3. 🛡️ Control de Tráfico de Red y Auditoria de Eventos\n4. ⚠️ Restablecer Cortafuegos de Fábrica (Reset)\n5. ↩ Volver"
         local seleccion
-        seleccion=$(echo -e "$opciones" | fzf_estilo "Selección" "S T O P 4 M E  -  U F W  M A N A G E R")
+        seleccion=$(echo -e "$opciones" | stop4me_fzf_menu "Selección" "S T O P 4 M E  -  U F W  M A N A G E R" "~80%")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ] || [[ "${seleccion:0:1}" == "5" ]]; then
             salir_stop4me
@@ -805,7 +841,6 @@ stop4me_main_menu() {
         fi
 
         case ${seleccion:0:1} in
-            
             1) gestionar_estado_ufw ;;
             2) gestionar_reglas_menu ;;
             3) analizar_trafico_red ;;
@@ -814,6 +849,14 @@ stop4me_main_menu() {
     done
 }
 
+# --- PUNTO DE ENTRADA CON SOPORTE DE REFRESCO VIVO PARA FZF ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    case "$1" in
+        --logo-header)
+            logo_texto
+            exit 0
+            ;;
+    esac
+
     stop4me_main_menu
 fi
