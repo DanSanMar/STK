@@ -854,7 +854,7 @@ stop4me_main_menu() {
     while true; do
         clear
 
-        local opciones="1. ⚡ Estado / Activar / Desactivar / Recargar UFW\n2. 🔌 Gestión de Reglas por Puerto o Servicio o IP (ALLOW/DENY)\n3. 🛡️ Control de Tráfico de Red y Auditoria de Eventos\n4. ⚠️ Restablecer Cortafuegos de Fábrica (Reset)\n5. ↩ Volver"
+        local opciones="1. ⚡ ESTADO      | Activar / Desactivar / Recargar UFW\n2. 🔌 GESTIÓN     | Reglas por Puerto o Servicio o IP\n3. 🛡️ CONTROL     | Tráfico de Red y Auditoria de Eventos\n4. ⚠️ RESTART     | Vuelve a la Configuración de Fábrica\n5. ↩  Volver"
         local seleccion
         seleccion=$(echo -e "$opciones" | stop4me_fzf_menu "Selección" "S T O P 4 M E  -  U F W  M A N A G E R" "~80%")
 
