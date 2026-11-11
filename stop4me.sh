@@ -149,28 +149,51 @@ logo_texto() {
     local hora
     hora=$(date '+%H:%M:%S')
 
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STOP4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}TU GESTOR DE UFW${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}  ${AMARILLO}Gestor:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
-    if [ "$IMMUTABLE" = true ]; then
-        echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+    # --- RECOPILACIÓN DE DATOS DE RED Y FIREWALL ---
+    local iface ip_addr
+    # Extraer la interfaz de red principal y su IP
+    iface=$(ip route 2>/dev/null | awk '/default/ {print $5}' | head -n1)
+    if [ -n "$iface" ]; then
+        ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+    else
+        iface="Ninguna"
+        ip_addr="Desconectado"
     fi
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}$(hostname 2>/dev/null)${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${USER:-root}${RESET}"
-    
+
+    local ufw_status="${ROJO}NO INSTALADO ❌${RESET}"
+    local ufw_policies="N/A"
+    local ufw_rules="0"
+    local ufw_log="N/A"
+
     if command -v ufw &>/dev/null; then
         local st_ufw
-        st_ufw=$(ufw status 2>/dev/null | head -n 1)
-        if [[ "$st_ufw" == *"active"* ]] && [[ "$st_ufw" != *"inactive"* ]]; then
-            echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${VERDE_BRILLANTE}ACTIVO 🛡️${RESET}"
+        st_ufw=$(ufw status verbose 2>/dev/null)
+        
+        if echo "$st_ufw" | grep -iq "Status: active"; then
+            ufw_status="${VERDE_BRILLANTE}ACTIVO 🛡️${RESET}"
+            
+            # Extraer políticas por defecto (Entrada / Salida)
+            local in_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (incoming)\|allow (incoming)\|reject (incoming)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
+            local out_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (outgoing)\|allow (outgoing)\|reject (outgoing)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
+            ufw_policies="IN: ${in_pol:-DENY} | OUT: ${out_pol:-ALLOW}"
+            
+            # Contar número de reglas activas y nivel de log
+            ufw_rules=$(ufw status numbered 2>/dev/null | grep -cE '^\[ *[0-9]+\]')
+            ufw_log=$(echo "$st_ufw" | grep -i "Logging:" | awk '{print $2}' | tr 'a-z' 'A-Z')
         else
-            echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ROJO_BRILLANTE}INACTIVO ⚠️${RESET}"
+            ufw_status="${ROJO_BRILLANTE}INACTIVO ⚠️${RESET}"
+            ufw_policies="N/A (Apagado)"
         fi
-    else
-        echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ROJO}NO INSTALADO ❌${RESET}"
     fi
+
+    # --- RENDERIZADO DEL LOGO ---
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STOP4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}TU GESTOR DE UFW${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ufw_status}   ${AMARILLO}Reglas Activas:${RESET} ${AZUL}${ufw_rules}${RESET}"
+    echo -e " ${AMARILLO}➤ Políticas :${RESET} ${MAGENTA}${ufw_policies}${RESET}   ${AMARILLO}Log:${RESET} ${AZUL}${ufw_log:-"N/A"}${RESET}"
+    echo -e " ${AMARILLO}➤ Red Activa:${RESET} ${AZUL}${iface:-"N/A"}${RESET} ${AZUL_OSCURO}(${ip_addr:-"N/A"})${RESET}"
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
-
 mostrar_logo_stop4me() {
     logo_texto
 }
@@ -860,3 +883,4 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
     stop4me_main_menu
 fi
+
