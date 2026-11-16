@@ -149,6 +149,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Mejora:** La cabecera se adapta al alto de la terminal: en pantallas pequeñas se recorta para no cortar las opciones del menú.
 * **Mejora:** El dashboard sustituye el recuento de puertos por un aviso de posibles reverse shells (`✔ ninguna` / `⚠ N sospechosa(s)`).
 * **Mejora:** `By: DanSanMar` pasa a la línea de versión, el marco muestra `SYSTEM TOOL KIT` y el título `STK - ALL4ME`. Se elimina la palabra “Dashboard” y el gestor de paquetes de la cabecera.
+* **Mejora:** Información de red más clara: latencia, servidores DNS, tipo de interfaz, MAC, IPv4/IPv6, tráfico RX/TX y detalle Wi-Fi (SSID, señal y calidad), con las interfaces físicas primero.
 
 ### 📝 v6.5.0
 * **Nuevo:** Logo de cabecera renovado al estilo PROC4ME, con paleta de colores dinámica cada 5 segundos.

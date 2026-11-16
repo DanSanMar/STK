@@ -2108,54 +2108,240 @@ menu_operaciones_servicio() {
         esac
     done
 }
-#Info de REd
+# ==============================================================================
+#                        INFORMACIÓN DE RED
+# ==============================================================================
+
+formato_bytes() {
+    local b="${1:-0}"
+    [[ "$b" =~ ^[0-9]+$ ]] || b=0
+    if [ "$b" -ge 1073741824 ]; then
+        LC_ALL=C awk -v b="$b" 'BEGIN { printf "%.2f GB", b / 1073741824 }'
+    elif [ "$b" -ge 1048576 ]; then
+        LC_ALL=C awk -v b="$b" 'BEGIN { printf "%.1f MB", b / 1048576 }'
+    elif [ "$b" -ge 1024 ]; then
+        LC_ALL=C awk -v b="$b" 'BEGIN { printf "%.1f KB", b / 1024 }'
+    else
+        printf '%s B' "$b"
+    fi
+}
+
+tipo_interfaz() {
+    local iface="$1"
+    case "$iface" in
+        lo) echo "Loopback" ;;
+        wl*) echo "Wi-Fi" ;;
+        en*|eth*) echo "Ethernet" ;;
+        virbr*|docker*|br-*|veth*|vmnet*|vboxnet*) echo "Virtual" ;;
+        tun*|tap*|wg*|tailscale*|zt*) echo "VPN" ;;
+        *)
+            if [ -d "/sys/class/net/$iface/wireless" ]; then
+                echo "Wi-Fi"
+            else
+                echo "Red"
+            fi
+            ;;
+    esac
+}
+
+wifi_detalle() {
+    local iface="$1" ssid="" senal="" calidad="" freq="" salida
+
+    if command -v iw &>/dev/null; then
+        salida=$(iw dev "$iface" link 2>/dev/null)
+        if [ -n "$salida" ]; then
+            ssid=$(printf '%s\n' "$salida" | sed -n 's/^[[:space:]]*SSID:[[:space:]]*//p' | head -n1)
+            senal=$(printf '%s\n' "$salida" | sed -n 's/^[[:space:]]*signal:[[:space:]]*//p' | head -n1)
+            freq=$(printf '%s\n' "$salida" | sed -n 's/^[[:space:]]*freq:[[:space:]]*//p' | head -n1)
+        fi
+    fi
+
+    if [ -z "$ssid" ] && command -v nmcli &>/dev/null; then
+        ssid=$(LC_ALL=C nmcli -t -f GENERAL.CONNECTION dev show "$iface" 2>/dev/null \
+            | sed -n 's/^GENERAL.CONNECTION://p' | head -n1)
+        [ "$ssid" = "--" ] && ssid=""
+    fi
+
+    if [ -z "$senal" ] && [ -r /proc/net/wireless ]; then
+        senal=$(awk -v i="${iface}:" '$1==i { gsub(/\./,"",$4); print $4 " dBm" }' /proc/net/wireless 2>/dev/null)
+        calidad=$(awk -v i="${iface}:" '$1==i { gsub(/\./,"",$3); print $3 "/70" }' /proc/net/wireless 2>/dev/null)
+    fi
+
+    [ -z "$ssid$senal$calidad$freq" ] && return
+
+    [ -n "$ssid" ] && printf '%s' "$ssid"
+    [ -n "$senal" ] && printf ' · Señal %s' "$senal"
+    [ -n "$calidad" ] && printf ' · Calidad %s' "$calidad"
+    [ -n "$freq" ] && printf ' · %s MHz' "$freq"
+}
+
+mostrar_interfaz_red() {
+    local iface="$1"
+    local base="/sys/class/net/$iface"
+    local estado estado_txt mac ipv4 ipv6 rx tx tipo wifi_info
+    local ok="${VERDE_BRILLANTE}"
+    local bad="${ROJO_BRILLANTE}"
+    local warn="${AMARILLO}"
+
+    estado=$(cat "$base/operstate" 2>/dev/null)
+    mac=$(cat "$base/address" 2>/dev/null)
+    ipv4=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | paste -sd, - | sed 's/,/, /g')
+    ipv6=$(ip -o -6 addr show dev "$iface" scope global 2>/dev/null | awk '{print $4}' | paste -sd, - | sed 's/,/, /g')
+    rx=$(formato_bytes "$(cat "$base/statistics/rx_bytes" 2>/dev/null)")
+    tx=$(formato_bytes "$(cat "$base/statistics/tx_bytes" 2>/dev/null)")
+    tipo=$(tipo_interfaz "$iface")
+
+    case "$estado" in
+        up)   estado_txt="${ok}● UP${RESET}" ;;
+        down) estado_txt="${bad}● DOWN${RESET}" ;;
+        *)    estado_txt="${warn}● ${estado:-?}${RESET}" ;;
+    esac
+
+    echo -e "  ${estado_txt}  ${NEGRITA}${BLANCO}${iface}${RESET}  ${AZUL}[${tipo}]${RESET}"
+    echo -e "      ${AMARILLO}IPv4${RESET} ${ipv4:-—}    ${AMARILLO}MAC${RESET} ${mac:-—}"
+    if [ -n "$ipv6" ]; then
+        echo -e "      ${AMARILLO}IPv6${RESET} ${ipv6}"
+    fi
+    echo -e "      ${AMARILLO}RX${RESET} ${rx}    ${AMARILLO}TX${RESET} ${tx}"
+
+    wifi_info=""
+    if [ "$tipo" = "Wi-Fi" ]; then
+        wifi_info=$(wifi_detalle "$iface")
+    fi
+    if [ -n "$wifi_info" ]; then
+        echo -e "      ${AMARILLO}Wi-Fi${RESET} ${wifi_info}"
+    fi
+}
+
+prioridad_interfaz() {
+    case "$(tipo_interfaz "$1")" in
+        Ethernet|Wi-Fi) echo 0 ;;
+        VPN) echo 1 ;;
+        Red) echo 2 ;;
+        Virtual) echo 3 ;;
+        *) echo 4 ;;
+    esac
+}
+
+campo_red() {
+    printf ' %b➤ %-17s%b %b\n' "$AMARILLO" "$1" "$RESET" "$2"
+}
+
 mostrar_info_red() {
     trap "clear; return" SIGINT
     clear
     mostrar_logo
-    pintar $CIAN "--- INFORMACIÓN DE RED ---"
 
-    # 1. Obtener IP Local (Método universal usando la ruta por defecto)
-    # Buscamos la interfaz que tiene la ruta de salida (default) y extraemos su IP
-    IP_LOCAL=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
-    
-    # Si el método anterior falla, probamos filtrando loopback
-    if [ -z "$IP_LOCAL" ]; then
-        IP_LOCAL=$(hostname -I | awk '{print $1}')
+    local ok="${VERDE_BRILLANTE}"
+    local warn="${AMARILLO}"
+    local bad="${ROJO_BRILLANTE}"
+    local nd="${AZUL}"
+    local sep="${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    local ruta iface_activa gw ip_local ip_local_txt ip_publica ip_publica_txt
+    local dns_servers internet dns_ok=true
+
+    echo -e " ${CIAN}${NEGRITA}INFORMACIÓN DE RED${RESET}"
+    echo -e " ${sep}"
+
+    # --- Interfaz de salida, IP local y puerta de enlace ---
+    ruta=$(ip route get 1.1.1.1 2>/dev/null | head -n1)
+    iface_activa=$(printf '%s\n' "$ruta" | awk '{ for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+    ip_local=$(printf '%s\n' "$ruta" | sed -n 's/.* src \([^ ]*\).*/\1/p')
+    gw=$(ip route 2>/dev/null | awk '$1 == "default" { print $3; exit }')
+
+    [ -z "$ip_local" ] && ip_local=$(hostname -I 2>/dev/null | awk '{ print $1 }')
+    if [ -n "$iface_activa" ]; then
+        ip_local_txt=$(ip -o -4 addr show dev "$iface_activa" 2>/dev/null | awk '{ print $4; exit }')
+    fi
+    [ -z "$ip_local_txt" ] && ip_local_txt="$ip_local"
+
+    # --- IP pública (con alternativas y diagnóstico de DNS) ---
+    echo -ne "\r\033[K ${AMARILLO}➤ Consultando IP pública...${RESET}"
+    if command -v host &>/dev/null; then
+        host ifconfig.me &>/dev/null || dns_ok=false
+    elif command -v getent &>/dev/null; then
+        getent hosts ifconfig.me &>/dev/null || dns_ok=false
     fi
 
-    # 2. Obtener IP Pública (Con manejo de errores y alternativa)
-    echo -ne "${AMARILLO}Obteniendo IP pública (espere un momento...)${RESET}"
-    
-    # --- NUEVA MEJORA DE DIAGNÓSTICO ---
-    # Comprobamos primero si el sistema puede resolver nombres (DNS)
-    if ! host ifconfig.me &>/dev/null; then
-        IP_PUBLICA="Error DNS (Revisa /etc/resolv.conf)"
+    if [ "$dns_ok" = false ]; then
+        ip_publica="Error DNS (revisa /etc/resolv.conf)"
+        ip_publica_txt="${bad}${ip_publica}${RESET}"
+    elif ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        ip_publica="falta curl/wget"
+        ip_publica_txt="${warn}${ip_publica}${RESET}"
     else
-        # Si el DNS funciona, procedemos con curl o wget
-        if command -v curl &>/dev/null; then
-            # Usamos -L por si hay redirecciones y un timeout de conexión corto
-            IP_PUBLICA=$(curl -sL --connect-timeout 3 --max-time 5 ifconfig.me || echo "Error de conexión")
-        elif command -v wget &>/dev/null; then
-            IP_PUBLICA=$(wget -qO- --timeout=3 --tries=1 ifconfig.me || echo "Error de conexión")
+        local url valor
+        ip_publica=""
+        for url in "https://ifconfig.me" "https://api.ipify.org" "https://icanhazip.com"; do
+            if command -v curl &>/dev/null; then
+                valor=$(curl -sL --connect-timeout 3 --max-time 5 "$url" 2>/dev/null)
+            else
+                valor=$(wget -qO- --timeout=3 --tries=1 "$url" 2>/dev/null)
+            fi
+            valor=$(printf '%s' "$valor" | tr -d '[:space:]')
+            if [ -n "$valor" ] && [[ "$valor" =~ ^[0-9a-fA-F:.]+$ ]]; then
+                ip_publica="$valor"
+                break
+            fi
+        done
+        if [ -n "$ip_publica" ]; then
+            ip_publica_txt="$ip_publica"
         else
-            IP_PUBLICA="Falta curl/wget para consultar"
+            ip_publica="no disponible"
+            ip_publica_txt="${warn}${ip_publica}${RESET}"
         fi
     fi
+    printf '\r\033[K'
 
-    # Limpiamos la línea de "Obteniendo..." y mostramos resultados
-    echo -e "\r\033[K" 
-    echo -e "${AMARILLO}➤ IP Local:${RESET}    ${BLANCO}${IP_LOCAL:-"No detectada"}${RESET}"
-    echo -e "${AMARILLO}➤ IP Pública:${RESET}  ${BLANCO}${IP_PUBLICA}${RESET}"
-    echo -e "${AMARILLO}➤ Interfaz:${RESET}    ${BLANCO}$(ip route | grep default | awk '{print $5}')${RESET}"
-    echo -e "${AMARILLO}➤ Puerta Enlace:${RESET} ${BLANCO}$(ip route | grep default | awk '{print $3}')${RESET}"
+    # --- Servidores DNS configurados ---
+    dns_servers=$(awk '$1 == "nameserver" { printf "%s%s", sep, $2; sep = ", " } END { print "" }' /etc/resolv.conf 2>/dev/null)
+    [ -z "$dns_servers" ] && dns_servers="—"
+
+    # --- Estado de Internet y latencia ---
+    if command -v ping &>/dev/null; then
+        local ping_out latencia
+        ping_out=$(LC_ALL=C ping -c 1 -W 1 -n 1.1.1.1 2>/dev/null)
+        if [ $? -eq 0 ]; then
+            latencia=$(printf '%s\n' "$ping_out" | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)
+            internet="${ok}✔ conectado${RESET}"
+            [ -n "$latencia" ] && internet+=" ${AZUL}(${latencia} ms)${RESET}"
+        else
+            internet="${warn}⚠ sin salida${RESET}"
+        fi
+    else
+        internet="${nd}N/D${RESET}"
+    fi
+
+    campo_red "Interfaz activa:" "${iface_activa:-—}${iface_activa:+ ${AZUL}[$(tipo_interfaz "$iface_activa")]${RESET}}"
+    campo_red "IP local:" "${ip_local_txt:-—}"
+    campo_red "IP pública:" "$ip_publica_txt"
+    campo_red "Puerta de enlace:" "${gw:-—}"
+    campo_red "DNS:" "$dns_servers"
+    campo_red "Internet:" "$internet"
+
+    # --- Detalle de cada interfaz ---
     echo ""
-    
-    pintar $AZUL "Estado de interfaces:"
-    ip -brief addr show | grep -v "127.0.0.1"
-    
+    echo -e " ${sep}"
+    echo -e " ${CIAN}${NEGRITA}ESTADO DE LAS INTERFACES${RESET}  ${AZUL}(RX/TX acumulado desde el arranque)${RESET}"
     echo ""
-    registrar_log "$LOG_INFO" "Consulta de red realizada (Local: $IP_LOCAL | Pública: $IP_PUBLICA)"
+    local encontrados=0 base iface lista
+    lista=$(for base in /sys/class/net/*; do
+        [ -e "$base" ] || continue
+        iface=$(basename "$base")
+        [ "$iface" = "lo" ] && continue
+        printf '%s %s\n' "$(prioridad_interfaz "$iface")" "$iface"
+    done | sort -k1,1n -k2,2)
+    while read -r _ iface; do
+        [ -n "$iface" ] || continue
+        mostrar_interfaz_red "$iface"
+        echo ""
+        encontrados=$((encontrados + 1))
+    done <<< "$lista"
+    if [ "$encontrados" -eq 0 ]; then
+        echo -e "  ${AZUL}Sin interfaces de red detectadas${RESET}"
+    fi
+
+    registrar_log "$LOG_INFO" "Consulta de red realizada (Interfaz: ${iface_activa:-?} | Local: ${ip_local:-?} | Pública: ${ip_publica})"
     read -p "Presione Enter para volver..."
 }
 mostrar_spinner() {
