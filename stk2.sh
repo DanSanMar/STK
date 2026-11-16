@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.5.0"
+V="6.5.1"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -22,6 +22,9 @@ MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 BLANCO='\e[97m'
+
+# Paleta común para todos los menús FZF de STK (estilo PROC4ME)
+FZF_COLORES="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,prompt:#5fb2ff,marker:#92ff92"
 
 # --- CONFIGURACIÓN DE LOGS ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
@@ -159,7 +162,6 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     OS_ID="${ID:-unknown}"
     OS_LIKE="${ID_LIKE:-unknown}"
-    URL="${HOME_URL:-unknown}"
     
     if [ -n "$VERSION" ]; then
         VERSION="$VERSION"
@@ -618,6 +620,41 @@ temperatura_maxima() {
     fi
 }
 
+puertos_resumen() {
+    local salida="" campo=5 lista total mostrados
+
+    if command -v ss &>/dev/null; then
+        salida=$(ss -tulnH 2>/dev/null)
+        campo=5
+    elif command -v netstat &>/dev/null; then
+        salida=$(netstat -tuln 2>/dev/null | awk 'NR>2')
+        campo=4
+    else
+        echo "N/D"
+        return
+    fi
+
+    lista=$(printf '%s\n' "$salida" \
+        | awk -v c="$campo" 'NF {print $c}' \
+        | sed 's/.*://' \
+        | grep -E '^[0-9]+$' \
+        | sort -n -u)
+
+    total=$(printf '%s\n' "$lista" | awk 'NF {n++} END {print n+0}')
+
+    if [ "$total" -eq 0 ]; then
+        echo "ninguno"
+        return
+    fi
+
+    if [ "$total" -le 3 ]; then
+        echo "$lista" | paste -sd, - | sed 's/,/, /g'
+    else
+        mostrados=$(echo "$lista" | head -n 3 | paste -sd, - | sed 's/,/, /g')
+        echo "${mostrados}… (${total})"
+    fi
+}
+
 mostrar_dashboard() {
     local ok="${VERDE_BRILLANTE}"
     local warn="${AMARILLO}"
@@ -644,20 +681,13 @@ mostrar_dashboard() {
     fi
 
     # --- Puertos a la escucha ---
-    puertos=""
-    if command -v ss &>/dev/null; then
-        local salida_ss
-        salida_ss=$(ss -tulnH 2>/dev/null)
-        puertos=$(printf '%s\n' "$salida_ss" | awk 'NF {n++} END {print n+0}')
-    elif command -v netstat &>/dev/null; then
-        local salida_netstat
-        salida_netstat=$(netstat -tuln 2>/dev/null | awk 'NR>2')
-        puertos=$(printf '%s\n' "$salida_netstat" | awk 'NF {n++} END {print n+0}')
-    fi
-    if [[ "$puertos" =~ ^[0-9]+$ ]]; then
-        puertos="${AZUL}${puertos}${RESET}"
-    else
+    puertos=$(puertos_resumen)
+    if [ "$puertos" == "N/D" ]; then
         puertos="${nd}N/D${RESET}"
+    elif [ "$puertos" == "ninguno" ]; then
+        puertos="${nd}ninguno${RESET}"
+    else
+        puertos="${AZUL}${puertos}${RESET}"
     fi
 
     # --- Temperatura ---
@@ -718,8 +748,8 @@ mostrar_dashboard() {
         red="${bad}✖ sin red${RESET}"
     fi
 
-    echo -e " ${AMARILLO}➤ Dashboard:${RESET} ${AMARILLO}Servicios:${RESET} ${fallos}   ${AMARILLO}Puertos:${RESET} ${puertos}   ${AMARILLO}Temp:${RESET} ${temp}"
-    echo -e "              ${AMARILLO}UFW:${RESET} ${ufw}   ${AMARILLO}SSH:${RESET} ${ssh}   ${AMARILLO}Internet:${RESET} ${red}"
+    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}   ${AMARILLO}Puertos:${RESET} ${puertos}   ${AMARILLO}Temp:${RESET} ${temp}"
+    echo -e "   ${AMARILLO}UFW:${RESET} ${ufw}   ${AMARILLO}SSH:${RESET} ${ssh}   ${AMARILLO}Internet:${RESET} ${red}"
 }
 
 logo_texto() {
@@ -731,10 +761,10 @@ logo_texto() {
     host=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
     local usuario="${SUDO_USER:-${USER:-root}}"
 
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}SYSTEM TOOL KIT${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}SYSTEM TOOL KIT${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${AZUL_OSCURO}| ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}  ${AMARILLO}Gestor:${RESET} ${AZUL}${Package:-Desconocido}${RESET}"
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}  ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET}"
+    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}"
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
     fi
@@ -757,7 +787,31 @@ fzf_estilo() {
         --border=rounded \
         --prompt="➤ $prompt_text: " \
         --header="$header_text" \
-        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
+        --color="$FZF_COLORES"
+}
+
+# Menú con marco global: logo + dashboard + opciones dentro del mismo recuadro.
+stk_fzf_menu() {
+    local prompt_text="$1"
+    local titulo="$2"
+    local extra="${3:-}"
+    local logo
+
+    logo=$(logo_texto)
+    if [ -n "$extra" ]; then
+        logo+=$(printf '\n\n %b' "$extra")
+    fi
+
+    fzf --ansi \
+        --height=~90% \
+        --layout=reverse \
+        --no-sort \
+        --header-first \
+        --border=rounded \
+        --border-label=" $titulo " \
+        --prompt="➤ $prompt_text: " \
+        --header="$logo" \
+        --color="$FZF_COLORES"
 }
 
 ejecutar_stop4me() {
@@ -781,32 +835,12 @@ ejecutar_proc4me() {
     read -p "Presione Enter para continuar..."
   fi
 }
-# LÓGICA FZF menú principal
-
-fzf_menu_principal() {
-    local host_name=$(hostname 2>/dev/null || cat /etc/hostname)
-    local kernel_ver=$(uname -r | cut -d- -f1)
-
-    fzf --ansi \
-        --height=15 \
-        --layout=reverse \
-        --border=rounded \
-        --prompt=" Selecione Menú-❯ " \
-        --header="--- P A N E L  D E  C O N T R O L ---" \
-        --header-lines=1 \
-        --color="border:#5fafd7,header:#af87ff,prompt:#5fb2ff,pointer:#afff00" \
-        --preview-window="up:25%:border-bottom" \
-        --preview="echo -e '\033[1;36mINFORMACIÓN\033[0m | \033[1;33mFecha:\033[0m $DATE | \033[1;33mHost:\033[0m $host_name | \033[1;33mKernel:\033[0m $kernel_ver'"
-}
 #función del menú principal
 menu() {
     while true; do
         clear
-        mostrar_logo
-        
-        # El encabezado es la primera línea que fzf ignorará gracias a --header-lines=1
-opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
-0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditoria.
+
+opciones="0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditoria.
 1. 📊 | MONITORIZACIÓN  | Rendimiento, red, procesos y seguridad
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
@@ -815,7 +849,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
 6. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
-        seleccion=$(echo -e "$opciones" | fzf_menu_principal)
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Menú" "PANEL DE CONTROL" "${AZUL}ICONO | CATEGORÍA       | DESCRIPCIÓN${RESET}")
 
         # Salida si se cancela con ESC o si está vacío
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then salir; fi
@@ -830,8 +864,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Procesos y Amenazas (PROC4ME)\n4. Auditoría de Seguridad\n5. Gestor de Firewall UFW\n6. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Procesos y Amenazas (PROC4ME)\n4. Auditoría de Seguridad\n5. Gestor de Firewall UFW\n6. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
@@ -846,8 +879,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
             2) # --- SUBMENÚ SOFTWARE ---
                 while true; do
                     clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | fzf_estilo "Seleccione" "SOFTWARE")
+                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) Actualizar_sistema ;;
@@ -860,8 +892,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
             3) # --- SUBMENÚ ADMINISTRACIÓN ---
                 while true; do
                     clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | fzf_estilo "Seleccione" "ADMINISTRACIÓN")
+                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "ADMINISTRACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) gestionar_usuarios ;;
@@ -875,8 +906,7 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
             4) # --- SUBMENÚ MANTENIMIENTO ---
                 while true; do
                     clear
-                    mostrar_logo
-                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | fzf_estilo "Seleccione" "MANTENIMIENTO")
+                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) super_limpieza ;;
@@ -2259,6 +2289,7 @@ fzf_seleccionar_directorio() {
         sel=$(echo -e "$lineas_menu" | fzf --ansi --height=18 --reverse --border=rounded \
             --prompt="Navegar ❯ " \
             --header="Directorio actual: $dir_actual" \
+            --color="$FZF_COLORES" \
             --delimiter="\t" --with-nth=1)
 
         # Si el usuario cancela con ESC o Ctrl+C
@@ -2325,6 +2356,7 @@ ver_backups_existentes() {
         --border=rounded \
         --prompt="➤ Inspeccionar Backup: " \
         --header="--- VISTA PREVIA DEL CONTENIDO (.tar.gz) ---" \
+        --color="$FZF_COLORES" \
         --preview="tar -tvf {} | head -n 40" \
         --preview-window="right:60%"
 
