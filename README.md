@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.0.0-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.5.0-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.0.0)
+# 🛠️ STK - System Tool Kit (v6.5.0)
 
 </div>
 
@@ -31,6 +31,7 @@
 * **Nuevas funciones de la v.5.9.4:** Se añade una opción de gestión de Firewall con UFW dentro del menú de Auditoria de Seguridad.
 * **Nuevas funciones de la v.5.9.5:** Se añade menú de gestión de tareas programadas con Cron.
 * **Nuevas funciones de la v.5.9.7:** Se añaden flags para la utilización directa de las funciones más habituales y una ayuda para recordarlas.
+* **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -143,7 +144,13 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.0.0 (Actual)
+### 📝 v6.5.0 (Actual)
+* **Nuevo:** Logo de cabecera renovado al estilo PROC4ME, con paleta de colores dinámica cada 5 segundos.
+* **Nuevo:** Dashboard rápido en el menú principal y submenús: servicios fallidos, puertos a la escucha, temperatura, UFW, SSH e Internet.
+* **Nuevo:** PROC4ME integrado en Monitorización → Procesos y Amenazas.
+* **Nuevo:** Notificaciones de tareas Cron activables o desactivables desde el gestor de tareas automáticas.
+
+### 📝 v6.0.0
 * **Nuevo:** Soporte para sistemas inmutables basados en OSTree (`rpm-ostree`): Fedora Silverblue, Kinoite y COSMIC Atomic.
 * **Mejora:** Detección automática del entorno inmutable e instalación de dependencias con `rpm-ostree` (`--apply-live`), con preparación de capas y aviso de reinicio cuando es necesario.
 * **Mejora:** Ramas específicas de `rpm-ostree` para actualizar el sistema, instalar/desinstalar programas, limpiar metadatos y ejecutar el modo automático.

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.0.0"
+V="6.5.0"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -11,9 +11,13 @@ NEGRITA='\e[1m'
 VERDE_BRILLANTE='\e[92m'
 VERDE='\e[32m'
 AMARILLO='\e[33m'
+AMARILLO_BRILLANTE='\e[93m'
 AZUL='\e[34m'
 AZUL_BRILLANTE='\e[94m'
+AZUL_OSCURO='\e[0;34m'
+AZUL_CLARO='\e[38;5;117m'
 CIAN='\e[36m'
+CIAN_BRILLANTE='\e[96m'
 MAGENTA='\e[35m'
 ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
@@ -550,25 +554,198 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
     fi
 fi
 
-mostrar_logo() {
-    # He re-alineado los bloques de ASCII para que encajen perfectamente
-    echo -e "${CIAN}  ██████  ████████ ██   ██${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██         ██    ██  ██ ${RESET}"
-    echo -e "${AZUL}  ██████     ██    █████  ${RESET}"
-    echo -e "${AZUL}       ██    ██    ██  ██ ${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██████     ██    ██   ██${RESET}"
-    echo -e "${VERDE_BRILLANTE}  SYSTEM TOOL KIT-ALL4ME    ${RESET}\n${AZUL_BRILLANTE}  v${V}${RESET}"
-    echo -e "${AZUL}  By: ${AUTOR}${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    #OS_ID:-"Desconocido" Forma sencilla de decir: si no tiene valor imprime: "Desconocido"
-    echo -e "${AMARILLO}➤ Sistema detectado:${RESET} ${AZUL}${OS_ID:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Package de paquetes:${RESET} ${AZUL}${Package:-"Desconocido"}${RESET}"
-    if [ "$IMMUTABLE" = true ]; then
-        echo -e "${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+# --- LOGO Y DASHBOARD DE ESTADO (estilo PROC4ME) ---
+PALETA_LOGO=(
+    "$ROJO"
+    "$AZUL_BRILLANTE"
+    "$VERDE_BRILLANTE"
+    "$AMARILLO_BRILLANTE"
+    "$CIAN_BRILLANTE"
+    "$ROJO_BRILLANTE"
+    "$AZUL_CLARO"
+    "$VERDE"
+    "$AMARILLO"
+    "$CIAN"
+)
+actualizar_colores_logo() {
+    # El color avanza una posición cada 5 segundos (epoch / 5).
+    local epoch
+    epoch=$(date +%s 2>/dev/null)
+    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
+
+    local base=$(( (epoch / 5) % 10 ))
+
+    COLOR_LOGO="${PALETA_LOGO[$base]}"
+    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % 10 ))]}"
+    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % 10 ))]}"
+}
+
+temperatura_maxima() {
+    local max=0 z t
+    for z in /sys/class/thermal/thermal_zone*/temp; do
+        [ -r "$z" ] || continue
+        t=$(cat "$z" 2>/dev/null)
+        [[ "$t" =~ ^[0-9]+$ ]] || continue
+        # Descartar valores irreales de sensores sin calibrar
+        [ "$t" -ge 1000 ] && [ "$t" -le 120000 ] || continue
+        [ "$t" -gt "$max" ] && max="$t"
+    done
+
+    if [ "$max" -gt 0 ]; then
+        echo $((max / 1000))
+        return
     fi
-    echo -e "${AMARILLO}➤ Versión:${RESET} ${AZUL}${VERSION:-"Desconocido"}${RESET}"
-    echo -e "${AMARILLO}➤ Web oficial:${RESET} ${AZUL}${URL:-"Desconocido"}${RESET}"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+    if command -v sensors &>/dev/null; then
+        local salida
+        salida=$(sensors 2>/dev/null | awk '
+            /°C/ {
+                for (i = 1; i <= NF; i++) {
+                    if ($i ~ /^\+[0-9.,]+°C$/) {
+                        v = $i
+                        gsub(/[+°C]/, "", v)
+                        gsub(/,/, ".", v)
+                        if (v + 0 > max && v + 0 < 120) max = v + 0
+                        break
+                    }
+                }
+            }
+            END { if (max > 0) printf "%.0f", max; else print "N/D" }
+        ')
+        echo "${salida:-N/D}"
+    else
+        echo "N/D"
+    fi
+}
+
+mostrar_dashboard() {
+    local ok="${VERDE_BRILLANTE}"
+    local warn="${AMARILLO}"
+    local bad="${ROJO_BRILLANTE}"
+    local nd="${AZUL}"
+    local fallos puertos temp ufw ssh red
+
+    # --- Servicios fallidos ---
+    if command -v systemctl &>/dev/null; then
+        local salida_fallos
+        if salida_fallos=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null); then
+            local n_fallos
+            n_fallos=$(printf '%s\n' "$salida_fallos" | awk 'NF {n++} END {print n+0}')
+            if [ "$n_fallos" -eq 0 ]; then
+                fallos="${ok}✔ 0 fallidos${RESET}"
+            else
+                fallos="${bad}⚠ ${n_fallos} fallidos${RESET}"
+            fi
+        else
+            fallos="${nd}N/D${RESET}"
+        fi
+    else
+        fallos="${nd}N/D${RESET}"
+    fi
+
+    # --- Puertos a la escucha ---
+    puertos=""
+    if command -v ss &>/dev/null; then
+        local salida_ss
+        salida_ss=$(ss -tulnH 2>/dev/null)
+        puertos=$(printf '%s\n' "$salida_ss" | awk 'NF {n++} END {print n+0}')
+    elif command -v netstat &>/dev/null; then
+        local salida_netstat
+        salida_netstat=$(netstat -tuln 2>/dev/null | awk 'NR>2')
+        puertos=$(printf '%s\n' "$salida_netstat" | awk 'NF {n++} END {print n+0}')
+    fi
+    if [[ "$puertos" =~ ^[0-9]+$ ]]; then
+        puertos="${AZUL}${puertos}${RESET}"
+    else
+        puertos="${nd}N/D${RESET}"
+    fi
+
+    # --- Temperatura ---
+    temp=$(temperatura_maxima)
+    if [[ "$temp" =~ ^[0-9]+$ ]]; then
+        if [ "$temp" -ge 80 ]; then
+            temp="${bad}⚠ ${temp}°C${RESET}"
+        else
+            temp="${ok}✔ ${temp}°C${RESET}"
+        fi
+    else
+        temp="${nd}N/D${RESET}"
+    fi
+
+    # --- Estado de UFW ---
+    if command -v ufw &>/dev/null; then
+        if ufw status 2>/dev/null | head -n 1 | grep -qi "status:[[:space:]]*active"; then
+            ufw="${ok}✔ activo${RESET}"
+        else
+            ufw="${warn}⚠ inactivo${RESET}"
+        fi
+    else
+        ufw="${nd}N/D${RESET}"
+    fi
+
+    # --- SSH ---
+    local ssh_activo=false
+    if command -v systemctl &>/dev/null; then
+        systemctl is-active --quiet ssh 2>/dev/null && ssh_activo=true
+        systemctl is-active --quiet sshd 2>/dev/null && ssh_activo=true
+    fi
+    [ "$ssh_activo" = false ] && pgrep -x sshd >/dev/null 2>&1 && ssh_activo=true
+    if [ "$ssh_activo" = true ]; then
+        ssh="${ok}✔ activo${RESET}"
+    else
+        ssh="${nd}inactivo${RESET}"
+    fi
+
+    # --- Conexión a Internet ---
+    local hay_ruta=false
+    if command -v ip &>/dev/null; then
+        ip route 2>/dev/null | grep -q '^default' && hay_ruta=true
+    elif command -v route &>/dev/null; then
+        route -n 2>/dev/null | grep -q '^0\.0\.0\.0' && hay_ruta=true
+    else
+        hay_ruta=true
+    fi
+
+    if [ "$hay_ruta" = true ]; then
+        if ! command -v ping &>/dev/null; then
+            red="${ok}✔ ruta activa${RESET}"
+        elif ping -c 1 -W 1 -n 1.1.1.1 >/dev/null 2>&1; then
+            red="${ok}✔ conectado${RESET}"
+        else
+            red="${warn}⚠ sin salida${RESET}"
+        fi
+    else
+        red="${bad}✖ sin red${RESET}"
+    fi
+
+    echo -e " ${AMARILLO}➤ Dashboard:${RESET} ${AMARILLO}Servicios:${RESET} ${fallos}   ${AMARILLO}Puertos:${RESET} ${puertos}   ${AMARILLO}Temp:${RESET} ${temp}"
+    echo -e "              ${AMARILLO}UFW:${RESET} ${ufw}   ${AMARILLO}SSH:${RESET} ${ssh}   ${AMARILLO}Internet:${RESET} ${red}"
+}
+
+logo_texto() {
+    actualizar_colores_logo
+
+    local hora
+    hora=$(date '+%H:%M:%S')
+    local host
+    host=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
+    local usuario="${SUDO_USER:-${USER:-root}}"
+
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}SYSTEM TOOL KIT${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}  ${AMARILLO}Gestor:${RESET} ${AZUL}${Package:-Desconocido}${RESET}"
+    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}  ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET}"
+    if [ "$IMMUTABLE" = true ]; then
+        echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
+    fi
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    mostrar_dashboard
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+}
+
+mostrar_logo() {
+    echo ""
+    logo_texto
 }
 #Lógica fzf de estilo
 fzf_estilo() {
