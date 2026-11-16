@@ -108,7 +108,8 @@ inicializar_estructura() {
         "descripcion": null,
         "activado": false,
         "fecha_activacion": null,
-        "ultima_ejecucion": null
+        "ultima_ejecucion": null,
+        "notificaciones": true
     },
     "tareas": []
 }
@@ -174,6 +175,19 @@ verificar_dependencias() {
 }
 
 enviar_notificacion() {
+    # 0. Respetar la preferencia del usuario (por defecto: notificaciones activadas)
+    local notif_activas="true"
+    if command -v jq &>/dev/null; then
+        notif_activas=$(jq -r 'if .configuracion.notificaciones == null then "true" else (.configuracion.notificaciones | tostring) end' "$CRON_CONFIG_FILE" 2>/dev/null)
+        [ -z "$notif_activas" ] && notif_activas="true"
+    elif grep -q '"notificaciones"[[:space:]]*:[[:space:]]*false' "$CRON_CONFIG_FILE" 2>/dev/null; then
+        notif_activas="false"
+    fi
+    if [ "$notif_activas" != "true" ]; then
+        log_cron_exec "INFO" "Notificaciones desactivadas; se omite el aviso de escritorio."
+        return 0
+    fi
+
     verificar_dependencias
 
     # 1. Detectar usuario activo y socket de DBus de forma robusta
@@ -606,6 +620,18 @@ obtener_tareas_configuradas() {
         fi
     else
         echo "Ninguna"
+    fi
+}
+
+notificaciones_estado() {
+    if [ -f "$CRON_CONFIG_FILE" ] && command -v jq &>/dev/null; then
+        local estado
+        estado=$(jq -r 'if .configuracion.notificaciones == null then "true" else (.configuracion.notificaciones | tostring) end' "$CRON_CONFIG_FILE" 2>/dev/null)
+        echo "${estado:-true}"
+    elif [ -f "$CRON_CONFIG_FILE" ] && grep -q '"notificaciones"[[:space:]]*:[[:space:]]*false' "$CRON_CONFIG_FILE" 2>/dev/null; then
+        echo "false"
+    else
+        echo "true"
     fi
 }
 
@@ -1155,6 +1181,12 @@ ver_configuracion_cron() {
             echo -e "Estado general:   ${ROJO}INACTIVO${RESET}"
         fi
 
+        if [ "$(notificaciones_estado)" == "true" ]; then
+            echo -e "Notificaciones:   ${VERDE_BRILLANTE}🔔 ACTIVADAS${RESET}"
+        else
+            echo -e "Notificaciones:   ${ROJO}🔕 DESACTIVADAS${RESET}"
+        fi
+
         echo -e "Activado el:      ${AZUL}$fecha_act${RESET}"
         echo -e "Última ejecución: ${AZUL}$ult_ejec${RESET}"
         echo ""
@@ -1224,6 +1256,81 @@ ver_resumen_cron() {
     read -p "Presione cualquier tecla para continuar..."
 }
 
+configurar_notificaciones() {
+    if [ ! -f "$CRON_CONFIG_FILE" ]; then
+        pintar "$ROJO" "❌ No hay configuración. Programa una tarea primero."
+        read -p "Presione Enter..."
+        return
+    fi
+
+    while true; do
+        clear
+        mostrar_logo
+        echo ""
+        pintar "$CIAN" "--- NOTIFICACIONES DE TAREAS AUTOMÁTICAS ---"
+        echo ""
+
+        local estado_actual
+        estado_actual=$(notificaciones_estado)
+        if [ "$estado_actual" == "true" ]; then
+            echo -e "Estado actual: ${VERDE_BRILLANTE}🔔 ACTIVADAS${RESET}"
+        else
+            echo -e "Estado actual: ${ROJO}🔕 DESACTIVADAS${RESET}"
+        fi
+        echo ""
+        echo -e "${AMARILLO}Las notificaciones avisan en el escritorio del usuario al terminar cada ejecución.${RESET}"
+        echo -e "${AMARILLO}Desactivarlas no afecta a las tareas: solo silencia los avisos.${RESET}"
+        echo ""
+
+        local opciones="1. Activar notificaciones
+2. Desactivar notificaciones
+3. ↩ Volver"
+
+        local opc=""
+        if command -v fzf &>/dev/null; then
+            local sel
+            sel=$(echo -e "$opciones" | fzf_estilo "Selecciona una opción" "NOTIFICACIONES CRON")
+            [ -z "$sel" ] && return
+            opc=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
+        else
+            echo -e "$opciones"
+            echo ""
+            echo -ne "${AMARILLO}Seleccione opción (1-3): ${RESET}"
+            read -r opc
+        fi
+
+        local nuevo_estado=""
+        case "$opc" in
+            1) nuevo_estado="true" ;;
+            2) nuevo_estado="false" ;;
+            *) return ;;
+        esac
+
+        if [ "$nuevo_estado" == "$estado_actual" ]; then
+            pintar "$AZUL" "Las notificaciones ya están en ese estado."
+            sleep 2
+            continue
+        fi
+
+        local tmp_json=$(mktemp)
+        if jq --argjson val "$nuevo_estado" '.configuracion.notificaciones = $val' "$CRON_CONFIG_FILE" > "$tmp_json" 2>/dev/null; then
+            mv "$tmp_json" "$CRON_CONFIG_FILE"
+            chmod 600 "$CRON_CONFIG_FILE"
+            if [ "$nuevo_estado" == "true" ]; then
+                pintar "$VERDE_BRILLANTE" "✔ Notificaciones ACTIVADAS."
+                log_cron "INFO" "Notificaciones de tareas CRON activadas"
+            else
+                pintar "$VERDE_BRILLANTE" "✔ Notificaciones DESACTIVADAS."
+                log_cron "INFO" "Notificaciones de tareas CRON desactivadas"
+            fi
+        else
+            rm -f "$tmp_json"
+            pintar "$ROJO" "❌ No se pudo guardar la preferencia de notificaciones."
+        fi
+        sleep 2
+    done
+}
+
 desactivar_cron() {
     clear
     mostrar_logo
@@ -1250,6 +1357,8 @@ desactivar_cron() {
         
         # 2. Resetear el archivo JSON adecuadamente
         if [ -f "$CRON_CONFIG_FILE" ]; then
+            local notif_actual
+            notif_actual=$(notificaciones_estado)
             if command -v jq &>/dev/null; then
                 local tmp_json=$(mktemp)
                 jq '.configuracion.activado = false | 
@@ -1272,7 +1381,8 @@ desactivar_cron() {
         "descripcion": "Ninguna",
         "activado": false,
         "fecha_activacion": null,
-        "ultima_ejecucion": null
+        "ultima_ejecucion": null,
+        "notificaciones": $notif_actual
     },
     "tareas": []
 }
@@ -1325,6 +1435,11 @@ gestionar_tareas_auto() {
             echo -e "   ${AMARILLO}Frecuencia:${RESET} ${AZUL}$config_actual${RESET}"
             echo -e "   ${AMARILLO}Tareas:${RESET} ${AZUL}$tareas_activas${RESET}"
             echo -e "   ${AMARILLO}Última ejecución:${RESET} ${AZUL}$(obtener_ultima_ejecucion)${RESET}"
+            if [ "$(notificaciones_estado)" == "true" ]; then
+                echo -e "   ${AMARILLO}Notificaciones:${RESET}   ${VERDE}🔔 Activadas${RESET}"
+            else
+                echo -e "   ${AMARILLO}Notificaciones:${RESET}   ${ROJO}🔕 Desactivadas${RESET}"
+            fi
         else
             echo -e "${ROJO}❌ No hay tareas programadas${RESET}"
         fi
@@ -1336,7 +1451,8 @@ gestionar_tareas_auto() {
 2. Desactivar Tareas
 3. Configuración actual
 4. Ver Logs/Resumen
-5. Volver"
+5. Notificaciones (Activar/Desactivar)
+6. Volver"
 
         local seleccion
         seleccion=$(echo "$opciones_fzf" | fzf_estilo "Selecciona una opción" "Menú de Tareas Automatizadas")
@@ -1348,7 +1464,8 @@ gestionar_tareas_auto() {
             2) gestionar_tareas_individuales ;;
             3) ver_configuracion_cron ;;
             4) logs_resumen ;;
-            5) break ;;
+            5) configurar_notificaciones ;;
+            6) break ;;
         esac
     done
 }

@@ -92,7 +92,7 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Motor COPY4ME & Backups:** 
   * **Empaquetado Local:** Respaldos compresión `.tar.gz` de directorios clave (`/etc`, `/var/www`, `/home`) o personalizados, con cálculo de hash **SHA256** y rotación de un máximo de 5 ficheros.
   * **Sincronización Avanzada:** Sincronización incremental, espejo o bidireccional mediante `rsync`, con perfiles persistentes en `/var/backups/stk_backups/config.json`.
-* **Programador (Cron):** Integración con `stk_cron.sh` para la automatización y consulta de tareas programadas en el sistema.
+* **Programador (Cron):** Integración con `stk_cron.sh` para la automatización y consulta de tareas programadas en el sistema. Las notificaciones de escritorio al finalizar cada tarea se pueden activar o desactivar desde la opción **5. Notificaciones** del menú de tareas automáticas.
 
 
 <div align="center">
@@ -136,6 +136,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 - `stk_cron.sh` necesita `cronie`; instálalo con `stk2.sh` o con
   `sudo rpm-ostree install --idempotent --allow-inactive cronie`. Para las notificaciones de
   escritorio se usa `notify-send` (`libnotify`), que suele venir ya instalado en el escritorio.
+  Si no las quieres, desactívalas desde **Tareas Automáticas → 5. Notificaciones**.
 
 ---
 
@@ -146,6 +147,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Mejora:** Detección automática del entorno inmutable e instalación de dependencias con `rpm-ostree` (`--apply-live`), con preparación de capas y aviso de reinicio cuando es necesario.
 * **Mejora:** Ramas específicas de `rpm-ostree` para actualizar el sistema, instalar/desinstalar programas, limpiar metadatos y ejecutar el modo automático.
 * **Módulo UFW:** `stop4me.sh` instala UFW con `rpm-ostree` y avisa si hace falta reiniciar.
+* **Nuevo:** Opción **Notificaciones** en el gestor de tareas automáticas para activar o desactivar los avisos de escritorio de Cron sin tocar las tareas programadas.
 
 ### 📝 v5.9.7
 * **Nuevo:** Soporte para ejecución directa por línea de comandos mediante banderas CLI (`-m`, `-a`, `-u`, `-c`, `-l`, `-b`, `-A`, `-v`, `-h`).
