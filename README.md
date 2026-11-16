@@ -70,6 +70,7 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Hardware y Carga:** Monitor en tiempo real con refresco de 5s para uso de CPU, memoria RAM y almacenamiento con **barras de estado en color**.
 * **Diagnóstico de Red:** Lectura de IP local, interfaces activas e IP pública mediante API externa con consulta DNS de contingencia.
 * **Seguridad y Firewall:** Control del cortafuegos (`ufw`), verificación de permisos SUID, cuentas con UID 0, firmas y análisis de accesos no autorizados.
+* **Investigador de Procesos (PROC4ME):** Análisis de procesos, puertos, persistencia y amenazas silenciosas, con informes exportables a texto y Markdown desde el menú de Monitorización.
 
 <div align="center">
 <img width="500" height="300" alt="Monitorización STK" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />

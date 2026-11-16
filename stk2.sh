@@ -590,6 +590,20 @@ ejecutar_stop4me() {
   # Ejecuta el archivo pasándole argumentos
   bash "$DIR/stop4me.sh"
 }
+
+ejecutar_proc4me() {
+  # Lanza el investigador de procesos y amenazas desde la misma carpeta que STK
+  if [ -f "$SCRIPT_DIR/proc4me.sh" ]; then
+    bash "$SCRIPT_DIR/proc4me.sh"
+  elif command -v proc4me &>/dev/null; then
+    proc4me
+  elif command -v proc4me.sh &>/dev/null; then
+    proc4me.sh
+  else
+    echo -e "${ROJO}❌ Error: No se encuentra proc4me.sh en $SCRIPT_DIR${RESET}"
+    read -p "Presione Enter para continuar..."
+  fi
+}
 # LÓGICA FZF menú principal
 
 fzf_menu_principal() {
@@ -616,7 +630,7 @@ menu() {
         # El encabezado es la primera línea que fzf ignorará gracias a --header-lines=1
 opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
 0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditoria.
-1. 📊 | MONITORIZACIÓN  | Analisis de rendimiento, red y seguridad
+1. 📊 | MONITORIZACIÓN  | Rendimiento, red, procesos y seguridad
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
@@ -640,13 +654,14 @@ opciones="ICONO | CATEGORÍA       | DESCRIPCIÓN
                 while true; do
                     clear
                     mostrar_logo
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red \n3. Auditoría de Seguridad\n4. Gestor de Firewall UFW\n5. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Procesos y Amenazas (PROC4ME)\n4. Auditoría de Seguridad\n5. Gestor de Firewall UFW\n6. ↩ Volver" | fzf_estilo "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
                         2) mostrar_info_red ;;
-                        3) auditoria_seguridad ;;
-                        4) ejecutar_stop4me ;;
+                        3) ejecutar_proc4me ;;
+                        4) auditoria_seguridad ;;
+                        5) ejecutar_stop4me ;;
                     esac
                 done
                 ;;
