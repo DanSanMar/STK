@@ -146,8 +146,9 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ### 📝 v6.5.1 (Actual)
 * **Mejora:** Cabecera y menús con marco global estilo PROC4ME, opciones visibles sin deslizamiento y colores unificados en todos los FZF.
-* **Mejora:** El dashboard muestra los puertos a la escucha con detalle (por ejemplo `53, 67, 2222… (7)`) en lugar de solo el total.
-* **Mejora:** `By: DanSanMar` pasa a la línea de versión y se elimina la palabra “Dashboard” de la cabecera.
+* **Mejora:** La cabecera se adapta al alto de la terminal: en pantallas pequeñas se recorta para no cortar las opciones del menú.
+* **Mejora:** El dashboard sustituye el recuento de puertos por un aviso de posibles reverse shells (`✔ ninguna` / `⚠ N sospechosa(s)`).
+* **Mejora:** `By: DanSanMar` pasa a la línea de versión, el marco muestra `SYSTEM TOOL KIT` y el título `STK - ALL4ME`. Se elimina la palabra “Dashboard” y el gestor de paquetes de la cabecera.
 
 ### 📝 v6.5.0
 * **Nuevo:** Logo de cabecera renovado al estilo PROC4ME, con paleta de colores dinámica cada 5 segundos.

@@ -620,38 +620,25 @@ temperatura_maxima() {
     fi
 }
 
-puertos_resumen() {
-    local salida="" campo=5 lista total mostrados
+reverse_shell_alerta() {
+    # Busca intérpretes con sockets establecidos: patrón típico de reverse shell.
+    local procesos total
 
-    if command -v ss &>/dev/null; then
-        salida=$(ss -tulnH 2>/dev/null)
-        campo=5
-    elif command -v netstat &>/dev/null; then
-        salida=$(netstat -tuln 2>/dev/null | awk 'NR>2')
-        campo=4
-    else
+    if ! command -v ss &>/dev/null; then
         echo "N/D"
         return
     fi
 
-    lista=$(printf '%s\n' "$salida" \
-        | awk -v c="$campo" 'NF {print $c}' \
-        | sed 's/.*://' \
-        | grep -E '^[0-9]+$' \
-        | sort -n -u)
+    procesos=$(ss -tupn state established 2>/dev/null \
+        | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' \
+        | grep -Eix 'bash|sh|dash|zsh|ksh|python|python[0-9.]*|perl|php|ruby|nc|ncat|socat')
 
-    total=$(printf '%s\n' "$lista" | awk 'NF {n++} END {print n+0}')
+    total=$(printf '%s\n' "$procesos" | awk 'NF {n++} END {print n+0}')
 
-    if [ "$total" -eq 0 ]; then
-        echo "ninguno"
-        return
-    fi
-
-    if [ "$total" -le 3 ]; then
-        echo "$lista" | paste -sd, - | sed 's/,/, /g'
+    if [ "$total" -gt 0 ]; then
+        echo "⚠ ${total} sospechosa(s)"
     else
-        mostrados=$(echo "$lista" | head -n 3 | paste -sd, - | sed 's/,/, /g')
-        echo "${mostrados}… (${total})"
+        echo "ok"
     fi
 }
 
@@ -660,7 +647,7 @@ mostrar_dashboard() {
     local warn="${AMARILLO}"
     local bad="${ROJO_BRILLANTE}"
     local nd="${AZUL}"
-    local fallos puertos temp ufw ssh red
+    local fallos shells temp ufw ssh red
 
     # --- Servicios fallidos ---
     if command -v systemctl &>/dev/null; then
@@ -680,14 +667,14 @@ mostrar_dashboard() {
         fallos="${nd}N/D${RESET}"
     fi
 
-    # --- Puertos a la escucha ---
-    puertos=$(puertos_resumen)
-    if [ "$puertos" == "N/D" ]; then
-        puertos="${nd}N/D${RESET}"
-    elif [ "$puertos" == "ninguno" ]; then
-        puertos="${nd}ninguno${RESET}"
+    # --- Posibles reverse shells ---
+    shells=$(reverse_shell_alerta)
+    if [ "$shells" == "N/D" ]; then
+        shells="${nd}N/D${RESET}"
+    elif [ "$shells" == "ok" ]; then
+        shells="${ok}✔ ninguna${RESET}"
     else
-        puertos="${AZUL}${puertos}${RESET}"
+        shells="${bad}${shells}${RESET}"
     fi
 
     # --- Temperatura ---
@@ -748,11 +735,12 @@ mostrar_dashboard() {
         red="${bad}✖ sin red${RESET}"
     fi
 
-    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}   ${AMARILLO}Puertos:${RESET} ${puertos}   ${AMARILLO}Temp:${RESET} ${temp}"
+    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}   ${AMARILLO}Shells:${RESET} ${shells}   ${AMARILLO}Temp:${RESET} ${temp}"
     echo -e "   ${AMARILLO}UFW:${RESET} ${ufw}   ${AMARILLO}SSH:${RESET} ${ssh}   ${AMARILLO}Internet:${RESET} ${red}"
 }
 
 logo_texto() {
+    local modo="${1:-completo}"
     actualizar_colores_logo
 
     local hora
@@ -761,9 +749,24 @@ logo_texto() {
     host=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
     local usuario="${SUDO_USER:-${USER:-root}}"
 
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}SYSTEM TOOL KIT${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${AZUL_OSCURO}| ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}ALL4ME${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${AZUL_OSCURO}| ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+
+    # En pantallas bajas se recorta la cabecera para no ocultar el menú.
+    case "$modo" in
+        compacto)
+            mostrar_dashboard
+            return
+            ;;
+        medio)
+            echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
+            echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}"
+            mostrar_dashboard
+            return
+            ;;
+    esac
+
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}  ${AMARILLO}Gestor:${RESET} ${AZUL}${Package:-Desconocido}${RESET}"
+    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
     echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}"
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable (rpm-ostree)${RESET}"
@@ -794,13 +797,21 @@ fzf_estilo() {
 stk_fzf_menu() {
     local prompt_text="$1"
     local titulo="$2"
-    local extra="${3:-}"
-    local logo
+    local filas modo logo
 
-    logo=$(logo_texto)
-    if [ -n "$extra" ]; then
-        logo+=$(printf '\n\n %b' "$extra")
+    filas=$(stty size </dev/tty 2>/dev/null | awk '{print $1}')
+    [[ "$filas" =~ ^[0-9]+$ ]] || filas="${LINES:-24}"
+
+    # Cabecera adaptativa: en terminales bajas se recorta para no cortar opciones.
+    if [ "$filas" -lt 24 ]; then
+        modo="compacto"
+    elif [ "$filas" -lt 32 ]; then
+        modo="medio"
+    else
+        modo="completo"
     fi
+
+    logo=$(logo_texto "$modo")
 
     fzf --ansi \
         --height=~90% \
@@ -849,7 +860,7 @@ opciones="0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditor
 6. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Menú" "PANEL DE CONTROL" "${AZUL}ICONO | CATEGORÍA       | DESCRIPCIÓN${RESET}")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione" "SYSTEM TOOL KIT")
 
         # Salida si se cancela con ESC o si está vacío
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then salir; fi
