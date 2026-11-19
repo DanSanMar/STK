@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.5.2-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.0-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.5.2)
+# 🛠️ STK - System Tool Kit (v6.6.0)
 
 </div>
 
@@ -32,6 +32,7 @@
 * **Nuevas funciones de la v.5.9.5:** Se añade menú de gestión de tareas programadas con Cron.
 * **Nuevas funciones de la v.5.9.7:** Se añaden flags para la utilización directa de las funciones más habituales y una ayuda para recordarlas.
 * **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
+* **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -96,6 +97,14 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
   * **Sincronización Avanzada:** Sincronización incremental, espejo o bidireccional mediante `rsync`, con perfiles persistentes en `/var/backups/stk_backups/config.json`.
 * **Programador (Cron):** Integración con `stk_cron.sh` para la automatización y consulta de tareas programadas en el sistema. Las notificaciones de escritorio al finalizar cada tarea se pueden activar o desactivar desde la opción **5. Notificaciones** del menú de tareas automáticas.
 
+### 🤖 Modo Auto Integral
+* **Checklist de pasos:** Menú `fzf --multi` para elegir actualización, limpieza, auditoría y servicios, todos marcados por defecto. `TAB` marca/desmarca, `ENTER` confirma y `ESC` cancela. Sin terminal interactiva se ejecutan todos.
+* **Preflight:** Comprueba red, espacio libre, gestor de paquetes ocupado y batería antes de empezar. Si algo no es seguro, omite la actualización y continúa con el resto.
+* **Snapshot previo:** Punto de recuperación con `snapper`, `timeshift` o respaldo de la lista de paquetes en `/var/lib/stk/snapshots/`.
+* **Ejecución robusta:** Lock `flock` contra ejecuciones simultáneas, timeouts por paso y `Ctrl+C` que libera el bloqueo y vuelve al menú.
+* **Informe:** Resumen por módulo, duración por paso, espacio liberado, alertas y reinicio pendiente. Se guarda en JSON (`/var/lib/stk/last_auto.json`) con historial en `auto_history.jsonl`.
+* **Códigos de salida:** `0` todo correcto, `1` completado con avisos, `2` error grave y `3` ya había una ejecución en curso.
+
 
 <div align="center">
    <img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/723ff72c-16ce-4cc6-8bf8-7ffa3b35522c" />
@@ -144,7 +153,19 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.5.2 (Actual)
+### 📝 v6.6.0 (Actual)
+* **Nuevo:** Cabecera animada en todos los menús FZF: el logo (`STK`, `ALL4ME` y versión) cambia de color cada 3 segundos y el reloj se actualiza en vivo.
+* **Mejora:** El dashboard de estado se cachea 30 segundos para refrescar la cabecera sin lanzar comprobaciones costosas en cada ciclo.
+* **Nuevo:** Modo Auto con checklist `fzf` para elegir los pasos (actualización, limpieza, auditoría y servicios). Sin terminal interactiva se ejecutan todos.
+* **Nuevo:** Preflight del modo auto: red, espacio libre, gestor de paquetes ocupado y batería. La actualización se omite si no es seguro ejecutarla, sin detener el resto.
+* **Nuevo:** Snapshot previo con `snapper`, `timeshift` o respaldo de la lista de paquetes en `/var/lib/stk/snapshots/`.
+* **Nuevo:** Lock exclusivo (`flock`) contra ejecuciones simultáneas y timeouts configurables por paso.
+* **Nuevo:** Auditoría ampliada: `unattended-upgrades`, `fail2ban`, endurecimiento SSH, reglas `NOPASSWD`, archivos *world-writable* y puertos sensibles expuestos.
+* **Nuevo:** Detección de reinicio pendiente, kernel nuevo instalado y servicios que necesitan reinicio (`needrestart`).
+* **Nuevo:** Informe JSON en `/var/lib/stk/last_auto.json`, historial `auto_history.jsonl` y códigos de salida (`0` OK, `1` avisos, `2` error, `3` ya en ejecución).
+* **Corrección:** El paso de limpieza vuelve a ejecutarse y ahora informa del espacio liberado; corregido el recuento de paquetes actualizados en `pacman`.
+
+### 📝 v6.5.2
 * **Mejora:** Cabecera y menús con marco global estilo PROC4ME, opciones visibles sin deslizamiento y colores unificados en todos los FZF.
 * **Mejora:** La cabecera se adapta al alto de la terminal: en pantallas pequeñas se recorta para no cortar las opciones del menú.
 * **Mejora:** El dashboard sustituye el recuento de puertos por un aviso de posibles reverse shells (`✔ ninguna` / `⚠ N sospechosa(s)`).
