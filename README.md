@@ -155,6 +155,8 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 ## 📝 Registro de Cambios
 
 ### 📝 v6.6.1 (Actual)
+* **Corrección:** El mini-dashboard vuelve a mostrarse en la cabecera de todos los menús (se había perdido al quitar las líneas de separación).
+* **Mejora:** Dashboard tipo semáforo, al estilo de dash4me: carga CPU en porcentaje, RAM, disco `/` y temperatura con verde (correcto), naranja (sobre la media) y rojo (peligroso), con ✔ verde o ⚠ de aviso. Se eliminan los textos “ok”, “activo” y “conectado”.
 * **Corrección:** Los menús FZF ya no se quedan esperando hasta 3 segundos al salir. El refresco de la cabecera usa ahora un `sleep` interrumpible, por lo que abrir un submenú es inmediato.
 * **Mejora:** Dashboard rediseñado con métricas dinámicas y útiles: carga del sistema, uso de RAM, disco `/` y temperatura. El bloque de seguridad (servicios fallidos, firewall, SSH y red) se cachea 180 segundos y se refresca en segundo plano, sin bloquear el menú.
 * **Mejora:** La detección de posibles reverse shells sale del dashboard y pasa a la auditoría de seguridad, donde se explica con más contexto.

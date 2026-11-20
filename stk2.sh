@@ -686,10 +686,30 @@ uptime_legible() {
 }
 
 carga_sistema() {
-    local l1 l5 l15 resto
-    read -r l1 l5 l15 resto < /proc/loadavg 2>/dev/null
-    # Devolvemos solo la carga de 1 minuto para mostrar en el dashboard.
-    echo "${l1:-N/D}"
+    # Uso de CPU en % calculado con dos lecturas de /proc/stat (estilo dash4me).
+    # Barato: 0.1 s y solo lecturas de /proc; el dashboard lo cachea 15 s.
+    local campos f total1 total2 idle1 idle2 dt di pct
+    read -r campos < /proc/stat 2>/dev/null || { echo "N/D"; return; }
+    read -r -a f <<< "$campos"
+    idle1=${f[4]:-0}
+    total1=$(( ${f[1]:-0} + ${f[2]:-0} + ${f[3]:-0} + ${f[4]:-0} + ${f[5]:-0} + ${f[6]:-0} + ${f[7]:-0} + ${f[8]:-0} ))
+
+    sleep 0.1
+
+    read -r campos < /proc/stat 2>/dev/null || { echo "N/D"; return; }
+    read -r -a f <<< "$campos"
+    idle2=${f[4]:-0}
+    total2=$(( ${f[1]:-0} + ${f[2]:-0} + ${f[3]:-0} + ${f[4]:-0} + ${f[5]:-0} + ${f[6]:-0} + ${f[7]:-0} + ${f[8]:-0} ))
+
+    dt=$((total2 - total1))
+    di=$((idle2 - idle1))
+    if [ "$dt" -gt 0 ]; then
+        pct=$(( (dt - di) * 100 / dt ))
+    else
+        pct=0
+    fi
+    [ "$pct" -lt 0 ] && pct=0
+    echo "$pct"
 }
 
 memoria_ram() {
@@ -725,83 +745,62 @@ uso_disco_raiz() {
     [[ "$uso" =~ ^[0-9]+$ ]] && echo "$uso" || echo "N/D"
 }
 
+# Helper semáforo: verde (ok) / naranja (sobre media) / rojo (peligroso).
+# Devuelve "<valor><sufijo> <icono>" con el icono ✔ en verde o ⚠ en naranja/rojo.
+_metrica_color() {
+    local valor="$1" sufijo="$2" aviso="$3" critico="$4"
+    local color icono
+
+    if [[ ! "$valor" =~ ^[0-9]+$ ]]; then
+        printf '%sN/D%s' "${AZUL}" "${RESET}"
+        return
+    fi
+
+    if [ "$valor" -gt "$critico" ]; then
+        color="${ROJO_BRILLANTE}"
+        icono="${ROJO_BRILLANTE}⚠${RESET}"
+    elif [ "$valor" -gt "$aviso" ]; then
+        color="${AMARILLO_BRILLANTE}"
+        icono="${AMARILLO_BRILLANTE}⚠${RESET}"
+    else
+        color="${VERDE_BRILLANTE}"
+        icono="${VERDE_BRILLANTE}✔${RESET}"
+    fi
+
+    printf '%s%s%s %s' "$color" "$valor" "$sufijo" "$icono"
+}
+
 mostrar_dashboard_rapido() {
-    local ok_green="${VERDE_BRILLANTE}" warn_orange="${AMARILLO}" bad_red="${ROJO_BRILLANTE}" nd="${AZUL}"
-    local carga ram temp
+    local carga ram_txt ram_pct disco temp
 
     carga=$(carga_sistema)
-    ram=$(memoria_ram)
+    ram_txt=$(memoria_ram)
+    disco=$(uso_disco_raiz)
     temp=$(temperatura_maxima)
 
-    # Colorizar carga: verde < 0.7, naranja 0.7-1.5, rojo > 1.5
-    local carga_color="$nd"
-    if [[ "$carga" =~ ^[0-9]+\.[0-9]+$ ]]; then
-        local l=$(echo "$carga" | awk -F. '{print $1}')
-        if (( l < 1 )); then
-            carga_color="$ok_green"
-        elif (( l < 2 )); then
-            carga_color="$warn_orange"
-        else
-            carga_color="$bad_red"
-        fi
-    fi
+    # memoria_ram devuelve "X.Y/Z.Y GB (P%)"; nos quedamos con el porcentaje.
+    ram_pct=$(printf '%s' "$ram_txt" | sed -n 's/.*(\([0-9][0-9]*\)%).*/\1/p')
+    [[ "$ram_pct" =~ ^[0-9]+$ ]] || ram_pct="N/D"
 
-    # Colorizar RAM: verde si uso < 70%, naranja 70-90%, rojo > 90%
-    local ram_color="$nd"
-    if [[ "$ram" =~ ^[0-9]+%$ ]]; then
-        local r=$(echo "$ram" | sed 's/%//')
-        if (( r < 70 )); then
-            ram_color="$ok_green"
-        elif (( r < 90 )); then
-            ram_color="$warn_orange"
-        else
-            ram_color="$bad_red"
-        fi
-    fi
-
-    # Colorizar temperatura: verde < 70°C, naranja 70-80°C, rojo > 80°C
-    local temp_color="$nd"
-    if [[ "$temp" =~ ^[0-9]+$ ]]; then
-        if (( temp < 70 )); then
-            temp_color="$ok_green"
-        elif (( temp < 80 )); then
-            temp_color="$warn_orange"
-        else
-            temp_color="$bad_red"
-        fi
-    fi
-
-    # Mostrar solo valores coloreados, sin labels.
-    # Verde check si OK, rojo ⚠ si hay que advertir.
-    local ram_display=""
-    if [[ "$ram_color" == "$ok_green" ]]; then
-        ram_display="${ram}"
-    else
-        ram_display="${bad_red}⚠${ram}${RESET}"
-    fi
-
-    local temp_display=""
-    if [[ "$temp_color" == "$ok_green" ]]; then
-        temp_display="${temp}°C"
-    else
-        temp_display="${bad_red}⚠${temp}°C${RESET}"
-    fi
-
-    echo -e " ${AZUL}${HOST_STK}${RESET}  ${carga_color}${carga}${RESET}  ${ram_display}  ${temp_display}"
+    # Umbrales tipo dash4me:
+    #   CPU/disco: verde <=60, naranja 61-85, rojo >85
+    #   RAM:       verde <=65, naranja 66-85, rojo >85
+    #   Temp:      verde <=75, naranja 76-85, rojo >85
+    echo -e " ${AMARILLO}Carga:${RESET} $(_metrica_color "$carga" '%' 60 85)   ${AMARILLO}RAM:${RESET} $(_metrica_color "$ram_pct" '%' 65 85)   ${AMARILLO}Disco /:${RESET} $(_metrica_color "$disco" '%' 60 85)   ${AMARILLO}Temp:${RESET} $(_metrica_color "$temp" '°C' 75 85)"
 }
 
 # --- BLOQUE DE SEGURIDAD (costoso; se refresca cada DASH_SEG_REFRESCO) ---
 mostrar_dashboard_seguridad() {
-    local ok="${VERDE_BRILLANTE}" warn="${AMARILLO}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
+    local ok="${VERDE_BRILLANTE}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
     local fallos fw ssh red
 
-    # Servicios fallidos
+    # Servicios fallidos: solo ✔ en verde si están todos bien, ⚠ en rojo si no.
     if command -v systemctl &>/dev/null; then
         local salida_fallos n_fallos
         if salida_fallos=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null); then
             n_fallos=$(printf '%s\n' "$salida_fallos" | awk 'NF {n++} END {print n+0}')
             if [ "$n_fallos" -eq 0 ]; then
-                fallos="${ok}✔ ok${RESET}"
+                fallos="${ok}✔${RESET}"
             else
                 fallos="${bad}⚠ ${n_fallos} fallidos${RESET}"
             fi
@@ -814,10 +813,10 @@ mostrar_dashboard_seguridad() {
 
     # Firewall: UFW, firewalld, nftables o iptables
     if comprobar_firewall; then
-        fw="${ok}✔ activo${RESET}"
+        fw="${ok}✔${RESET}"
     elif command -v ufw &>/dev/null || command -v firewall-cmd &>/dev/null \
         || command -v nft &>/dev/null || command -v iptables &>/dev/null; then
-        fw="${warn}⚠ inactivo${RESET}"
+        fw="${bad}⚠${RESET}"
     else
         fw="${nd}N/D${RESET}"
     fi
@@ -830,9 +829,9 @@ mostrar_dashboard_seguridad() {
     fi
     [ "$ssh_activo" = false ] && pgrep -x sshd >/dev/null 2>&1 && ssh_activo=true
     if [ "$ssh_activo" = true ]; then
-        ssh="${ok}✔ activo${RESET}"
+        ssh="${ok}✔${RESET}"
     else
-        ssh="${nd}inactivo${RESET}"
+        ssh="${bad}⚠${RESET}"
     fi
 
     # Conexión: ruta por defecto + salida a Internet (timeout corto)
@@ -846,16 +845,16 @@ mostrar_dashboard_seguridad() {
     fi
 
     if [ "$hay_ruta" = false ]; then
-        red="${bad}✖ sin red${RESET}"
+        red="${bad}⚠ sin red${RESET}"
     elif ! command -v ping &>/dev/null; then
-        red="${ok}✔ ruta activa${RESET}"
+        red="${ok}✔${RESET}"
     elif ping -c 1 -W 1 -n 1.1.1.1 >/dev/null 2>&1; then
-        red="${ok}✔ conectado${RESET}"
+        red="${ok}✔${RESET}"
     else
-        red="${warn}⚠ sin salida${RESET}"
+        red="${bad}⚠ sin salida${RESET}"
     fi
 
-    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}  ${AMARILLO}Firewall:${RESET} ${fw}  ${AMARILLO}SSH:${RESET} ${ssh}  ${AMARILLO}Red:${RESET} ${red}"
+    echo -e " ${AMARILLO}Servicios:${RESET} ${fallos}  ${AMARILLO}Firewall:${RESET} ${fw}  ${AMARILLO}SSH:${RESET} ${ssh}  ${AMARILLO}Red:${RESET} ${red}"
 }
 
 # Caché genérica: indica si el archivo existe y sigue vigente.
@@ -937,17 +936,17 @@ logo_texto() {
             return
             ;;
         medio)
-            echo -e " ${AMARILLO}HOST:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+            echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
             dashboard_cacheado
             return
             ;;
     esac
 
-    # Sin líneas box drawing:mostrar solo lo esencial
-    echo -e " ${AMARILLO}HOST:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+    echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
     fi
+    dashboard_cacheado
 }
 
 mostrar_logo() {
