@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.0-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.1-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.0)
+# 🛠️ STK - System Tool Kit (v6.6.1)
 
 </div>
 
@@ -33,6 +33,7 @@
 * **Nuevas funciones de la v.5.9.7:** Se añaden flags para la utilización directa de las funciones más habituales y una ayuda para recordarlas.
 * **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
 * **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
+* **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -153,7 +154,14 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.0 (Actual)
+### 📝 v6.6.1 (Actual)
+* **Corrección:** Los menús FZF ya no se quedan esperando hasta 3 segundos al salir. El refresco de la cabecera usa ahora un `sleep` interrumpible, por lo que abrir un submenú es inmediato.
+* **Mejora:** Dashboard rediseñado con métricas dinámicas y útiles: carga del sistema, uso de RAM, disco `/` y temperatura. El bloque de seguridad (servicios fallidos, firewall, SSH y red) se cachea 180 segundos y se refresca en segundo plano, sin bloquear el menú.
+* **Mejora:** La detección de posibles reverse shells sale del dashboard y pasa a la auditoría de seguridad, donde se explica con más contexto.
+* **Mejora:** Se elimina la comprobación de `fzf --help` en cada menú y la caché del dashboard se precalienta al arrancar. El `ping` inicial usa timeout de 1 segundo.
+* **Mejora:** `Listar usuarios` ya no hace una pausa de 2 segundos por cada usuario.
+
+### 📝 v6.6.0
 * **Nuevo:** Cabecera animada en todos los menús FZF: el logo (`STK`, `ALL4ME` y versión) cambia de color cada 3 segundos y el reloj se actualiza en vivo.
 * **Mejora:** El dashboard de estado se cachea 30 segundos para refrescar la cabecera sin lanzar comprobaciones costosas en cada ciclo.
 * **Nuevo:** Modo Auto con checklist `fzf` para elegir los pasos (actualización, limpieza, auditoría y servicios). Sin terminal interactiva se ejecutan todos.

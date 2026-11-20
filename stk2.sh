@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.0"
+V="6.6.1"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -504,7 +504,7 @@ check_dependencies() {
 }
 
 # --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
-if ! ping -c 1 8.8.8.8 &>/dev/null; then
+if ! ping -c 1 -W 1 -n 8.8.8.8 &>/dev/null; then
     pintar "$ROJO" "❌ No hay conexión a internet. Algunas funciones fallarán."
 fi
 
@@ -578,9 +578,23 @@ PALETA_LOGO=(
     "$AMARILLO"
     "$CIAN"
 )
-LOGO_INTERVALO=3   # Segundos entre cada cambio de color del logo
-DASH_REFRESCO=30   # Segundos de caché para el dashboard de estado
+LOGO_INTERVALO=3      # Segundos entre cada cambio de color del logo
+DASH_REFRESCO=15      # Caché de métricas dinámicas (carga, RAM, disco, temperatura)
+DASH_SEG_REFRESCO=180 # Caché del bloque de seguridad (servicios, firewall, SSH, red)
 LOGO_DASH_CACHE="$STK_TMP_DIR/dashboard_${UID:-0}"
+LOGO_SEG_CACHE="$STK_TMP_DIR/seguridad_${UID:-0}"
+
+# Datos que no cambian durante la ejecución: se leen una sola vez.
+KERNEL_STK=$(uname -r 2>/dev/null || echo "N/D")
+HOST_STK=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
+SO_STK="${PRETTY_NAME:-${OS_ID:-Desconocido}}"
+
+# Detección única de la cabecera dinámica de fzf (evita lanzar `fzf --help` en cada menú).
+FZF_CON_LISTEN=false
+if command -v fzf &>/dev/null && command -v curl &>/dev/null \
+    && fzf --help 2>/dev/null | grep -q -- '--listen'; then
+    FZF_CON_LISTEN=true
+fi
 
 actualizar_colores_logo() {
     # El color avanza una posición cada LOGO_INTERVALO segundos (epoch / intervalo).
@@ -655,21 +669,108 @@ reverse_shell_alerta() {
     fi
 }
 
-mostrar_dashboard() {
-    local ok="${VERDE_BRILLANTE}"
-    local warn="${AMARILLO}"
-    local bad="${ROJO_BRILLANTE}"
-    local nd="${AZUL}"
-    local fallos shells temp ufw ssh red
+# --- MÉTRICAS DINÁMICAS (baratas: /proc y df, sin comandos pesados) ---
+uptime_legible() {
+    local seg
+    read -r seg _ < /proc/uptime 2>/dev/null
+    [[ "$seg" =~ ^[0-9]+ ]] || { echo "N/D"; return; }
+    seg=${seg%.*}
+    local d=$((seg / 86400)) h=$(((seg % 86400) / 3600)) m=$(((seg % 3600) / 60))
+    if [ "$d" -gt 0 ]; then
+        echo "${d}d ${h}h"
+    elif [ "$h" -gt 0 ]; then
+        echo "${h}h ${m}m"
+    else
+        echo "${m}m"
+    fi
+}
 
-    # --- Servicios fallidos ---
+carga_sistema() {
+    local l1 l5 l15 resto
+    read -r l1 l5 l15 resto < /proc/loadavg 2>/dev/null
+    # Devolvemos solo la carga de 1 minuto para mostrar en el dashboard.
+    echo "${l1:-N/D}"
+}
+
+memoria_ram() {
+    local clave valor total=0 disponible=0 memfree=0 buffers=0 cached=0
+    while read -r clave valor _; do
+        case "$clave" in
+            MemTotal:)     total=$valor ;;
+            MemAvailable:) disponible=$valor ;;
+            MemFree:)      memfree=$valor ;;
+            Buffers:)      buffers=$valor ;;
+            Cached:)       cached=$valor ;;
+        esac
+    done < /proc/meminfo 2>/dev/null
+
+    # Kernels antiguos sin MemAvailable: aproximación con MemFree + Buffers + Cached.
+    [ "$disponible" -gt 0 ] || disponible=$((memfree + buffers + cached))
+
+    if [ "${total:-0}" -le 0 ]; then
+        echo "N/D"
+        return
+    fi
+
+    local usada=$((total - disponible))
+    local pct=$((usada * 100 / total))
+    local u_ent=$((usada / 1048576)) u_dec=$(((usada % 1048576) * 10 / 1048576))
+    local t_ent=$((total / 1048576)) t_dec=$(((total % 1048576) * 10 / 1048576))
+    printf '%d.%d/%d.%d GB (%d%%)' "$u_ent" "$u_dec" "$t_ent" "$t_dec" "$pct"
+}
+
+uso_disco_raiz() {
+    local uso
+    uso=$(df -P / 2>/dev/null | awk 'NR == 2 {gsub(/%/, "", $5); print $5}')
+    [[ "$uso" =~ ^[0-9]+$ ]] && echo "$uso" || echo "N/D"
+}
+
+mostrar_dashboard_rapido() {
+    local ok="${VERDE_BRILLANTE}" warn="${AMARILLO}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
+    local carga ram disco temp temp_txt disco_txt
+
+    carga=$(carga_sistema)
+    ram=$(memoria_ram)
+    disco=$(uso_disco_raiz)
+
+    if [[ "$disco" =~ ^[0-9]+$ ]]; then
+        if [ "$disco" -ge 90 ]; then
+            disco_txt="${bad}⚠ ${disco}%${RESET}"
+        elif [ "$disco" -ge 75 ]; then
+            disco_txt="${warn}⚠ ${disco}%${RESET}"
+        else
+            disco_txt="${ok}✔ ${disco}%${RESET}"
+        fi
+    else
+        disco_txt="${nd}N/D${RESET}"
+    fi
+
+    temp=$(temperatura_maxima)
+    if [[ "$temp" =~ ^[0-9]+$ ]]; then
+        if [ "$temp" -ge 80 ]; then
+            temp_txt="${bad}⚠ ${temp}°C${RESET}"
+        else
+            temp_txt="${ok}✔ ${temp}°C${RESET}"
+        fi
+    else
+        temp_txt="${nd}N/D${RESET}"
+    fi
+
+    echo -e " ${AMARILLO}➤ Carga:${RESET} ${carga_color}${carga}${RESET}  ${AMARILLO}RAM:${RESET} ${AZUL}${ram}${RESET}  ${AMARILLO}Disco /:${RESET} ${disco_txt}  ${AMARILLO}Temp:${RESET} ${temp_txt}"
+}
+
+# --- BLOQUE DE SEGURIDAD (costoso; se refresca cada DASH_SEG_REFRESCO) ---
+mostrar_dashboard_seguridad() {
+    local ok="${VERDE_BRILLANTE}" warn="${AMARILLO}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
+    local fallos fw ssh red
+
+    # Servicios fallidos
     if command -v systemctl &>/dev/null; then
-        local salida_fallos
+        local salida_fallos n_fallos
         if salida_fallos=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null); then
-            local n_fallos
             n_fallos=$(printf '%s\n' "$salida_fallos" | awk 'NF {n++} END {print n+0}')
             if [ "$n_fallos" -eq 0 ]; then
-                fallos="${ok}✔ 0 fallidos${RESET}"
+                fallos="${ok}✔ ok${RESET}"
             else
                 fallos="${bad}⚠ ${n_fallos} fallidos${RESET}"
             fi
@@ -680,40 +781,17 @@ mostrar_dashboard() {
         fallos="${nd}N/D${RESET}"
     fi
 
-    # --- Posibles reverse shells ---
-    shells=$(reverse_shell_alerta)
-    if [ "$shells" == "N/D" ]; then
-        shells="${nd}N/D${RESET}"
-    elif [ "$shells" == "ok" ]; then
-        shells="${ok}✔ ninguna${RESET}"
+    # Firewall: UFW, firewalld, nftables o iptables
+    if comprobar_firewall; then
+        fw="${ok}✔ activo${RESET}"
+    elif command -v ufw &>/dev/null || command -v firewall-cmd &>/dev/null \
+        || command -v nft &>/dev/null || command -v iptables &>/dev/null; then
+        fw="${warn}⚠ inactivo${RESET}"
     else
-        shells="${bad}${shells}${RESET}"
+        fw="${nd}N/D${RESET}"
     fi
 
-    # --- Temperatura ---
-    temp=$(temperatura_maxima)
-    if [[ "$temp" =~ ^[0-9]+$ ]]; then
-        if [ "$temp" -ge 80 ]; then
-            temp="${bad}⚠ ${temp}°C${RESET}"
-        else
-            temp="${ok}✔ ${temp}°C${RESET}"
-        fi
-    else
-        temp="${nd}N/D${RESET}"
-    fi
-
-    # --- Estado de UFW ---
-    if command -v ufw &>/dev/null; then
-        if ufw status 2>/dev/null | head -n 1 | grep -qi "status:[[:space:]]*active"; then
-            ufw="${ok}✔ activo${RESET}"
-        else
-            ufw="${warn}⚠ inactivo${RESET}"
-        fi
-    else
-        ufw="${nd}N/D${RESET}"
-    fi
-
-    # --- SSH ---
+    # SSH
     local ssh_activo=false
     if command -v systemctl &>/dev/null; then
         systemctl is-active --quiet ssh 2>/dev/null && ssh_activo=true
@@ -726,7 +804,7 @@ mostrar_dashboard() {
         ssh="${nd}inactivo${RESET}"
     fi
 
-    # --- Conexión a Internet ---
+    # Conexión: ruta por defecto + salida a Internet (timeout corto)
     local hay_ruta=false
     if command -v ip &>/dev/null; then
         ip route 2>/dev/null | grep -q '^default' && hay_ruta=true
@@ -736,20 +814,71 @@ mostrar_dashboard() {
         hay_ruta=true
     fi
 
-    if [ "$hay_ruta" = true ]; then
-        if ! command -v ping &>/dev/null; then
-            red="${ok}✔ ruta activa${RESET}"
-        elif ping -c 1 -W 1 -n 1.1.1.1 >/dev/null 2>&1; then
-            red="${ok}✔ conectado${RESET}"
-        else
-            red="${warn}⚠ sin salida${RESET}"
-        fi
-    else
+    if [ "$hay_ruta" = false ]; then
         red="${bad}✖ sin red${RESET}"
+    elif ! command -v ping &>/dev/null; then
+        red="${ok}✔ ruta activa${RESET}"
+    elif ping -c 1 -W 1 -n 1.1.1.1 >/dev/null 2>&1; then
+        red="${ok}✔ conectado${RESET}"
+    else
+        red="${warn}⚠ sin salida${RESET}"
     fi
 
-    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}   ${AMARILLO}Shells:${RESET} ${shells}   ${AMARILLO}Temp:${RESET} ${temp}"
-    echo -e "   ${AMARILLO}UFW:${RESET} ${ufw}   ${AMARILLO}SSH:${RESET} ${ssh}   ${AMARILLO}Internet:${RESET} ${red}"
+    echo -e " ${AMARILLO}➤ Servicios:${RESET} ${fallos}  ${AMARILLO}Firewall:${RESET} ${fw}  ${AMARILLO}SSH:${RESET} ${ssh}  ${AMARILLO}Red:${RESET} ${red}"
+}
+
+# Caché genérica: indica si el archivo existe y sigue vigente.
+_cache_vigente() {
+    local cache="$1" stamp="$2" ttl="$3"
+    local ahora mtime=0
+    ahora=$(date +%s 2>/dev/null)
+    [[ "$ahora" =~ ^[0-9]+$ ]] || return 1
+    [ -f "$stamp" ] && read -r mtime < "$stamp" 2>/dev/null
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    [ -f "$cache" ] && [ $((ahora - mtime)) -lt "$ttl" ]
+}
+
+_cache_guardar() {
+    local cache="$1" stamp="$2" contenido="$3"
+    printf '%s\n' "$contenido" > "${cache}.tmp" 2>/dev/null &&
+        mv -f "${cache}.tmp" "$cache" 2>/dev/null
+    date +%s > "$stamp" 2>/dev/null
+}
+
+# Refresco en segundo plano del bloque de seguridad (stale-while-revalidate).
+_cache_seguridad_refrescar() {
+    (
+        local nueva
+        nueva=$(mostrar_dashboard_seguridad)
+        printf '%s\n' "$nueva" > "${LOGO_SEG_CACHE}.tmp" 2>/dev/null &&
+            mv -f "${LOGO_SEG_CACHE}.tmp" "$LOGO_SEG_CACHE" 2>/dev/null
+        date +%s > "${LOGO_SEG_CACHE}.stamp" 2>/dev/null
+    ) </dev/null >/dev/null 2>&1 &
+}
+
+dashboard_cacheado() {
+    local rapido seguridad
+
+    # Métricas dinámicas: baratas, se recalculan cada DASH_REFRESCO segundos.
+    if _cache_vigente "$LOGO_DASH_CACHE" "${LOGO_DASH_CACHE}.stamp" "$DASH_REFRESCO"; then
+        rapido=$(cat "$LOGO_DASH_CACHE" 2>/dev/null)
+    else
+        rapido=$(mostrar_dashboard_rapido)
+        _cache_guardar "$LOGO_DASH_CACHE" "${LOGO_DASH_CACHE}.stamp" "$rapido"
+    fi
+
+    # Seguridad: cara. Se muestra la última copia y se refresca aparte.
+    if [ -f "$LOGO_SEG_CACHE" ]; then
+        seguridad=$(cat "$LOGO_SEG_CACHE" 2>/dev/null)
+        if ! _cache_vigente "$LOGO_SEG_CACHE" "${LOGO_SEG_CACHE}.stamp" "$DASH_SEG_REFRESCO"; then
+            _cache_seguridad_refrescar
+        fi
+    else
+        seguridad=$(mostrar_dashboard_seguridad)
+        _cache_guardar "$LOGO_SEG_CACHE" "${LOGO_SEG_CACHE}.stamp" "$seguridad"
+    fi
+
+    printf '%s\n%s\n' "$rapido" "$seguridad"
 }
 
 # Línea animada del logo: colores rotativos + hora en vivo.
@@ -764,34 +893,9 @@ logo_barra() {
 
 # El dashboard lanza comprobaciones costosas (systemctl, ss, ufw...).
 # Se cachea unos segundos para poder refrescar la cabecera sin penalizar.
-dashboard_cacheado() {
-    local cache="$LOGO_DASH_CACHE"
-    local stamp="${cache}.stamp"
-    local ahora mtime=0
-
-    ahora=$(date +%s 2>/dev/null)
-    [[ "$ahora" =~ ^[0-9]+$ ]] || ahora=0
-    [ -f "$stamp" ] && read -r mtime < "$stamp" 2>/dev/null
-    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
-
-    if [ -f "$cache" ] && [ $((ahora - mtime)) -lt "$DASH_REFRESCO" ]; then
-        cat "$cache"
-        return
-    fi
-
-    local salida
-    salida=$(mostrar_dashboard)
-    printf '%s\n' "$salida" > "$cache" 2>/dev/null
-    printf '%s\n' "$ahora" > "$stamp" 2>/dev/null
-    printf '%s\n' "$salida"
-}
-
+# Texto completo de la cabecera: logo + datos del sistema + dashboard.
 logo_texto() {
     local modo="${1:-completo}"
-    local host usuario
-
-    host=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
-    usuario="${SUDO_USER:-${USER:-root}}"
 
     logo_barra
 
@@ -802,16 +906,14 @@ logo_texto() {
             return
             ;;
         medio)
-            echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
-            echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}"
+            echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
             dashboard_cacheado
             return
             ;;
     esac
 
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID:-Desconocido} ${VERSION:-}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}$(uname -r 2>/dev/null)${RESET}"
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${host}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${usuario}${RESET}"
+    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
     fi
@@ -871,8 +973,8 @@ stk_fzf_menu() {
         --color="$FZF_COLORES"
     )
 
-    # fzf antiguo (sin --listen): cabecera estática, como hasta ahora.
-    if ! fzf --help 2>/dev/null | grep -q -- '--listen' || ! command -v curl &>/dev/null; then
+    # fzf antiguo (sin --listen) o sin curl: cabecera estática.
+    if [ "$FZF_CON_LISTEN" != true ]; then
         fzf "${fzf_args[@]}"
         return
     fi
@@ -882,9 +984,12 @@ stk_fzf_menu() {
     sock="$STK_TMP_DIR/fzf_${UID:-0}_${BASHPID:-$$}.sock"
 
     (
-        trap 'exit 0' TERM INT
+        sleep_pid=""
+        trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM INT
         # Refresca logo + hora cada LOGO_INTERVALO segundos.
-        while sleep "$LOGO_INTERVALO"; do
+        while :; do
+            sleep "$LOGO_INTERVALO" & sleep_pid=$!
+            wait "$sleep_pid" || exit 0
             logo=$(logo_texto "$modo")
             curl -s -o /dev/null --max-time 2 \
                 --unix-socket "$sock" \
@@ -927,6 +1032,8 @@ ejecutar_proc4me() {
 }
 #función del menú principal
 menu() {
+    # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
+    dashboard_cacheado </dev/null >/dev/null 2>&1 &
     while true; do
         clear
 
@@ -1921,7 +2028,25 @@ auditoria_seguridad() {
     fi
     echo ""
 
-    # B. Robustecimiento de Red (Kernel Sysctl)
+    # B. Intérpretes con conexiones establecidas (posible reverse shell)
+    ((total_checks++))
+    pintar $AMARILLO "🔍 Intérpretes con conexiones establecidas (posible reverse shell):"
+    local rs_shells
+    rs_shells=$(reverse_shell_alerta)
+    if [ "$rs_shells" == "ok" ]; then
+        pintar $VERDE "  ✔ Ninguna conexión de intérprete sospechosa."
+        ((checks_passed++))
+    elif [ "$rs_shells" == "N/D" ]; then
+        pintar $AZUL "  ℹ️ No se pudo comprobar (falta el comando 'ss')."
+    else
+        pintar $ROJO_BRILLANTE "  ⚠️ ${rs_shells#⚠ }"
+        sugerencias+=("🕵️ Reverse shell: Revisa las conexiones con 'ss -tupn state established' y valida los procesos implicados.")
+        registrar_log "$LOG_WARN" "SEGURIDAD: Posible reverse shell detectada"
+        ((alertas_count++))
+    fi
+    echo ""
+
+    # C. Robustecimiento de Red (Kernel Sysctl)
     ((total_checks++))
     pintar $AMARILLO "🔍 Parámetros de seguridad del Kernel (Sysctl Network):"
     local syn_cookies
@@ -1939,7 +2064,7 @@ auditoria_seguridad() {
         ((alertas_count++))
     fi
     echo ""
-    # C. Auditoría de Intentos SSH / Auth
+    # D. Auditoría de Intentos SSH / Auth
     ((total_checks++))
     pintar $AMARILLO "🔍 Accesos fallidos de seguridad recientes (SSH/Auth):"
     local ssh_logs=""
@@ -2503,8 +2628,7 @@ listar_usuarios() {
         echo "-----------------------------------------------------------------"
         pintar $NEGRITA$CIAN "SUDO   : $RESET $(sudo -l -U "$u")"
         pintar $VERDE"================================================================="
-        sleep 2
-                    
+
     done
     echo ""
     echo "================================================================="
