@@ -726,37 +726,68 @@ uso_disco_raiz() {
 }
 
 mostrar_dashboard_rapido() {
-    local ok="${VERDE_BRILLANTE}" warn="${AMARILLO}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
-    local carga ram disco temp temp_txt disco_txt
+    local ok_green="${VERDE_BRILLANTE}" warn_orange="${AMARILLO}" bad_red="${ROJO_BRILLANTE}" nd="${AZUL}"
+    local carga ram temp
 
     carga=$(carga_sistema)
     ram=$(memoria_ram)
-    disco=$(uso_disco_raiz)
-
-    if [[ "$disco" =~ ^[0-9]+$ ]]; then
-        if [ "$disco" -ge 90 ]; then
-            disco_txt="${bad}⚠ ${disco}%${RESET}"
-        elif [ "$disco" -ge 75 ]; then
-            disco_txt="${warn}⚠ ${disco}%${RESET}"
-        else
-            disco_txt="${ok}✔ ${disco}%${RESET}"
-        fi
-    else
-        disco_txt="${nd}N/D${RESET}"
-    fi
-
     temp=$(temperatura_maxima)
-    if [[ "$temp" =~ ^[0-9]+$ ]]; then
-        if [ "$temp" -ge 80 ]; then
-            temp_txt="${bad}⚠ ${temp}°C${RESET}"
+
+    # Colorizar carga: verde < 0.7, naranja 0.7-1.5, rojo > 1.5
+    local carga_color="$nd"
+    if [[ "$carga" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        local l=$(echo "$carga" | awk -F. '{print $1}')
+        if (( l < 1 )); then
+            carga_color="$ok_green"
+        elif (( l < 2 )); then
+            carga_color="$warn_orange"
         else
-            temp_txt="${ok}✔ ${temp}°C${RESET}"
+            carga_color="$bad_red"
         fi
-    else
-        temp_txt="${nd}N/D${RESET}"
     fi
 
-    echo -e " ${AMARILLO}➤ Carga:${RESET} ${carga_color}${carga}${RESET}  ${AMARILLO}RAM:${RESET} ${AZUL}${ram}${RESET}  ${AMARILLO}Disco /:${RESET} ${disco_txt}  ${AMARILLO}Temp:${RESET} ${temp_txt}"
+    # Colorizar RAM: verde si uso < 70%, naranja 70-90%, rojo > 90%
+    local ram_color="$nd"
+    if [[ "$ram" =~ ^[0-9]+%$ ]]; then
+        local r=$(echo "$ram" | sed 's/%//')
+        if (( r < 70 )); then
+            ram_color="$ok_green"
+        elif (( r < 90 )); then
+            ram_color="$warn_orange"
+        else
+            ram_color="$bad_red"
+        fi
+    fi
+
+    # Colorizar temperatura: verde < 70°C, naranja 70-80°C, rojo > 80°C
+    local temp_color="$nd"
+    if [[ "$temp" =~ ^[0-9]+$ ]]; then
+        if (( temp < 70 )); then
+            temp_color="$ok_green"
+        elif (( temp < 80 )); then
+            temp_color="$warn_orange"
+        else
+            temp_color="$bad_red"
+        fi
+    fi
+
+    # Mostrar solo valores coloreados, sin labels.
+    # Verde check si OK, rojo ⚠ si hay que advertir.
+    local ram_display=""
+    if [[ "$ram_color" == "$ok_green" ]]; then
+        ram_display="${ram}"
+    else
+        ram_display="${bad_red}⚠${ram}${RESET}"
+    fi
+
+    local temp_display=""
+    if [[ "$temp_color" == "$ok_green" ]]; then
+        temp_display="${temp}°C"
+    else
+        temp_display="${bad_red}⚠${temp}°C${RESET}"
+    fi
+
+    echo -e " ${AZUL}${HOST_STK}${RESET}  ${carga_color}${carga}${RESET}  ${ram_display}  ${temp_display}"
 }
 
 # --- BLOQUE DE SEGURIDAD (costoso; se refresca cada DASH_SEG_REFRESCO) ---
@@ -906,20 +937,17 @@ logo_texto() {
             return
             ;;
         medio)
-            echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+            echo -e " ${AMARILLO}HOST:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
             dashboard_cacheado
             return
             ;;
     esac
 
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+    # Sin líneas box drawing:mostrar solo lo esencial
+    echo -e " ${AMARILLO}HOST:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
     if [ "$IMMUTABLE" = true ]; then
-        echo -e " ${AMARILLO}➤ Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
+        echo -e " ${AMARILLO}Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
     fi
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    dashboard_cacheado
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
 mostrar_logo() {
