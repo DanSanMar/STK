@@ -908,7 +908,9 @@ dashboard_cacheado() {
         _cache_guardar "$LOGO_SEG_CACHE" "${LOGO_SEG_CACHE}.stamp" "$seguridad"
     fi
 
-    printf '%s\n%s\n' "$rapido" "$seguridad"
+    # El uptime se calcula en vivo: no depende de la caché de seguridad (180 s).
+    local uptime_txt="${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+    printf '%s\n%s  %b\n' "$rapido" "$seguridad" "$uptime_txt"
 }
 
 # Línea animada del logo: colores rotativos + hora en vivo.
@@ -928,6 +930,7 @@ logo_texto() {
     local modo="${1:-completo}"
 
     logo_barra
+    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
     # En pantallas bajas se recorta la cabecera para no ocultar el menú.
     case "$modo" in
@@ -936,13 +939,13 @@ logo_texto() {
             return
             ;;
         medio)
-            echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+            echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}"
             dashboard_cacheado
             return
             ;;
     esac
 
-    echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}  ${AMARILLO}Uptime:${RESET} ${AZUL}$(uptime_legible)${RESET}"
+    echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}"
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
     fi
