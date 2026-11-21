@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.2-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.4-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.2)
+# 🛠️ STK - System Tool Kit (v6.6.4)
 
 </div>
 
@@ -35,6 +35,7 @@
 * **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
 * **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
 * **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq`, limpieza de huérfanos de `pacman` corregida, nueva sección **Seguridad** en el menú principal y **JOBS4ME**, dashboard de análisis de servicios y tareas programadas con explorador FZF.
+* **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -83,6 +84,7 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 ### 📦 Gestión de Software
 * **Sincronización Multidistro:** Actualización centralizada para `apt`, `pacman`, `dnf`, `zypper`, además de gestores secundarios como `flatpak` y `snap`.
 * **Instalación Segura:** Instalación y purga completa de aplicaciones con validación estricta de entradas para prevenir inyecciones de comandos.
+* **Instalador por Categorías:** `install4me.sh` ofrece aplicaciones organizadas por escritorio, desarrollo, sistemas, seguridad y utilidades, con fuentes híbridas (repositorios nativos, Flatpak, GitHub y AUR) y soporte para sistemas inmutables. Se accede desde **Software → 2. Instalador por categorías**.
 
 ### ⚙️ Administración y Servicios
 * **Gestión de Usuarios:** Creación, edición y eliminación interactiva mediante `fzf` de usuarios estándar (UID >= 1000) con asignación dinámica de grupos administrativos (`sudo`/`wheel`).
@@ -155,7 +157,15 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.2 (Actual)
+### 📝 v6.6.4 (Actual)
+* **Nuevo:** Integración de `install4me.sh` (v2.5.0) en el menú **Software** como opción 2. Instala por categorías desde repositorios nativos, Flatpak, GitHub Releases y AUR, con soporte para sistemas inmutables (`rpm-ostree`).
+* **Adaptación:** `install4me` usa ahora la paleta de colores FZF de STK, `--border-label` en sus menús y el log central `/var/log/stk_mantenimiento.log` con etiqueta `[INSTALL4ME]`.
+* **Menú:** El submenú de Software queda como `1. Actualización`, `2. Instalador por categorías`, `3. Instalar / Desinstalar programa` (submenú con las funciones rápidas ya existentes) y `4. Volver`.
+
+### 📝 v6.6.3
+* **Versión:** Alineación del número de versión del script.
+
+### 📝 v6.6.2
 * **Corrección:** La comprobación de salida a Internet usaba un único destino (`1.1.1.1` por ICMP) y mostraba «sin salida» en redes donde ese host no responde. Se unifica en la función `comprobar_salida_internet()`, con los tres métodos de dash4me: TCP a `1.1.1.1:53`, ICMP a `8.8.8.8` y HTTP como último recurso.
 * **Mejora:** El dashboard bajo el logo muestra únicamente `✔` o `⚠ sin red`, sin detalles del método, mientras que **Información de red** sí indica el método y la latencia (p. ej. `✔ conectado (8.8.8.8, 9.05 ms)`).
 * **Corrección:** El informe JSON del Modo Auto se genera ahora con `jq` en lugar de concatenar cadenas, evitando errores con comillas, acentos y caracteres especiales.

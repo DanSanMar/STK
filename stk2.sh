@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.3"
+V="6.6.4"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -1102,6 +1102,20 @@ ejecutar_jobs4me() {
     read -p "Presione Enter para continuar..."
   fi
 }
+
+ejecutar_install4me() {
+  # Lanza el instalador por categorías (repos, Flatpak, GitHub, AUR)
+  if [ -f "$SCRIPT_DIR/install4me.sh" ]; then
+    bash "$SCRIPT_DIR/install4me.sh"
+  elif command -v install4me.sh &>/dev/null; then
+    install4me.sh
+  elif command -v install4me &>/dev/null; then
+    install4me
+  else
+    echo -e "${ROJO}❌ Error: No se encuentra install4me.sh en $SCRIPT_DIR${RESET}"
+    read -p "Presione Enter para continuar..."
+  fi
+}
 #función del menú principal
 menu() {
     # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
@@ -1112,7 +1126,7 @@ menu() {
 opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 1. 📊 | MONITORIZACIÓN  | Rendimiento, red y análisis de servicios
 2. 🛡️ | SEGURIDAD       | Procesos, auditoría y firewall UFW
-3. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
+3. 📦 | SOFTWARE        | Actualización e instalación guiada de paquetes
 4. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 5. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
 6. 📅 | TAREAS AUTO     | Programar tareas automáticas con CRON
@@ -1160,12 +1174,22 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             3) # --- SUBMENÚ SOFTWARE ---
                 while true; do
                     clear
-                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
+                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalador por categorías (INSTALL4ME)\n3. Instalar / Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) Actualizar_sistema ;;
-                        2) instalar_programa ;;
-                        3) desinstalar_programa ;;
+                        2) ejecutar_install4me ;;
+                        3)
+                            while true; do
+                                clear
+                                accion_inst=$(echo -e "1. Instalar programa\n2. Desinstalar programa\n3. ↩ Volver" | stk_fzf_menu "Seleccione" "INSTALAR / DESINSTALAR")
+                                if [[ $? -ne 0 || "$accion_inst" == *"Volver"* ]]; then break; fi
+                                case ${accion_inst%%.*} in
+                                    1) instalar_programa ;;
+                                    2) desinstalar_programa ;;
+                                esac
+                            done
+                            ;;
                     esac
                 done
                 ;;
