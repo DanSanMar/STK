@@ -9,7 +9,7 @@
 # Pensado para ejecutarse solo (bash hard4me.sh) o integrarse en STK.
 # ==============================================================================
 
-V="1.1"
+V="1.2"
 DESCRIPCION="Dashboard de análisis y monitorización del disco duro"
 AUTOR="DanSanMar"
 
@@ -920,9 +920,20 @@ explorar_discos() {
     done
     [ -z "$lista" ] && { alerta "No hay discos que explorar."; pausa; return 0; }
 
-    local preview_cmd header_cmd
+    # Con un solo disco FZF no aporta nada (una única línea que además ya se
+    # está previsualizando): se muestra el detalle directamente.
+    if [ ${#DISCOS[@]} -eq 1 ]; then
+        clear
+        stk_header
+        detalle_dispositivo "${DISCOS[0]}"
+        pausa
+        return 0
+    fi
+
+    local preview_cmd header_cmd header
     printf -v preview_cmd 'bash %q --detalle {1}' "$SELF_PATH"
     header_cmd=$(stk_header_cmd "$SELF_PATH")
+    header=$(stk_header)   # cabecera inicial: bg-transform-header la refresca después
 
     printf '%b' "$lista" | fzf --ansi \
         --height=~90% \
@@ -932,6 +943,7 @@ explorar_discos() {
         --border=rounded \
         --border-label=" ANÁLISIS DE DISCOS " \
         --prompt="➤ Disco: " \
+        --header="$header" \
         --preview="$preview_cmd" \
         --preview-window="right:62%:wrap" \
         --bind="every(5):bg-transform-header:$header_cmd" \
