@@ -1088,6 +1088,20 @@ ejecutar_proc4me() {
     read -p "Presione Enter para continuar..."
   fi
 }
+
+ejecutar_jobs4me() {
+  # Lanza el dashboard de análisis de servicios y tareas programadas
+  if [ -f "$SCRIPT_DIR/jobs4me.sh" ]; then
+    bash "$SCRIPT_DIR/jobs4me.sh"
+  elif command -v jobs4me.sh &>/dev/null; then
+    jobs4me.sh
+  elif command -v jobs4me &>/dev/null; then
+    jobs4me
+  else
+    echo -e "${ROJO}❌ Error: No se encuentra jobs4me.sh en $SCRIPT_DIR${RESET}"
+    read -p "Presione Enter para continuar..."
+  fi
+}
 #función del menú principal
 menu() {
     # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
@@ -1096,12 +1110,13 @@ menu() {
         clear
 
 opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
-1. 📊 | MONITORIZACIÓN  | Rendimiento, red, procesos y seguridad
-2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
-3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
-4. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
-5. 📅 | TAREAS AUTO     | Programar tareas automáticas con CRON
-6. ❌ | SALIR           | Control+C"            
+1. 📊 | MONITORIZACIÓN  | Rendimiento, red y análisis de servicios
+2. 🛡️ | SEGURIDAD       | Procesos, auditoría y firewall UFW
+3. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
+4. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
+5. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
+6. 📅 | TAREAS AUTO     | Programar tareas automáticas con CRON
+7. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
         seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione" "SYSTEM TOOL KIT")
@@ -1119,19 +1134,30 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Procesos y Amenazas (PROC4ME)\n4. Auditoría de Seguridad\n5. Gestor de Firewall UFW\n6. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios (JOBS4ME)\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
                         2) mostrar_info_red ;;
-                        3) ejecutar_proc4me ;;
-                        4) auditoria_seguridad ;;
-                        5) ejecutar_stop4me ;;
+                        3) ejecutar_jobs4me ;;
                     esac
                 done
                 ;;
 
-            2) # --- SUBMENÚ SOFTWARE ---
+            2) # --- SUBMENÚ SEGURIDAD ---
+                while true; do
+                    clear
+                    accion=$(echo -e "1. Analisis de Procesos\n2. Auditoría de Seguridad\n3. Gestor de Firewall UFW\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SEGURIDAD")
+                    if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
+                    case ${accion%%.*} in
+                        1) ejecutar_proc4me ;;
+                        2) auditoria_seguridad ;;
+                        3) ejecutar_stop4me ;;
+                    esac
+                done
+                ;;
+
+            3) # --- SUBMENÚ SOFTWARE ---
                 while true; do
                     clear
                     accion=$(echo -e "1. Actualización del Sistema\n2. Instalar programa\n3. Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
@@ -1144,7 +1170,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                 done
                 ;;
 
-            3) # --- SUBMENÚ ADMINISTRACIÓN ---
+            4) # --- SUBMENÚ ADMINISTRACIÓN ---
                 while true; do
                     clear
                     accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "ADMINISTRACIÓN")
@@ -1158,7 +1184,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                 done
                 ;;
 
-            4) # --- SUBMENÚ MANTENIMIENTO ---
+            5) # --- SUBMENÚ MANTENIMIENTO ---
                 while true; do
                     clear
                     accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
@@ -1171,7 +1197,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                 done
                 ;;
 
-            5) 
+            6) 
                 # Gestor de tareas automatizadas
                 if [ -f "$SCRIPT_DIR/stk_cron.sh" ]; then
                     bash "$SCRIPT_DIR/stk_cron.sh"
@@ -1182,7 +1208,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                 fi
                 ;;
 
-            6) salir ;;
+            7) salir ;;
         esac
     done
 }

@@ -34,7 +34,7 @@
 * **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
 * **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
 * **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
-* **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq` y limpieza de huérfanos de `pacman` corregida.
+* **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq`, limpieza de huérfanos de `pacman` corregida, nueva sección **Seguridad** en el menú principal y **JOBS4ME**, dashboard de análisis de servicios y tareas programadas con explorador FZF.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -70,11 +70,11 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 
 ## 📋 Módulos del Sistema
 
-### 📊 Monitorización y Auditoría
+### 📊 Monitorización y Seguridad
 * **Hardware y Carga:** Monitor en tiempo real con refresco de 5s para uso de CPU, memoria RAM y almacenamiento con **barras de estado en color**.
 * **Diagnóstico de Red:** Lectura de IP local, interfaces activas e IP pública mediante API externa con consulta DNS de contingencia.
 * **Seguridad y Firewall:** Control del cortafuegos (`ufw`), verificación de permisos SUID, cuentas con UID 0, firmas y análisis de accesos no autorizados.
-* **Investigador de Procesos (PROC4ME):** Análisis de procesos, puertos, persistencia y amenazas silenciosas, con informes exportables a texto y Markdown desde el menú de Monitorización.
+* **Investigador de Procesos (PROC4ME):** Análisis de procesos, puertos, persistencia y amenazas silenciosas, con informes exportables a texto y Markdown desde el menú de **Seguridad**.
 
 <div align="center">
 <img width="500" height="300" alt="Monitorización STK" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
@@ -161,6 +161,8 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Corrección:** El informe JSON del Modo Auto se genera ahora con `jq` en lugar de concatenar cadenas, evitando errores con comillas, acentos y caracteres especiales.
 * **Corrección:** La eliminación de paquetes huérfanos en `pacman` usa un array con `mapfile` para manejar varios resultados sin problemas de expansión.
 * **Mejora:** El umbral de binarios SUID en la auditoría es configurable mediante `AUTO_LIMITE_SUID` (por defecto 60).
+* **Menú:** Nueva sección **2. Seguridad** en el menú principal. PROC4ME, auditoría de seguridad y el gestor de UFW se mudan desde Monitorización, que ahora contiene rendimiento, red y análisis de servicios.
+* **Nuevo:** `jobs4me.sh`, dashboard de análisis (sin menú, sin exigir root) con top de consumo, timers, cron, veredictos interpretados y explorador FZF con detalle en árbol de cada servicio. Integrado en Monitorización como **3. Análisis de Servicios**.
 
 ### 📝 v6.6.1
 * **Corrección:** El mini-dashboard vuelve a mostrarse en la cabecera de todos los menús (se había perdido al quitar las líneas de separación).
