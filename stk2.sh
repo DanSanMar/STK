@@ -1163,6 +1163,7 @@ opciones="0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditor
 AUTO_MIN_ESPACIO_MB=1024          # Espacio libre mínimo en / para actualizar
 AUTO_TIMEOUT_ACTUALIZACION=1800   # 30 min para el bloque de actualización
 AUTO_TIMEOUT_LIMPIEZA=600         # 10 min por comando de limpieza
+AUTO_LIMITE_SUID=60               # Umbral de binarios SUID considerados anormales en auditoria
 AUTO_ESTADO_DIR="/var/lib/stk"
 AUTO_JSON_FILE="$AUTO_ESTADO_DIR/last_auto.json"
 AUTO_JSON_HIST="$AUTO_ESTADO_DIR/auto_history.jsonl"
@@ -1579,24 +1580,44 @@ auto_escribir_json() {
     local resultado="$1" duracion="$2"
     auto_preparar_estado
 
-    {
-        printf '{\n'
-        printf '  "fecha": "%s",\n' "$(auto_json_escape "$FECHA_INICIO")"
-        printf '  "duracion_s": %d,\n' "$duracion"
-        printf '  "resultado": "%s",\n' "$resultado"
-        printf '  "pasos": %s,\n' "$(auto_json_arr "${PASOS_EJECUTADOS[@]}")"
-        printf '  "preflight": {"red": "%s", "espacio_libre_mb": %d, "espacio_ok": %s, "bateria": "%s", "avisos": %s},\n' \
-            "$(auto_json_escape "$PRE_RED")" "$PRE_ESPACIO_MB" "$PRE_ESPACIO_OK" \
-            "$(auto_json_escape "$PRE_BATERIA")" "$(auto_json_arr "${PRE_AVISOS[@]}")"
-        printf '  "snapshot": "%s",\n' "$(auto_json_escape "$SNAPSHOT_METODO")"
-        printf '  "espacio_liberado_mb": %d,\n' "${ESPACIO_LIBERADO_MB:-0}"
-        printf '  "score_seguridad": %d,\n' "${SCORE_SEGURIDAD:-0}"
-        printf '  "alertas": %s,\n' "$(auto_json_arr "${SEC_ALERTAS[@]}")"
-        printf '  "servicios_fallidos": %s,\n' "$(auto_json_arr "${SVC_FAILED_ARR[@]}")"
-        printf '  "reboot_required": %s,\n' "$REBOOT_REQUIRED"
-        printf '  "kernel_pendiente": %s\n' "$KERNEL_PENDIENTE"
-        printf '}\n'
-    } > "$AUTO_JSON_FILE" 2>/dev/null && chmod 640 "$AUTO_JSON_FILE" 2>/dev/null
+    # Usamos jq para construir el JSON de forma segura (evita inyección de caracteres especiales)
+    jq -n \
+        --arg fecha "$FECHA_INICIO" \
+        --argjson duracion "$duracion" \
+        --arg resultado "$resultado" \
+        --argjson pasos "$(auto_json_arr "${PASOS_EJECUTADOS[@]}")" \
+        --arg pre_red "$PRE_RED" \
+        --argjson pre_espacio_mb "$PRE_ESPACIO_MB" \
+        --argjson pre_espacio_ok "$PRE_ESPACIO_OK" \
+        --arg pre_bateria "$PRE_BATERIA" \
+        --argjson pre_avisos "$(auto_json_arr "${PRE_AVISOS[@]}")" \
+        --arg snapshot "$SNAPSHOT_METODO" \
+        --argjson esp_liberado "${ESPACIO_LIBERADO_MB:-0}" \
+        --argjson score "${SCORE_SEGURIDAD:-0}" \
+        --argjson alertas "$(auto_json_arr "${SEC_ALERTAS[@]}")" \
+        --argjson svcs_fallidos "$(auto_json_arr "${SVC_FAILED_ARR[@]}")" \
+        --argjson reboot "$REBOOT_REQUIRED" \
+        --argjson kernel "$KERNEL_PENDIENTE" \
+        '{
+            "fecha": $fecha,
+            "duracion_s": $duracion,
+            "resultado": $resultado,
+            "pasos": $pasos,
+            "preflight": {
+                "red": $pre_red,
+                "espacio_libre_mb": $pre_espacio_mb,
+                "espacio_ok": $pre_espacio_ok,
+                "bateria": $pre_bateria,
+                "avisos": $pre_avisos
+            },
+            "snapshot": $snapshot,
+            "espacio_liberado_mb": $esp_liberado,
+            "score_seguridad": $score,
+            "alertas": $alertas,
+            "servicios_fallidos": $svcs_fallidos,
+            "reboot_required": $reboot,
+            "kernel_pendiente": $kernel
+        }' > "$AUTO_JSON_FILE" 2>/dev/null && chmod 640 "$AUTO_JSON_FILE" 2>/dev/null
 
     if [ -f "$AUTO_JSON_FILE" ]; then
         tr '\n' ' ' < "$AUTO_JSON_FILE" >> "$AUTO_JSON_HIST" 2>/dev/null
@@ -2136,7 +2157,7 @@ auditoria_seguridad() {
     suid_count=$(echo "$suid_files" | grep -c -v '^$')
     
     echo -e "  • Total de ejecutables SUID detectados: ${BLANCO}${suid_count}${RESET}"
-    if [ "$suid_count" -gt 60 ]; then
+    if [ "$suid_count" -gt "$AUTO_LIMITE_SUID" ]; then
         pintar $AMARILLO "  ⚠️ Umbral alto de binarios SUID detectado."
         sugerencias+=("🛡️ SUID Elevado: Hay $suid_count binarios SUID. Audítalos con: find / -perm -4000")
         ((alertas_count++))
@@ -2729,10 +2750,11 @@ super_limpieza() {
             pacman)
                 # Limpia paquetes no instalados y antiguas versiones de la caché
                 "${TMO[@]}" pacman -Sc --noconfirm >/dev/null 2>&1
-                # Elimina paquetes huérfanos si existen
-                local huerfanos=$(pacman -Qtdq 2>/dev/null)
-                if [ -n "$huerfanos" ]; then
-                    "${TMO[@]}" pacman -Rns $huerfanos --noconfirm >/dev/null 2>&1
+                # Elimina paquetes huérfanos si existen (usando array para seguridad)
+                local huerfanos=()
+                mapfile -t huerfanos < <(pacman -Qtdq 2>/dev/null)
+                if [ ${#huerfanos[@]} -gt 0 ]; then
+                    "${TMO[@]}" pacman -Rns "${huerfanos[@]}" --noconfirm >/dev/null 2>&1
                 fi
                 ;;
             zypper)
