@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.1"
+V="6.6.2"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -789,6 +789,38 @@ mostrar_dashboard_rapido() {
     echo -e " ${AMARILLO}Carga:${RESET} $(_metrica_color "$carga" '%' 60 85)   ${AMARILLO}RAM:${RESET} $(_metrica_color "$ram_pct" '%' 65 85)   ${AMARILLO}Disco /:${RESET} $(_metrica_color "$disco" '%' 60 85)   ${AMARILLO}Temp:${RESET} $(_metrica_color "$temp" '°C' 75 85)"
 }
 
+# --- COMPROBACIÓN DE SALIDA A INTERNET (métodos estilo dash4me) ---
+# Devuelve 0 si hay salida y deja el método en SALIDA_RED y su latencia en SALIDA_RED_LATENCIA.
+comprobar_salida_internet() {
+    SALIDA_RED=""
+    SALIDA_RED_LATENCIA=""
+
+    # 1. TCP al puerto DNS de Cloudflare (útil si ICMP está filtrado)
+    if command -v nc &>/dev/null && nc -zw1 1.1.1.1 53 &>/dev/null; then
+        SALIDA_RED="1.1.1.1:53"
+        return 0
+    fi
+
+    # 2. ICMP a Google (más fiable que 1.1.1.1 en muchas redes)
+    if command -v ping &>/dev/null; then
+        local ping_out
+        ping_out=$(LC_ALL=C ping -c 1 -w 2 -n 8.8.8.8 2>/dev/null)
+        if [ $? -eq 0 ]; then
+            SALIDA_RED="8.8.8.8"
+            SALIDA_RED_LATENCIA=$(printf '%s\n' "$ping_out" | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)
+            return 0
+        fi
+    fi
+
+    # 3. HTTP como último recurso
+    if command -v curl &>/dev/null && curl -sI --connect-timeout 2 --max-time 5 http://www.google.com &>/dev/null; then
+        SALIDA_RED="HTTP"
+        return 0
+    fi
+
+    return 1
+}
+
 # --- BLOQUE DE SEGURIDAD (costoso; se refresca cada DASH_SEG_REFRESCO) ---
 mostrar_dashboard_seguridad() {
     local ok="${VERDE_BRILLANTE}" bad="${ROJO_BRILLANTE}" nd="${AZUL}"
@@ -834,7 +866,7 @@ mostrar_dashboard_seguridad() {
         ssh="${bad}⚠${RESET}"
     fi
 
-    # Conexión: ruta por defecto + salida a Internet (timeout corto)
+    # Conexión: ruta por defecto + salida a Internet (misma comprobación que el menú de red)
     local hay_ruta=false
     if command -v ip &>/dev/null; then
         ip route 2>/dev/null | grep -q '^default' && hay_ruta=true
@@ -844,14 +876,10 @@ mostrar_dashboard_seguridad() {
         hay_ruta=true
     fi
 
-    if [ "$hay_ruta" = false ]; then
-        red="${bad}⚠ sin red${RESET}"
-    elif ! command -v ping &>/dev/null; then
-        red="${ok}✔${RESET}"
-    elif ping -c 1 -W 1 -n 1.1.1.1 >/dev/null 2>&1; then
+    if [ "$hay_ruta" = true ] && comprobar_salida_internet; then
         red="${ok}✔${RESET}"
     else
-        red="${bad}⚠ sin salida${RESET}"
+        red="${bad}⚠ sin red${RESET}"
     fi
 
     echo -e " ${AMARILLO}Servicios:${RESET} ${fallos}  ${AMARILLO}Firewall:${RESET} ${fw}  ${AMARILLO}SSH:${RESET} ${ssh}  ${AMARILLO}Red:${RESET} ${red}"
@@ -3034,7 +3062,6 @@ mostrar_info_red() {
     local ok="${VERDE_BRILLANTE}"
     local warn="${AMARILLO}"
     local bad="${ROJO_BRILLANTE}"
-    local nd="${AZUL}"
     local sep="${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     local ruta iface_activa gw ip_local ip_local_txt ip_publica ip_publica_txt
     local dns_servers internet dns_ok=true
@@ -3096,19 +3123,12 @@ mostrar_info_red() {
     dns_servers=$(awk '$1 == "nameserver" { printf "%s%s", sep, $2; sep = ", " } END { print "" }' /etc/resolv.conf 2>/dev/null)
     [ -z "$dns_servers" ] && dns_servers="—"
 
-    # --- Estado de Internet y latencia ---
-    if command -v ping &>/dev/null; then
-        local ping_out latencia
-        ping_out=$(LC_ALL=C ping -c 1 -W 1 -n 1.1.1.1 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            latencia=$(printf '%s\n' "$ping_out" | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)
-            internet="${ok}✔ conectado${RESET}"
-            [ -n "$latencia" ] && internet+=" ${AZUL}(${latencia} ms)${RESET}"
-        else
-            internet="${warn}⚠ sin salida${RESET}"
-        fi
+    # --- Estado de Internet y latencia (misma comprobación que el dashboard) ---
+    if comprobar_salida_internet; then
+        internet="${ok}✔ conectado${RESET}"
+        [ -n "$SALIDA_RED" ] && internet+=" ${AZUL}(${SALIDA_RED}${SALIDA_RED_LATENCIA:+, ${SALIDA_RED_LATENCIA} ms})${RESET}"
     else
-        internet="${nd}N/D${RESET}"
+        internet="${warn}⚠ sin salida${RESET}"
     fi
 
     campo_red "Interfaz activa:" "${iface_activa:-—}${iface_activa:+ ${AZUL}[$(tipo_interfaz "$iface_activa")]${RESET}}"

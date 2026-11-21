@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.1-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.2-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.1)
+# 🛠️ STK - System Tool Kit (v6.6.2)
 
 </div>
 
@@ -34,6 +34,7 @@
 * **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
 * **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
 * **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
+* **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq` y limpieza de huérfanos de `pacman` corregida.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -154,7 +155,14 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.1 (Actual)
+### 📝 v6.6.2 (Actual)
+* **Corrección:** La comprobación de salida a Internet usaba un único destino (`1.1.1.1` por ICMP) y mostraba «sin salida» en redes donde ese host no responde. Se unifica en la función `comprobar_salida_internet()`, con los tres métodos de dash4me: TCP a `1.1.1.1:53`, ICMP a `8.8.8.8` y HTTP como último recurso.
+* **Mejora:** El dashboard bajo el logo muestra únicamente `✔` o `⚠ sin red`, sin detalles del método, mientras que **Información de red** sí indica el método y la latencia (p. ej. `✔ conectado (8.8.8.8, 9.05 ms)`).
+* **Corrección:** El informe JSON del Modo Auto se genera ahora con `jq` en lugar de concatenar cadenas, evitando errores con comillas, acentos y caracteres especiales.
+* **Corrección:** La eliminación de paquetes huérfanos en `pacman` usa un array con `mapfile` para manejar varios resultados sin problemas de expansión.
+* **Mejora:** El umbral de binarios SUID en la auditoría es configurable mediante `AUTO_LIMITE_SUID` (por defecto 60).
+
+### 📝 v6.6.1
 * **Corrección:** El mini-dashboard vuelve a mostrarse en la cabecera de todos los menús (se había perdido al quitar las líneas de separación).
 * **Mejora:** La cabecera lleva una línea separadora bajo el logo y el `uptime` se muestra al final de la línea de seguridad, junto a Red.
 * **Mejora:** Dashboard tipo semáforo, al estilo de dash4me: carga CPU en porcentaje, RAM, disco `/` y temperatura con verde (correcto), naranja (sobre la media) y rojo (peligroso), con ✔ verde o ⚠ de aviso. Se eliminan los textos “ok”, “activo” y “conectado”.
