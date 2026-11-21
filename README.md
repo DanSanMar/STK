@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.5-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.6-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.5)
+# 🛠️ STK - System Tool Kit (v6.6.6)
 
 </div>
 
@@ -37,6 +37,7 @@
 * **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq`, limpieza de huérfanos de `pacman` corregida, nueva sección **Seguridad** en el menú principal y **JOBS4ME**, dashboard de análisis de servicios y tareas programadas con explorador FZF.
 * **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK, y biblioteca `stk_header.sh` de cabeceras responsive.
 * **Mejoras de la v.6.6.5:** Modo Auto con limpieza segura (sin desinstalación de paquetes ni papeleras), informe sin JSON —resumen en pantalla y bitácora con avisos e incidencias—, lógica compartida con el programador Cron mediante `stk_auto_lib.sh` y lock exclusivo común, y notificaciones de escritorio revisadas.
+* **Mejoras de la v.6.6.6:** `hard4me.sh`, dashboard de monitorización del disco con salud SMART/NVMe, veredictos interpretados, capacidad e inodos, rendimiento, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap) y temperatura. Solo lectura, sin exigir root, con instalación de dependencias bajo pregunta.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -85,6 +86,8 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Diagnóstico de Red:** Lectura de IP local, interfaces activas e IP pública mediante API externa con consulta DNS de contingencia.
 * **Seguridad y Firewall:** Control del cortafuegos (`ufw`), verificación de permisos SUID, cuentas con UID 0, firmas y análisis de accesos no autorizados.
 * **Investigador de Procesos (PROC4ME):** Análisis de procesos, puertos, persistencia y amenazas silenciosas, con informes exportables a texto y Markdown desde el menú de **Seguridad**.
+* **Analizador de Servicios (JOBS4ME):** Dashboard de servicios, consumo y tareas programadas con veredictos interpretados y explorador FZF.
+* **Monitor de Disco (HARD4ME):** Salud SMART/NVMe con veredicto explicado, capacidad e inodos, rendimiento por dispositivo, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap), temperatura y top de espacio bajo demanda. Solo lectura; si faltan `smartctl`/`nvme` pregunta antes de instalar y puede degradar a `N/D` sin root. Se accede desde **Monitorización → 4. Análisis de Disco** o con `-D, --disk`.
 
 <div align="center">
 <img width="500" height="300" alt="Monitorización STK" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
@@ -167,7 +170,14 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.5 (Actual)
+### 📝 v6.6.6 (Actual)
+* **Nuevo:** `hard4me.sh` (v1.0), dashboard de análisis y monitorización del disco con el mismo estilo que JOBS4ME: logo animado, cabecera viva de FZF, redibujo sin parpadeo y modo sin TTY.
+* **Discos:** Inventario `lsblk`, tipo SSD/HDD/NVMe y bus, salud SMART (`smartctl`) y NVMe (`nvme smart-log`) con veredictos explicados (sectores reasignados/pendientes, temperatura, vida restante, errores, autotest), capacidad e inodos, rendimiento desde `/proc/diskstats`, capas LVM/mdadm/Btrfs/ZFS/LUKS/swap y temperatura.
+* **Seguridad:** Solo lectura: no lanza auto-tests, scrubs ni reparaciones. No exige root (degrada a `N/D` con nota). Si faltan `smartctl`/`nvme-cli`, pregunta `s/N` antes de instalar con el gestor nativo; sin TTY nunca instala.
+* **Interacción:** Teclas `[f]` explorar con preview en árbol, `[d]` top de espacio por directorios y archivos grandes con `timeout`, `[r]` refrescar, `[i]` informe en `/var/log/hard4me/` y `[q]` salir.
+* **Integración:** Nueva opción **Monitorización → 4. Análisis de Disco (HARD4ME)**, flag `-D, --disk` y `ejecutar_hard4me()` en `stk2.sh`.
+
+### 📝 v6.6.5
 * **Seguridad:** La limpieza del Modo Auto pasa a ser segura y transparente: solo cachés, logs (7 días) y miniaturas. Fuera del auto se eliminaron `install -f -y` y `autoremove --purge -y`; la papelera y el `autoremove` viven en la limpieza completa con confirmación.
 * **Informe:** Se eliminan `last_auto.json` y `auto_history.jsonl` y la dependencia de `jq` en el informe. El resumen incorpora preflight, incidencias de actualización, kernel pendiente y `needrestart`; todos los avisos se registran ahora en la bitácora.
 * **Unificación:** Nueva `stk_auto_lib.sh` con una sola implementación de lock, preflight, snapshot, actualización, limpieza, auditoría y servicios para `stk2.sh` y el wrapper del cron, con umbrales y lock compartidos.

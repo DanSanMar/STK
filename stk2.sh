@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.5"
+V="6.6.6"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -1103,6 +1103,20 @@ ejecutar_jobs4me() {
   fi
 }
 
+ejecutar_hard4me() {
+  # Lanza el dashboard de análisis y monitorización del disco duro
+  if [ -f "$SCRIPT_DIR/hard4me.sh" ]; then
+    bash "$SCRIPT_DIR/hard4me.sh"
+  elif command -v hard4me.sh &>/dev/null; then
+    hard4me.sh
+  elif command -v hard4me &>/dev/null; then
+    hard4me
+  else
+    echo -e "${ROJO}❌ Error: No se encuentra hard4me.sh en $SCRIPT_DIR${RESET}"
+    read -p "Presione Enter para continuar..."
+  fi
+}
+
 ejecutar_install4me() {
   # Lanza el instalador por categorías (repos, Flatpak, GitHub, AUR)
   if [ -f "$SCRIPT_DIR/install4me.sh" ]; then
@@ -1124,12 +1138,12 @@ menu() {
         clear
 
 opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
-1. 📊 | MONITORIZACIÓN  | Rendimiento, red y análisis de servicios
-2. 🛡️ | SEGURIDAD       | Procesos, auditoría y firewall UFW
-3. 📦 | SOFTWARE        | Actualización e instalación guiada de paquetes
+1. 📊 | MONITORIZACIÓN  | Rendimiento, red, disco y servicios
+2. 🛡️ | SEGURIDAD       | Auditoria de red, procesos y firewall
+3. 📦 | SOFTWARE        | Actualización e instalación
 4. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 5. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
-6. 📅 | TAREAS AUTO     | Programar tareas automáticas con CRON
+6. 📅 | TAREAS AUTO     | Programar tareas automáticas
 7. ❌ | SALIR           | Control+C"            
 
         # Capturamos la selección
@@ -1148,12 +1162,13 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios\n4. Análisis de Disco (HARD4ME)\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
                         2) mostrar_info_red ;;
                         3) ejecutar_jobs4me ;;
+                        4) ejecutar_hard4me ;;
                     esac
                 done
                 ;;
@@ -3274,6 +3289,7 @@ mostrar_ayuda() {
     echo -e "  ${VERDE}-l, --logs${RESET}             Muestra las últimas entradas de la bitácora STK."
     echo -e "  ${VERDE}-b, --backup${RESET}           Accede directamente al menú de copias de seguridad."
     echo -e "  ${VERDE}-A, --auto${RESET}             Ejecuta el modo automático de mantenimiento integral."
+    echo -e "  ${VERDE}-D, --disk${RESET}             Abre el análisis y monitorización del disco (HARD4ME)."
     echo -e "  ${VERDE}-v, --version${RESET}          Muestra la versión del script y sale."
     echo -e "  ${VERDE}-h, --help, ayuda${RESET}      Muestra este mensaje de ayuda."
     echo ""
@@ -3328,6 +3344,10 @@ case "$1" in
 
     -A|--auto|modo_automativo)
         modo_auto
+        ;;
+
+    -D|--disk|hard4me)
+        ejecutar_hard4me
         ;;
 
     -v|--version)
