@@ -1095,7 +1095,7 @@ menu() {
     while true; do
         clear
 
-opciones="0. 🤖 | MODO AUTO       | Auto-update-limpieza + Servicios y Auditoria.
+opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 1. 📊 | MONITORIZACIÓN  | Rendimiento, red, procesos y seguridad
 2. 📦 | SOFTWARE        | Gestión de paquetes y actualizaciones
 3. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
