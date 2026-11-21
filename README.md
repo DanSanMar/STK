@@ -35,7 +35,7 @@
 * **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
 * **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
 * **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq`, limpieza de huérfanos de `pacman` corregida, nueva sección **Seguridad** en el menú principal y **JOBS4ME**, dashboard de análisis de servicios y tareas programadas con explorador FZF.
-* **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK.
+* **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK, y biblioteca `stk_header.sh` de cabeceras responsive.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -52,6 +52,14 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 ### 3. Optimización de Rendimiento
 * **Mínimo Overhead:** Basado en herramientas nativas de administración del sistema (`awk`, `sed`, `grep`, `du`, `jq`).
 * **Refresco Visual Eficiente:** Uso de `tput` y secuencias de escape ANSI en el monitor de rendimiento (intervalos de 5 segundos) para actualizar el tablero en pantalla sin parpadeos ni consumo innecesario de procesador.
+
+### 4. Cabeceras Responsive Compartidas
+`stk_header.sh` centraliza la estética de los módulos (colores, menús FZF y salida) para que cualquier script nuevo herede el mismo aspecto con unas pocas líneas:
+* **API única:** `stk_init MODULO VERSION SUBTITULO [EXTRA]`, `stk_header`, `stk_fzf_menu`, `stk_salir` y `stk_header_cmd` (para cabeceras vivas en FZF).
+* **Barra llena adaptativa:** el título se centra con relleno de `━` según el ancho real; no se usa centrado con espacios, que descuadra con emoji.
+* **Medición fiable:** `stty size` → `tput cols` → `$COLUMNS` → 80, y `wc -L` para contar columnas visibles (caracteres anchos incluidos).
+* **Tres modos:** completo (≥90 columnas y ≥20 filas), normal (≥60) y compacto (pantallas estrechas o bajas), con truncado seguro.
+* **Estilo PROC4ME:** módulo, subtítulo, `By: DanSanMar`, versión y hora con colores rotativos por segmentos; el autor siempre en la barra superior.
 ---
 
 ## 🛡️ Medidas de Seguridad y Fiabilidad
@@ -161,6 +169,8 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Nuevo:** Integración de `install4me.sh` (v2.5.0) en el menú **Software** como opción 2. Instala por categorías desde repositorios nativos, Flatpak, GitHub Releases y AUR, con soporte para sistemas inmutables (`rpm-ostree`).
 * **Adaptación:** `install4me` usa ahora la paleta de colores FZF de STK, `--border-label` en sus menús y el log central `/var/log/stk_mantenimiento.log` con etiqueta `[INSTALL4ME]`.
 * **Menú:** El submenú de Software queda como `1. Actualización`, `2. Instalador por categorías`, `3. Instalar / Desinstalar programa` (submenú con las funciones rápidas ya existentes) y `4. Volver`.
+* **Nuevo:** Biblioteca `stk_header.sh` para cabeceras responsive compartidas: barra llena adaptativa, medición con `wc -L`, tres modos según ancho/alto y paleta/Menús FZF centralizados. `install4me` es el primer módulo migrado.
+* **Estilo:** El logo superior usa colores rotativos por segmentos y lleva `By: DanSanMar` en la barra, en lugar de repetirlo en las líneas inferiores.
 
 ### 📝 v6.6.3
 * **Versión:** Alineación del número de versión del script.

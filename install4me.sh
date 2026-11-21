@@ -5,25 +5,17 @@ V="2.5.0"
 DESCRIPCION="Herramienta de instalación de programas por categorías y fuentes híbridas"
 AUTOR="DanSanMar"
 
-# --- CONFIGURACIÓN DE COLORES EXTENDIDA ---
-RESET='\e[0m'
-NEGRITA='\e[1m'
-VERDE_BRILLANTE='\e[92m'
-VERDE='\e[32m'
-AMARILLO_BRILLANTE='\e[93m'
-AMARILLO='\e[33m'
-AZUL_BRILLANTE='\e[94m'
-AZUL_CLARO='\e[96m'
-AZUL_OSCURO='\e[34m'
-AZUL='\e[34m'
-CIAN_BRILLANTE='\e[96m'
-CIAN='\e[36m'
-MAGENTA='\e[35m'
-ROJO_BRILLANTE='\e[91m'
-ROJO='\e[31m'
-BLANCO_NEGRITA='\e[1;97m'
-BLANCO='\e[97m'
-GRIS_CLARO='\e[37m'
+# --- BIBLIOTECA DE CABECERAS STK (paleta, menús FZF y salida) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+source "$SCRIPT_DIR/stk_header.sh"
+
+# Uso interno: FZF puede pedir la cabecera en caliente con bg-transform-header
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${1:-}" = "--stk-header" ]; then
+    stk_init "INSTALL4ME" "$V" "SOFTWARE INSTALLER"
+    stk_header
+    exit 0
+fi
 
 # --- CONFIGURACIÓN DE LOGS ---
 # Log centralizado del proyecto (estilo STK / PROC4ME / STOP4ME / JOBS4ME)
@@ -33,11 +25,6 @@ LOG_WARN="WARN"
 LOG_ERR="ERROR"
 
 DATE=$(date +"%d/%m/%Y")
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SELF_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename "${BASH_SOURCE[0]}")"
-
-# Paleta común de los menús FZF de STK
-FZF_COLORES="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,marker:#92ff92"
 
 registrar_log() {
     local NIVEL="${1:-INFO}"
@@ -51,20 +38,6 @@ pintar() {
     local COLOR="$1" 
     local MENSAJE="$2" 
     echo -e "${COLOR}${MENSAJE}${RESET}"
-}
-
-# Menú FZF con la estética de STK (mantiene el logo centrado del script)
-install4me_fzf_menu() {
-    local prompt_text="$1"
-    local titulo="$2"
-    local altura="${3:-18}"
-    fzf --ansi \
-        --height="$altura" \
-        --reverse \
-        --border=rounded \
-        --border-label=" $titulo " \
-        --prompt="➤ $prompt_text: " \
-        --color="$FZF_COLORES"
 }
 
 # --- COMPROBACIÓN DE SUDO ---
@@ -129,86 +102,15 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
     [ "$Package" = "unknown" ] && Package="dnf"
 fi
 
-obtener_color_unico() {
-    local indice=$1
-    shift
-    local colores_usados=("$@")
-    local paleta=(
-        "$AZUL_BRILLANTE" "$VERDE_BRILLANTE" "$AMARILLO_BRILLANTE" 
-        "$CIAN_BRILLANTE" "$ROJO_BRILLANTE" "$AZUL_CLARO" 
-        "$VERDE" "$AMARILLO" "$CIAN" "$ROJO"
-    )
-
-    local color_propuesto="${paleta[$((indice % ${#paleta[@]}))]}"
-
-    # Si el color ya se usó en esta iteración, tomamos el siguiente en la paleta
-    for usado in "${colores_usados[@]}"; do
-        if [[ "$color_propuesto" == "$usado" ]]; then
-            color_propuesto="${paleta[$(((indice + 1) % ${#paleta[@]}))]}"
-            break
-        fi
-    done
-
-    echo "$color_propuesto"
-}
-
-# Elimina colores ANSI para medir la longitud real visible
-medir_texto() {
-    local texto="$1"
-    echo -e "$texto" | sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g; s/\e\[[0-9;]*[a-zA-Z]//g' | wc -m
-}
-
-# Imprime con echo -e añadiendo el margen exacto a la izquierda
-imprimir_centrado() {
-    local texto="$1"
-    local ancho_terminal
-    ancho_terminal=$(tput cols 2>/dev/null || echo 80)
-    
-    local largo_real
-    largo_real=$(medir_texto "$texto")
-    
-    local margen=$(( (ancho_terminal - largo_real) / 2 ))
-    [ $margen -lt 0 ] && margen=0
-    
-    # Genera los espacios del margen de forma limpia
-    local espacios=""
-    if [ $margen -gt 0 ]; then
-        espacios=$(printf '%*s' "$margen" "")
-    fi
-    
-    echo -e "${espacios}${texto}"
-}
+# Configuración de la cabecera responsive (se conserva la línea OS/Pkg/User)
+stk_init "INSTALL4ME" "$V" "SOFTWARE INSTALLER"
 
 mostrar_logo() {
-    local HORA_ACTUAL SEGUNDOS
-    HORA_ACTUAL=$(date +"%H:%M:%S")
-    SEGUNDOS=$(date +"%S")
-
-    # Índices base desfasados
-    local idx_install=$(( 10#$SEGUNDOS % 10 ))
-    local idx_num4=$(( (10#$SEGUNDOS + 3) % 10 ))
-    local idx_me=$(( (10#$SEGUNDOS + 6) % 10 ))
-    local idx_ver=$(( (10#$SEGUNDOS + 8) % 10 ))
-
-    # Asignación de colores
-    local C_INSTALL C_4 C_ME C_VER
-    C_INSTALL=$(obtener_color_unico "$idx_install")
-    C_4=$(obtener_color_unico "$idx_num4" "$C_INSTALL")
-    C_ME=$(obtener_color_unico "$idx_me" "$C_INSTALL" "$C_4")
-    C_VER=$(obtener_color_unico "$idx_ver" "$C_INSTALL" "$C_4" "$C_ME")
-
-    # Líneas construidas
     local pkg_mostrar="${Package:-N/A}"
     [ "$INMUTABLE" = true ] && pkg_mostrar="rpm-ostree"
-
-    local linea_titulo="${AZUL_BRILLANTE}--- ⚡ ${C_INSTALL}INSTALL${C_4}4${C_ME}ME${RESET} ${AZUL_OSCURO}| ${C_VER}v${V}${RESET} ${AZUL_OSCURO}| ${BLANCO}:${HORA_ACTUAL}: ${AZUL_BRILLANTE}⚡---${RESET}"
-    local linea_info="${VERDE_BRILLANTE}OS:${RESET} ${AZUL}${OS_ID:-"N/A"}${RESET} | ${AMARILLO}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET} | ${CIAN}User:${RESET} ${BLANCO}${SUDO_USER:-$USER}${RESET}"
-    local linea_divisor="${AZUL_BRILLANTE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-    # Renderizado centrado
-    imprimir_centrado "$linea_titulo"
-    imprimir_centrado "$linea_info"
-    imprimir_centrado "$linea_divisor"
+    STK_EXTRA="${VERDE_BRILLANTE}OS:${RESET} ${AZUL}${OS_ID:-N/A}${RESET} | ${AMARILLO}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET} | ${CIAN}User:${RESET} ${BLANCO}${SUDO_USER:-$USER}${RESET}"
+    echo ""
+    stk_header
     echo ""
 }
 
@@ -886,7 +788,7 @@ menu_gestores_paquetes() {
 0. ⬅️ Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Gestor" "GESTORES DE PAQUETES" "15")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Gestor" "GESTORES DE PAQUETES" "15")
         [ -z "$seleccion" ] && return
 
         local opcion_num
@@ -1041,7 +943,7 @@ menu_escritorio() {
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
 
         [ -z "$seleccion" ] && return
 
@@ -1069,7 +971,7 @@ menu_desarrollo() {
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
 
         [ -z "$seleccion" ] && return
 
@@ -1098,7 +1000,7 @@ menu_sistemas() {
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
 
         [ -z "$seleccion" ] && return
 
@@ -1129,7 +1031,7 @@ menu_all4me() {
 0. ⬅️ VOLVER     - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Opción" "INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Opción" "INSTALL4ME")
 
         [ -z "$seleccion" ] && return
 
@@ -1164,7 +1066,7 @@ menu_principal() {
 0. ❌  SALIR           - Salir del script"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | install4me_fzf_menu "Seleccione Opción" "INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Opción" "INSTALL4ME")
 
         [ -z "$seleccion" ] && salir
 
@@ -1191,14 +1093,7 @@ salir() {
         pintar "$AMARILLO_BRILLANTE" "  ⚠️ Hay cambios de rpm-ostree pendientes. Reinicia el sistema."
         echo ""
     fi
-    pintar "$VERDE" "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    pintar "$AZUL" "Saliendo de Install4Me..."
-    pintar "$VERDE" "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    # Si se lanza con bash (como lo hace STK), solo termina el proceso hijo.
-    # Si se llegara a invocar con source desde STK, devuelve el control sin cerrarlo.
-    if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-        exit 0
-    fi
+    stk_salir "INSTALL4ME" "Saliendo de Install4Me..."
 }
 trap salir SIGINT SIGTERM
 
