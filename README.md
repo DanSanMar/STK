@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.6-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.7-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.6)
+# 🛠️ STK - System Tool Kit (v6.6.7)
 
 </div>
 
@@ -38,6 +38,7 @@
 * **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK, y biblioteca `stk_header.sh` de cabeceras responsive.
 * **Mejoras de la v.6.6.5:** Modo Auto con limpieza segura (sin desinstalación de paquetes ni papeleras), informe sin JSON —resumen en pantalla y bitácora con avisos e incidencias—, lógica compartida con el programador Cron mediante `stk_auto_lib.sh` y lock exclusivo común, y notificaciones de escritorio revisadas.
 * **Mejoras de la v.6.6.6:** `hard4me.sh`, dashboard de monitorización del disco con salud SMART/NVMe, veredictos interpretados, capacidad e inodos, rendimiento, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap) y temperatura. Solo lectura, sin exigir root, con instalación de dependencias bajo pregunta.
+* **Mejoras de la v.6.6.7:** `hard4me.sh` v1.1 adopta la cabecera compartida `stk_header.sh` (la misma que `install4me`), con modos completo/normal/compacto y FZF unificado; la búsqueda de directorios usa rutas seguras con `du -x` y `timeout`, y el dashboard se adapta a terminales estrechas sin desbordes.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -60,8 +61,9 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **API única:** `stk_init MODULO VERSION SUBTITULO [EXTRA]`, `stk_header`, `stk_fzf_menu`, `stk_salir` y `stk_header_cmd` (para cabeceras vivas en FZF).
 * **Barra llena adaptativa:** el título se centra con relleno de `━` según el ancho real; no se usa centrado con espacios, que descuadra con emoji.
 * **Medición fiable:** `stty size` → `tput cols` → `$COLUMNS` → 80, y `wc -L` para contar columnas visibles (caracteres anchos incluidos).
-* **Tres modos:** completo (≥90 columnas y ≥20 filas), normal (≥60) y compacto (pantallas estrechas o bajas), con truncado seguro.
+* **Tres modos:** completo (≥90 columnas y ≥20 filas), normal (≥60) y compacto (pantallas estrechas o bajas), con truncado seguro del título cuando no cabe (corregido en v6.6.7).
 * **Estilo PROC4ME:** módulo, subtítulo, `By: DanSanMar`, versión y hora con colores rotativos por segmentos; el autor siempre en la barra superior.
+* **Módulos migrados:** `install4me` y `hard4me` (v1.1) ya comparten esta cabecera; `stk_header_cmd` alimenta la cabecera viva del explorador FZF de discos.
 ---
 
 ## 🛡️ Medidas de Seguridad y Fiabilidad
@@ -87,7 +89,7 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Seguridad y Firewall:** Control del cortafuegos (`ufw`), verificación de permisos SUID, cuentas con UID 0, firmas y análisis de accesos no autorizados.
 * **Investigador de Procesos (PROC4ME):** Análisis de procesos, puertos, persistencia y amenazas silenciosas, con informes exportables a texto y Markdown desde el menú de **Seguridad**.
 * **Analizador de Servicios (JOBS4ME):** Dashboard de servicios, consumo y tareas programadas con veredictos interpretados y explorador FZF.
-* **Monitor de Disco (HARD4ME):** Salud SMART/NVMe con veredicto explicado, capacidad e inodos, rendimiento por dispositivo, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap), temperatura y top de espacio bajo demanda. Solo lectura; si faltan `smartctl`/`nvme` pregunta antes de instalar y puede degradar a `N/D` sin root. Se accede desde **Monitorización → 4. Análisis de Disco** o con `-D, --disk`.
+* **Monitor de Disco (HARD4ME v1.1):** Salud SMART/NVMe con veredicto explicado, capacidad e inodos, rendimiento por dispositivo, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap), temperatura y top de espacio bajo demanda. Usa la cabecera compartida `stk_header.sh` y un dashboard adaptable a terminales estrechas. Solo lectura; si faltan `smartctl`/`nvme` pregunta antes de instalar y puede degradar a `N/D` sin root. Se accede desde **Monitorización → 4. Análisis de Disco** o con `-D, --disk`.
 
 <div align="center">
 <img width="500" height="300" alt="Monitorización STK" src="https://github.com/user-attachments/assets/2725cd00-bcd5-4e7a-b3db-23a2a7a6da94" />
@@ -170,7 +172,13 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.6 (Actual)
+### 📝 v6.6.7 (Actual)
+* **Unificación:** `hard4me.sh` (v1.1) adopta `stk_header.sh`, la misma cabecera responsive de `install4me`: `stk_init`, `stk_header`, `stk_salir` y `stk_header_cmd` para la cabecera viva del explorador FZF. Se retiran la paleta, el logo y las utilidades de ancho duplicadas.
+* **Corrección:** `stk_header.sh` recorta el título con variantes cortas cuando no cabe en modo normal (p. ej. 60 columnas), evitando desbordes también en install4me.
+* **Robustez:** La tecla `[d]` usa solo rutas seguras (`/home`, `/var`, `/tmp`, `/root`, `/opt`, `/srv`) con `du -x`, `timeout -k` y sin `/` por defecto; si `timeout` no está disponible se omite con aviso en lugar de colgarse.
+* **Vista:** Dashboard adaptable al ancho real: tablas compactas, separadores dinámicos y secciones vacías ocultas con nota; verificado de 48 a 120 columnas sin desbordes. En modo básico (sin SMART/NVMe) el estado muestra **DATOS PARCIALES**.
+
+### 📝 v6.6.6
 * **Nuevo:** `hard4me.sh` (v1.0), dashboard de análisis y monitorización del disco con el mismo estilo que JOBS4ME: logo animado, cabecera viva de FZF, redibujo sin parpadeo y modo sin TTY.
 * **Discos:** Inventario `lsblk`, tipo SSD/HDD/NVMe y bus, salud SMART (`smartctl`) y NVMe (`nvme smart-log`) con veredictos explicados (sectores reasignados/pendientes, temperatura, vida restante, errores, autotest), capacidad e inodos, rendimiento desde `/proc/diskstats`, capas LVM/mdadm/Btrfs/ZFS/LUKS/swap y temperatura.
 * **Seguridad:** Solo lectura: no lanza auto-tests, scrubs ni reparaciones. No exige root (degrada a `N/D` con nota). Si faltan `smartctl`/`nvme-cli`, pregunta `s/N` antes de instalar con el gestor nativo; sin TTY nunca instala.

@@ -158,6 +158,23 @@ stk_header() {
 
     # Barra llena: el título queda centrado por relleno de '━', no por espacios.
     ancho_titulo=$(stk_ancho_texto "$titulo_plano")
+
+    # Si el título completo no cabe (p. ej. 60 columnas con subtítulo largo),
+    # se usan variantes cada vez más cortas ANTES de calcular el relleno.
+    # Así se evita desbordar la línea, tanto en install4me como en hard4me.
+    if [ "$ancho_titulo" -gt $(( cols - 2 )) ]; then
+        local corto_plano corto_colorido
+        corto_plano="⚡ ${STK_MODULO} | ${STK_SUBTITULO} | v${STK_VERSION} ⚡"
+        corto_colorido="${AZUL_BRILLANTE}⚡ ${NEGRITA}${STK_COLOR_LOGO}${STK_MODULO}${RESET} ${AZUL_OSCURO}| ${STK_COLOR_DASH}${STK_SUBTITULO}${RESET} ${AZUL_OSCURO}| ${STK_COLOR_VER}v${STK_VERSION}${RESET} ${AZUL_BRILLANTE}⚡${RESET}"
+        if [ "$(stk_ancho_texto "$corto_plano")" -gt $(( cols - 2 )) ]; then
+            corto_plano="⚡ ${STK_MODULO} v${STK_VERSION} ⚡"
+            corto_colorido="${AZUL_BRILLANTE}⚡ ${NEGRITA}${STK_COLOR_LOGO}${STK_MODULO}${RESET} ${STK_COLOR_VER}v${STK_VERSION}${RESET} ${AZUL_BRILLANTE}⚡${RESET}"
+        fi
+        titulo_plano="$corto_plano"
+        titulo_colorido="$corto_colorido"
+        ancho_titulo=$(stk_ancho_texto "$titulo_plano")
+    fi
+
     relleno=$(( cols - ancho_titulo - 2 ))
     [ "$relleno" -lt 0 ] && relleno=0
     izq=$(( relleno / 2 ))

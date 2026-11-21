@@ -9,28 +9,25 @@
 # Pensado para ejecutarse solo (bash hard4me.sh) o integrarse en STK.
 # ==============================================================================
 
-V="1.0"
+V="1.1"
 DESCRIPCION="Dashboard de análisis y monitorización del disco duro"
 AUTOR="DanSanMar"
 
-# --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me / jobs4me) ---
-RESET='\e[0m'
-NEGRITA='\e[1m'
-VERDE_BRILLANTE='\e[92m'
-VERDE='\e[32m'
-AMARILLO='\e[33m'
-AMARILLO_BRILLANTE='\e[93m'
-AZUL='\e[34m'
-AZUL_BRILLANTE='\e[94m'
-AZUL_OSCURO='\e[0;34m'
-AZUL_CLARO='\e[38;5;117m'
-CIAN='\e[36m'
-CIAN_BRILLANTE='\e[96m'
-MAGENTA='\e[35m'
-ROJO='\e[31m'
-ROJO_BRILLANTE='\e[91m'
-BLANCO='\e[97m'
-GRIS_CLARO='\e[0;90m'
+# --- BIBLIOTECA DE CABECERAS STK (paleta, menús FZF y cabecera responsive) ---
+# Misma cabecera que install4me.sh: modos completo/normal/compacto según
+# ancho y alto reales de terminal, con colores rotativos y `wc -L` para medir.
+STK_HEADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_header.sh"
+if [ ! -f "$STK_HEADER" ]; then
+    STK_HEADER=$(find /home /root /usr/local -maxdepth 5 -name "stk_header.sh" 2>/dev/null | head -n 1)
+fi
+if [ -f "$STK_HEADER" ]; then
+    # shellcheck source=stk_header.sh
+    source "$STK_HEADER"
+else
+    echo "❌ No se encuentra $STK_HEADER. HARD4ME no puede iniciarse." >&2
+    exit 1
+fi
+stk_init "HARD4ME" "$V" "DISK HEALTH MONITOR"
 
 # --- LOGS E INFORMES ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
@@ -73,12 +70,6 @@ registrar_log() {
     echo "[$FECHA] [$NIVEL] [${SUDO_USER:-${USER:-$(id -un 2>/dev/null)}}] - [HARD4ME] $MENSAJE" >> "$LOG_FILE" 2>/dev/null
 }
 
-pintar() {
-    local COLOR="$1"
-    local MENSAJE="$2"
-    echo -e "${COLOR}${MENSAJE}${RESET}"
-}
-
 ok()      { pintar "$VERDE_BRILLANTE" "✔ $1"; }
 alerta()  { pintar "$ROJO_BRILLANTE" "⚠️ $1"; }
 info()    { pintar "$AZUL" "ℹ️ $1"; }
@@ -88,9 +79,37 @@ pausa()   { echo ""; read -r -p "Presione Enter para continuar..." _; }
 es_numero()  { [[ "$1" =~ ^[0-9]+$ ]]; }
 es_decimal() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; }
 
+# --- Layout compartido con stk_header.sh (ancho/alto reales de terminal) ---
+ANCHO=80
+COMPACTO=false
+
+actualizar_layout() {
+    local cols lineas
+    cols=$(stk_detectar_columnas)
+    lineas=$(stk_detectar_filas)
+    es_numero "$cols" || cols=80
+    es_numero "$lineas" || lineas=24
+    ANCHO=$cols
+    if [ "$ANCHO" -lt 90 ] || [ "$lineas" -lt 20 ]; then
+        COMPACTO=true
+    else
+        COMPACTO=false
+    fi
+}
+
 recortar() {
-    local texto="$1" max="${2:-60}"
-    [ ${#texto} -gt "$max" ] && printf '%s…' "${texto:0:$((max - 1))}" || printf '%s' "$texto"
+    local texto="$1" max="${2:-60}" limite recortado
+    limite=$(( ANCHO - 4 ))
+    [ "$limite" -lt 12 ] && limite=12
+    [ "$max" -gt "$limite" ] && max="$limite"
+    recortado=$(stk_recortar "$texto" "$max")
+    [ "$recortado" != "$texto" ] && printf '%s…' "$recortado" || printf '%s' "$recortado"
+}
+
+separador() {
+    local n=$(( ANCHO - 1 ))
+    [ "$n" -lt 20 ] && n=20
+    stk_repetir '━' "$n"
 }
 
 cmd_timeout() {
@@ -142,52 +161,9 @@ detectar_sistema() {
     fi
 }
 
-# --- LOGO ANIMADO (estilo PROC4ME / STK / JOBS4ME) ---
-PALETA_LOGO=(
-    "$ROJO" "$AZUL_BRILLANTE" "$VERDE_BRILLANTE" "$AMARILLO_BRILLANTE"
-    "$CIAN_BRILLANTE" "$ROJO_BRILLANTE" "$AZUL_CLARO" "$VERDE" "$AMARILLO" "$CIAN"
-)
-
-actualizar_colores_logo() {
-    local epoch total=${#PALETA_LOGO[@]}
-    epoch=$(date +%s 2>/dev/null)
-    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
-    local base=$(( (epoch / 3) % total ))
-    COLOR_LOGO="${PALETA_LOGO[$base]}"
-    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % total ))]}"
-    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % total ))]}"
-}
-
-logo_texto() {
-    actualizar_colores_logo
-    local hora
-    hora=$(date '+%H:%M:%S')
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}HARD4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}DISK HEALTH MONITOR${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}"
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${SUDO_USER:-${USER:-root}}${RESET}  ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET}"
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-}
-
-hard4me_fzf_menu() {
-    local prompt_text="$1"
-    local titulo="$2"
-    local altura="${3:-~90%}"
-    local logo logo_cmd
-    logo=$(logo_texto)
-    printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
-    fzf --ansi \
-        --height="$altura" \
-        --layout=reverse \
-        --no-sort \
-        --header-first \
-        --border=rounded \
-        --border-label=" $titulo " \
-        --prompt="➤ $prompt_text: " \
-        --header="$logo" \
-        --bind "every(5):bg-transform-header:$logo_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,marker:#92ff92"
-}
+# --- CABECERA Y MENÚS: delegados a stk_header.sh ---
+# stk_init ya se llamó al sourcear la librería. stk_header dibuja la cabecera
+# responsive (completo/normal/compacto) y stk_fzf_menu da el menú estándar.
 
 # ==============================================================================
 # --- INSTALACIÓN DE DEPENDENCIAS BAJO DEMANDA ---
@@ -283,6 +259,17 @@ porcentaje_barra() {
     local i
     for (( i=0; i<llenos; i++ )); do barra+="█"; done
     for (( i=llenos; i<10; i++ )); do barra+="░"; done
+    printf '%s %s%%' "$barra" "$pct"
+}
+
+porcentaje_barra_corta() {
+    local pct="${1:-0}"
+    pct="${pct%\%}"
+    es_numero "$pct" || { printf '—'; return; }
+    local llenos=$(( pct / 20 )) barra="" i
+    [ "$llenos" -gt 5 ] && llenos=5
+    for (( i=0; i<llenos; i++ )); do barra+="█"; done
+    for (( i=llenos; i<5; i++ )); do barra+="░"; done
     printf '%s %s%%' "$barra" "$pct"
 }
 
@@ -688,96 +675,196 @@ cargar_temperatura() {
 # --- RENDERIZADO DEL DASHBOARD ---
 # ==============================================================================
 construir_pantalla() {
-    logo_texto
+    actualizar_layout
+    stk_header
+
+    local sin_salud=false
+    if [ "$HAS_SMART" = false ] && [ "$HAS_NVME" = false ]; then
+        sin_salud=true
+    fi
 
     local estado_txt
     case "$NIVEL_GLOBAL" in
         2) estado_txt="${ROJO_BRILLANTE}CRÍTICO${RESET}" ;;
         1) estado_txt="${AMARILLO_BRILLANTE}ATENCIÓN${RESET}" ;;
-        *) estado_txt="${VERDE_BRILLANTE}ÓPTIMO${RESET}" ;;
+        *)
+            if [ "$sin_salud" = true ]; then
+                estado_txt="${AMARILLO_BRILLANTE}DATOS PARCIALES${RESET}"
+            else
+                estado_txt="${VERDE_BRILLANTE}ÓPTIMO${RESET}"
+            fi
+            ;;
     esac
 
-    echo -e " ${AMARILLO}➤ Discos:${RESET} ${BLANCO}${CONT_DISCOS}${RESET}  ${VERDE}SSD: ${CONT_SSD}${RESET}  ${AZUL}HDD: ${CONT_HDD}${RESET}  ${CIAN}NVMe: ${CONT_NVME}${RESET}  ${ROJO}críticos: ${CONT_CRITICOS}${RESET}  ${AMARILLO}avisos: ${CONT_AVISOS}${RESET}"
-    echo -e " ${AMARILLO}➤ Estado global:${RESET} $estado_txt   ${AMARILLO}SMART:${RESET} $([ "$HAS_SMART" = true ] && echo "disponible" || echo "${ROJO}no disponible${RESET}")   ${AMARILLO}NVMe:${RESET} $([ "$HAS_NVME" = true ] && echo "disponible" || echo "${ROJO}no disponible${RESET}")"
+    if [ "$COMPACTO" = true ]; then
+        local resumen_discos="Discos: ${CONT_DISCOS} (SSD ${CONT_SSD} · HDD ${CONT_HDD} · NVMe ${CONT_NVME})"
+        [ "$CONT_CRITICOS" -gt 0 ] && resumen_discos+=" · 🔴${CONT_CRITICOS}"
+        [ "$CONT_AVISOS" -gt 0 ] && resumen_discos+=" · ⚠${CONT_AVISOS}"
+        echo -e " ${AMARILLO}➤ ${resumen_discos}${RESET}"
+    else
+        echo -e " ${AMARILLO}➤ Discos:${RESET} ${BLANCO}${CONT_DISCOS}${RESET}  ${VERDE}SSD: ${CONT_SSD}${RESET}  ${AZUL}HDD: ${CONT_HDD}${RESET}  ${CIAN}NVMe: ${CONT_NVME}${RESET}  ${ROJO}críticos: ${CONT_CRITICOS}${RESET}  ${AMARILLO}avisos: ${CONT_AVISOS}${RESET}"
+    fi
+    echo -e " ${AMARILLO}➤ Estado:${RESET} $estado_txt"
+    if [ "$COMPACTO" = false ]; then
+        echo -e " ${AMARILLO}➤ Herramientas:${RESET} SMART: $([ "$HAS_SMART" = true ] && echo disponible || echo "${ROJO}no disponible${RESET}") · NVMe: $([ "$HAS_NVME" = true ] && echo disponible || echo "${ROJO}no disponible${RESET}")"
+    fi
     if [ "$ES_ROOT" = false ]; then
-        echo -e "   ${GRIS_CLARO}ℹ Algunos datos pueden ser N/D sin privilegios: ejecuta con sudo para el informe completo.${RESET}"
+        if [ "$COMPACTO" = true ]; then
+            echo -e "   ${GRIS_CLARO}ℹ Sin root: usa sudo para datos completos.${RESET}"
+        else
+            echo -e "   ${GRIS_CLARO}ℹ Sin root algunos datos son N/D: usa sudo para el informe completo.${RESET}"
+        fi
     fi
 
-    # Interpretación resumida (máx. 2 hallazgos)
-    local avisos=() d
+    # Interpretación resumida
+    local -a avisos=()
+    local d id pct ip
     for d in "${DISCOS[@]}"; do
         [ "${DK_LEVEL[$d]:-0}" -ge 1 ] && avisos+=("$(icono_nivel "${DK_LEVEL[$d]}") $d (${DK_KIND[$d]}): ${DK_VERD[$d]}")
     done
-    local id pct
     for id in "${FS_FILAS[@]}"; do
         pct="${FS_PCT[$id]:-0}"; pct="${pct%\%}"; es_numero "$pct" || pct=0
         [ "$pct" -ge 90 ] && avisos+=("⚠ ${FS_MOUNT[$id]}: uso al ${pct}%")
-        local ip="${FS_IPCT[$id]:-0}"; ip="${ip%\%}"; es_numero "$ip" || ip=0
+        ip="${FS_IPCT[$id]:-0}"; ip="${ip%\%}"; es_numero "$ip" || ip=0
         [ "$ip" -ge 90 ] && avisos+=("⚠ ${FS_MOUNT[$id]}: inodos al ${ip}%")
     done
+    local max_aviso=92
+    [ "$COMPACTO" = true ] && max_aviso=$(( ANCHO - 22 ))
+    [ "$max_aviso" -lt 12 ] && max_aviso=12
     if [ ${#avisos[@]} -gt 0 ]; then
-        echo -e " ${MAGENTA}➤ Interpretación:${RESET} $(recortar "${avisos[0]}" 92)"
-        [ ${#avisos[@]} -gt 1 ] && echo -e "   $(recortar "${avisos[1]}" 92)"
+        echo -e " ${MAGENTA}➤ Interpretación:${RESET} $(recortar "${avisos[0]}" "$max_aviso")"
+        if [ "$COMPACTO" = false ] && [ ${#avisos[@]} -gt 1 ]; then
+            echo -e "   $(recortar "${avisos[1]}" "$max_aviso")"
+        fi
     else
         echo -e " ${VERDE_BRILLANTE}➤ Interpretación: sin incidencias destacables${RESET}"
     fi
 
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    # --- Salud ---
+    echo -e " ${CIAN}$(separador)${RESET}"
     echo -e " ${NEGRITA}${CIAN}💽 SALUD DE DISPOSITIVOS (solo lectura)${RESET}"
-    printf '  %-12s %-11s %-9s %-8s %-10s %s\n' "DISCO" "TIPO" "ESTADO" "TEMP" "VIDA" "VEREDICTO"
-    local nivel
-    for d in "${DISCOS[@]}"; do
-        nivel=${DK_LEVEL[$d]:-0}
-        printf '  %-12s %-11s %b%-9s%b %-8s %-10s %s\n' \
-            "$d" "$(recortar "${DK_KIND[$d]:-?}" 10)" \
-            "$(color_por_nivel "$nivel")" "$(recortar "${DK_HEALTH[$d]:-N/D}" 8)" "$RESET" \
-            "$(recortar "${DK_TEMP[$d]:-N/D}" 7)" "$(recortar "${DK_LIFE[$d]:-N/D}" 9)" \
-            "$(recortar "${DK_VERD[$d]:-}" 40)"
-    done
+    if [ "$sin_salud" = false ]; then
+        local nivel verd extra
+        if [ "$COMPACTO" = false ]; then
+            printf '  %-12s %-11s %-9s %-8s %-10s %s\n' "DISCO" "TIPO" "ESTADO" "TEMP" "VIDA" "VEREDICTO"
+            for d in "${DISCOS[@]}"; do
+                nivel=${DK_LEVEL[$d]:-0}
+                printf '  %-12s %-11s %b%-9s%b %-8s %-10s %s\n' \
+                    "$d" "$(recortar "${DK_KIND[$d]:-?}" 10)" \
+                    "$(color_por_nivel "$nivel")" "$(recortar "${DK_HEALTH[$d]:-N/D}" 8)" "$RESET" \
+                    "$(recortar "${DK_TEMP[$d]:-N/D}" 7)" "$(recortar "${DK_LIFE[$d]:-N/D}" 9)" \
+                    "$(recortar "${DK_VERD[$d]:-}" 40)"
+            done
+        else
+            printf '  %-10s %-9s %-8s %s\n' "DISCO" "TIPO" "ESTADO" "VEREDICTO"
+            for d in "${DISCOS[@]}"; do
+                nivel=${DK_LEVEL[$d]:-0}
+                extra=""
+                [ "${DK_TEMP[$d]:-N/D}" != "N/D" ] && extra=" ${DK_TEMP[$d]}"
+                [ "${DK_LIFE[$d]:-N/D}" != "N/D" ] && extra+=" vida:${DK_LIFE[$d]}"
+                verd="${DK_VERD[$d]:-}$extra"
+                printf '  %-10s %-9s %b%-8s%b %s\n' \
+                    "$d" "$(recortar "${DK_KIND[$d]:-?}" 8)" \
+                    "$(color_por_nivel "$nivel")" "$(recortar "${DK_HEALTH[$d]:-N/D}" 7)" "$RESET" \
+                    "$(recortar "$verd" $(( ANCHO - 34 )))"
+            done
+        fi
+    else
+        if [ "$COMPACTO" = true ]; then
+            echo -e "   ${AMARILLO}ℹ Salud N/D: instala smartmontools/nvme-cli${RESET}"
+        else
+            echo -e "   ${AMARILLO}ℹ Salud N/D: instala smartmontools / nvme-cli desde Software o ejecuta con sudo.${RESET}"
+        fi
+        printf '  %-12s %-11s %s\n' "DISCO" "TIPO" "MONTAJE"
+        for d in "${DISCOS[@]}"; do
+            printf '  %-12s %-11s %s\n' "$d" "$(recortar "${DK_KIND[$d]:-?}" 10)" "${DK_MOUNT[$d]:-—}"
+        done
+    fi
     [ ${#DISCOS[@]} -eq 0 ] && echo -e "  ${AZUL}No se detectaron discos (lsblk no disponible).${RESET}"
 
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    # --- Capacidad ---
+    echo -e " ${CIAN}$(separador)${RESET}"
     echo -e " ${NEGRITA}${CIAN}📁 CAPACIDAD E INODOS${RESET}"
-    printf '  %-20s %-8s %9s %9s %9s %-11s %s\n' "MONTAJE" "TIPO" "TAM" "USADO" "LIBRE" "USO" "INODOS"
-    local id barra ip
-    for id in "${FS_FILAS[@]:0:10}"; do
-        barra=$(porcentaje_barra "${FS_PCT[$id]:-0}")
-        ip="${FS_IPCT[$id]:-N/D}"
-        [ "$ip" = "-" ] && ip="N/D"
-        printf '  %-20s %-8s %9s %9s %9s %-11s %s\n' \
-            "$(recortar "${FS_MOUNT[$id]:-?}" 19)" "$(recortar "${FS_TYPE[$id]:-?}" 7)" \
-            "${FS_SIZE[$id]:-—}" "${FS_USED[$id]:-—}" "${FS_AVAIL[$id]:-—}" \
-            "$barra" "$ip"
-    done
-
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${NEGRITA}${CIAN}⚡ RENDIMIENTO (muestra de 1 s)${RESET}"
-    printf '  %-12s %12s %12s %12s %10s\n' "DISCO" "LECT/s" "ESCR/s" "KB/s" "OCUPACIÓN"
-    local fila d2 rl re kb ut
-    for fila in "${PERF_FILAS[@]}"; do
-        IFS='|' read -r d2 rl re kb ut <<< "$fila"
-        printf '  %-12s %12s %12s %12s %9s%%\n' "$d2" "$rl" "$re" "$kb" "$ut"
-    done
-    [ ${#PERF_FILAS[@]} -eq 0 ] && echo -e "  ${AZUL}Sin datos de /proc/diskstats${RESET}"
-
-    if [ ${#LAYER_FILAS[@]} -gt 0 ]; then
-        echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e " ${NEGRITA}${CIAN}🧱 CAPAS Y SUBSISTEMAS${RESET}"
-        local capa detalle
-        for fila in "${LAYER_FILAS[@]:0:8}"; do
-            IFS='|' read -r capa detalle <<< "$fila"
-            printf '  %-10s %s\n' "$capa" "$(recortar "$detalle" 78)"
+    local barra ip
+    if [ "$COMPACTO" = false ]; then
+        printf '  %-20s %-8s %9s %9s %9s %-11s %s\n' "MONTAJE" "TIPO" "TAM" "USADO" "LIBRE" "USO" "INODOS"
+        for id in "${FS_FILAS[@]:0:10}"; do
+            barra=$(porcentaje_barra "${FS_PCT[$id]:-0}")
+            ip="${FS_IPCT[$id]:-N/D}"
+            [ "$ip" = "-" ] && ip="N/D"
+            printf '  %-20s %-8s %9s %9s %9s %-11s %s\n' \
+                "$(recortar "${FS_MOUNT[$id]:-?}" 19)" "$(recortar "${FS_TYPE[$id]:-?}" 7)" \
+                "${FS_SIZE[$id]:-—}" "${FS_USED[$id]:-—}" "${FS_AVAIL[$id]:-—}" "$barra" "$ip"
+        done
+    else
+        printf '  %-16s %7s %-9s %s\n' "MONTAJE" "TAM" "USO" "INODOS"
+        for id in "${FS_FILAS[@]:0:10}"; do
+            barra=$(porcentaje_barra_corta "${FS_PCT[$id]:-0}")
+            ip="${FS_IPCT[$id]:-N/D}"
+            [ "$ip" = "-" ] && ip="N/D"
+            printf '  %-16s %7s %-9s %s\n' \
+                "$(recortar "${FS_MOUNT[$id]:-?}" 15)" "${FS_SIZE[$id]:-—}" "$barra" "$ip"
         done
     fi
 
-    if [ ${#TEMP_FILAS[@]} -gt 0 ]; then
-        echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e " ${NEGRITA}${CIAN}🌡 TEMPERATURA ADICIONAL${RESET}"
-        for fila in "${TEMP_FILAS[@]:0:4}"; do echo "  $fila"; done
+    # --- Rendimiento (solo si hay datos) ---
+    if [ ${#PERF_FILAS[@]} -gt 0 ]; then
+        echo -e " ${CIAN}$(separador)${RESET}"
+        echo -e " ${NEGRITA}${CIAN}⚡ RENDIMIENTO (muestra de 1 s)${RESET}"
+        local fila d2 rl re kb ut
+        if [ "$COMPACTO" = false ]; then
+            printf '  %-12s %12s %12s %12s %10s\n' "DISCO" "LECT/s" "ESCR/s" "KB/s" "OCUPACIÓN"
+            for fila in "${PERF_FILAS[@]}"; do
+                IFS='|' read -r d2 rl re kb ut <<< "$fila"
+                printf '  %-12s %12s %12s %12s %9s%%\n' "$d2" "$rl" "$re" "$kb" "$ut"
+            done
+        else
+            printf '  %-10s %9s %9s %9s\n' "DISCO" "LECT/s" "ESCR/s" "OCUPACIÓN"
+            for fila in "${PERF_FILAS[@]}"; do
+                IFS='|' read -r d2 rl re kb ut <<< "$fila"
+                printf '  %-10s %9s %9s %8s%%\n' "$d2" "$rl" "$re" "$ut"
+            done
+        fi
     fi
 
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${VERDE_BRILLANTE}[f]${RESET} explorar disco   ${VERDE_BRILLANTE}[d]${RESET} espacio por directorios   ${VERDE_BRILLANTE}[r]${RESET} refrescar   ${VERDE_BRILLANTE}[i]${RESET} informe   ${ROJO_BRILLANTE}[q]${RESET} salir"
+    # --- Capas (solo si hay datos) ---
+    if [ ${#LAYER_FILAS[@]} -gt 0 ]; then
+        echo -e " ${CIAN}$(separador)${RESET}"
+        echo -e " ${NEGRITA}${CIAN}🧱 CAPAS Y SUBSISTEMAS${RESET}"
+        local capa detalle
+        if [ "$COMPACTO" = false ]; then
+            for fila in "${LAYER_FILAS[@]:0:8}"; do
+                IFS='|' read -r capa detalle <<< "$fila"
+                printf '  %-10s %s\n' "$capa" "$(recortar "$detalle" 78)"
+            done
+        else
+            local resumen=""
+            for fila in "${LAYER_FILAS[@]:0:6}"; do
+                IFS='|' read -r capa detalle <<< "$fila"
+                resumen+="${resumen:+, }$capa: $(recortar "$detalle" 24)"
+            done
+            echo "  $(recortar "$resumen" $(( ANCHO - 4 )))"
+        fi
+    fi
+
+    # --- Temperatura (solo si hay datos) ---
+    if [ ${#TEMP_FILAS[@]} -gt 0 ]; then
+        echo -e " ${CIAN}$(separador)${RESET}"
+        echo -e " ${NEGRITA}${CIAN}🌡 TEMPERATURA ADICIONAL${RESET}"
+        for fila in "${TEMP_FILAS[@]:0:4}"; do
+            echo "  $(recortar "$fila" $(( ANCHO - 4 )))"
+        done
+    fi
+
+    echo -e " ${CIAN}$(separador)${RESET}"
+    if [ "$ANCHO" -lt 70 ]; then
+        echo -e " ${VERDE_BRILLANTE}[f]${RESET} explorar  ${VERDE_BRILLANTE}[d]${RESET} espacio  ${VERDE_BRILLANTE}[r]${RESET} refrescar"
+        echo -e " ${VERDE_BRILLANTE}[i]${RESET} informe  ${ROJO_BRILLANTE}[q]${RESET} salir"
+    elif [ "$COMPACTO" = true ]; then
+        echo -e " ${VERDE_BRILLANTE}[f]${RESET} explorar  ${VERDE_BRILLANTE}[d]${RESET} espacio  ${VERDE_BRILLANTE}[r]${RESET} refrescar  ${VERDE_BRILLANTE}[i]${RESET} informe  ${ROJO_BRILLANTE}[q]${RESET} salir"
+    else
+        echo -e " ${VERDE_BRILLANTE}[f]${RESET} explorar disco   ${VERDE_BRILLANTE}[d]${RESET} espacio por directorios   ${VERDE_BRILLANTE}[r]${RESET} refrescar   ${VERDE_BRILLANTE}[i]${RESET} informe   ${ROJO_BRILLANTE}[q]${RESET} salir"
+    fi
 }
 
 # Redibujo sin parpadeo (misma técnica que dash4me / jobs4me)
@@ -819,7 +906,7 @@ detalle_dispositivo() {
 
     if [ "${DK_DETAIL[$d]:-}" = "" ] && [ "$HAS_SMART" = true ]; then
         echo ""
-        echo "  ${GRIS_CLARO}Detalle SMART (consulta directa, solo lectura):${RESET}"
+        echo -e "  ${GRIS_CLARO}Detalle SMART (consulta directa, solo lectura):${RESET}"
         cmd_timeout 4 smartctl -i -H -A "$dev" 2>/dev/null | sed 's/^/    /' | head -n 30
     fi
 }
@@ -835,7 +922,7 @@ explorar_discos() {
 
     local preview_cmd header_cmd
     printf -v preview_cmd 'bash %q --detalle {1}' "$SELF_PATH"
-    printf -v header_cmd 'bash %q --logo-header' "$SELF_PATH"
+    header_cmd=$(stk_header_cmd "$SELF_PATH")
 
     printf '%b' "$lista" | fzf --ansi \
         --height=~90% \
@@ -853,24 +940,60 @@ explorar_discos() {
 
 # --- Espacio por directorios, bajo demanda ---
 analizar_espacio() {
+    actualizar_layout
     clear
-    logo_texto
+    stk_header
     echo -e " ${MAGENTA}--- TOP DE ESPACIO POR DIRECTORIOS (bajo demanda) ---${RESET}"
-    echo -e " ${GRIS_CLARO}Recorrido acotado a 60 s por raíz; no se ejecuta en el refresco automático.${RESET}\n"
+    echo -e " ${GRIS_CLARO}Rutas seguras, sin cruzar montajes. '/' no se analiza por defecto.${RESET}"
 
-    local raiz lineas
-    for raiz in / /home; do
-        [ -d "$raiz" ] || continue
-        echo -e " ${AZUL_BRILLANTE}➤ $raiz${RESET}"
-        lineas=$(cmd_timeout 60 du -h --max-depth=1 "$raiz" 2>/dev/null | sort -hr | head -n 12)
-        [ -z "$lineas" ] && lineas=$(cmd_timeout 60 du -h -d 1 "$raiz" 2>/dev/null | sort -hr | head -n 12)
-        [ -n "$lineas" ] && echo "$lineas" | sed 's/^/   /' || echo "   N/D"
-        echo ""
+    local -a rutas=()
+    local r
+    for r in /home /var /tmp /root /opt /srv; do
+        [ -d "$r" ] && [ -r "$r" ] && rutas+=("$r")
+    done
+    if [ ${#rutas[@]} -eq 0 ]; then
+        alerta "No hay directorios accesibles para analizar."
+        pausa
+        return 0
+    fi
+
+    # Sin timeout no se lanza ningún recorrido: era la causa del cuelgue.
+    if ! command -v timeout >/dev/null 2>&1; then
+        echo -e "\n ${AMARILLO}⚠ 'timeout' no disponible: se omiten los recorridos para no colgarse.${RESET}"
+        echo -e "   ${GRIS_CLARO}Usa 'df -h' o instala coreutils para esta opción.${RESET}"
+        pausa
+        return 0
+    fi
+
+    echo -e "\n ${AZUL}Analizando ${#rutas[@]} ruta(s)... (Ctrl+C para cancelar)${RESET}"
+    local inicio=$SECONDS raiz lineas
+
+    for raiz in "${rutas[@]}"; do
+        echo -e "\n ${AZUL_BRILLANTE}➤ $raiz${RESET}"
+        lineas=$(timeout -k 2 15 du -x -h --max-depth=1 --exclude=/var/lib/snapd "$raiz" 2>/dev/null | sort -hr | head -n 10)
+        [ -z "$lineas" ] && lineas=$(timeout -k 2 15 du -x -h -d 1 "$raiz" 2>/dev/null | sort -hr | head -n 10)
+        if [ -n "$lineas" ]; then
+            echo "$lineas" | sed 's/^/   /'
+        else
+            echo -e "   ${GRIS_CLARO}N/D (sin permisos o tiempo agotado)${RESET}"
+        fi
     done
 
-    echo -e " ${AZUL_BRILLANTE}➤ Archivos grandes (>500 MB, sistema de archivos raíz)${RESET}"
-    lineas=$(cmd_timeout 90 find / -xdev -type f -size +500M -exec du -h {} + 2>/dev/null | sort -hr | head -n 12)
-    [ -n "$lineas" ] && echo "$lineas" | sed 's/^/   /' || echo "   Ninguno o sin permisos"
+    echo -e "\n ${AZUL_BRILLANTE}➤ Archivos grandes (>200 MB)${RESET}"
+    lineas=$(timeout -k 2 25 find "${rutas[@]}" -xdev -type f -size +200M -printf '%s|%p\n' 2>/dev/null \
+        | sort -t'|' -k1,1rn | head -n 10)
+    if [ -n "$lineas" ]; then
+        local bytes ruta
+        while IFS='|' read -r bytes ruta; do
+            printf '   %8s  %s\n' "$(formato_mb "$bytes")" "$(recortar "$ruta" $(( ANCHO - 18 )))"
+        done <<< "$lineas"
+    else
+        # BusyBox find no tiene -printf: fallback acotado también con timeout.
+        lineas=$(timeout -k 2 25 find "${rutas[@]}" -xdev -type f -size +200M -exec du -h {} + 2>/dev/null | sort -hr | head -n 10)
+        [ -n "$lineas" ] && echo "$lineas" | sed 's/^/   /' || echo "   Ninguno o sin permisos"
+    fi
+
+    echo -e "\n ${VERDE}✔ Completado en $(( SECONDS - inicio )) s${RESET}"
     pausa
 }
 
@@ -883,8 +1006,8 @@ generar_informe() {
 
     {
         echo "HARD4ME v$V - Informe de análisis $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "Sistema: $OS_ID | Kernel: $KERNEL_STK | Host: $HOST_STK"
-        echo "Usuario: ${SUDO_USER:-${USER:-root}} | root: $ES_ROOT"
+        echo "Sistema: $STK_OS | Kernel: $STK_KERNEL | Host: $STK_HOST"
+        echo "Usuario: $STK_USER | root: $ES_ROOT"
         echo "============================================================"
         echo "ESTADO GLOBAL: $(case "$NIVEL_GLOBAL" in 2) echo CRITICO;; 1) echo ATENCION;; *) echo OPTIMO;; esac)"
         echo "Discos: $CONT_DISCOS (SSD: $CONT_SSD, HDD: $CONT_HDD, NVMe: $CONT_NVME)"
@@ -939,7 +1062,7 @@ mostrar_ayuda() {
     echo -e "${AMARILLO}Uso:${RESET} bash $0 [OPCIÓN]"
     echo ""
     echo -e "  ${VERDE}--detalle DISCO${RESET}   Muestra el análisis en árbol de un disco (p. ej. sda, nvme0n1)."
-    echo -e "  ${VERDE}--logo-header${RESET}     Uso interno para la cabecera viva de FZF."
+    echo -e "  ${VERDE}--stk-header${RESET}      Uso interno para la cabecera viva de FZF."
     echo -e "  ${VERDE}--help${RESET}            Muestra esta ayuda."
     echo ""
     echo -e "${AZUL}Dentro del dashboard:${RESET} [f] explorar · [d] espacio · [r] refrescar · [i] informe · [q] salir"
@@ -962,7 +1085,7 @@ main() {
 
     if [ "$HARD4ME_SOLO" = true ]; then
         case "${1:-}" in
-            --logo-header) logo_texto; exit 0 ;;
+            --stk-header|--logo-header) stk_header; exit 0 ;;
             --detalle)
                 if [ -n "${2:-}" ]; then
                     cargar_dispositivos
@@ -1027,11 +1150,8 @@ main() {
     done
 
     [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
-    echo -e "\n${AZUL}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    pintar "$AZUL" "Saliendo de HARD4ME..."
     pintar "$VERDE" "Análisis completado. No se ha modificado ningún disco."
-    echo -e "${AZUL}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
-    [ "$HARD4ME_SOLO" = true ] && exit 0
+    stk_salir "HARD4ME" "Saliendo de HARD4ME..."
 }
 
 main "$@"
