@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.4-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.5-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.4)
+# 🛠️ STK - System Tool Kit (v6.6.5)
 
 </div>
 
@@ -32,10 +32,11 @@
 * **Nuevas funciones de la v.5.9.5:** Se añade menú de gestión de tareas programadas con Cron.
 * **Nuevas funciones de la v.5.9.7:** Se añaden flags para la utilización directa de las funciones más habituales y una ayuda para recordarlas.
 * **Nuevas funciones de la v.6.5.0:** Logo renovado al estilo PROC4ME y dashboard de estado en los menús con servicios fallidos, puertos abiertos, temperatura, UFW, SSH e Internet.
-* **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe JSON.
+* **Nuevas funciones de la v.6.6.0:** Cabecera animada (colores cada 3 s y reloj en vivo) y Modo Auto reforzado con checklist de pasos, preflight, snapshot previo, timeouts, auditoría ampliada e informe en pantalla y bitácora.
 * **Mejoras de la v.6.6.1:** Menús sin esperas al salir, dashboard con carga/RAM/disco/temperatura y bloque de seguridad refrescado en segundo plano.
 * **Mejoras de la v.6.6.2:** Comprobación de Internet unificada y fiable (estilo dash4me), informe JSON del Modo Auto generado con `jq`, limpieza de huérfanos de `pacman` corregida, nueva sección **Seguridad** en el menú principal y **JOBS4ME**, dashboard de análisis de servicios y tareas programadas con explorador FZF.
 * **Mejoras de la v.6.6.4:** Integración de **INSTALL4ME** como instalador por categorías en el menú de Software, con paleta FZF y log unificados con STK, y biblioteca `stk_header.sh` de cabeceras responsive.
+* **Mejoras de la v.6.6.5:** Modo Auto con limpieza segura (sin desinstalación de paquetes ni papeleras), informe sin JSON —resumen en pantalla y bitácora con avisos e incidencias—, lógica compartida con el programador Cron mediante `stk_auto_lib.sh` y lock exclusivo común, y notificaciones de escritorio revisadas.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -103,18 +104,19 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 </div>
 
 ### 🧹 Mantenimiento, Tareas y Copias de Seguridad
-* **Súper Limpieza:** Liberación profunda de espacio en disco purgando paquetes huérfanos, cachés, papelera del sistema y limitando retención de logs a 3 días.
+* **Limpieza segura (modo auto):** Solo cachés del gestor, logs del journal con más de 7 días y miniaturas sin uso; no desinstala paquetes ni toca papeleras ni archivos personales. Muestra siempre lo que va a hacer.
+* **Limpieza completa (menú / `-c`):** Añade `autoremove` (sin `--purge`), paquetes huérfanos y vaciado de papeleras, este último con confirmación explícita e irreversible.
 * **Motor COPY4ME & Backups:** 
   * **Empaquetado Local:** Respaldos compresión `.tar.gz` de directorios clave (`/etc`, `/var/www`, `/home`) o personalizados, con cálculo de hash **SHA256** y rotación de un máximo de 5 ficheros.
   * **Sincronización Avanzada:** Sincronización incremental, espejo o bidireccional mediante `rsync`, con perfiles persistentes en `/var/backups/stk_backups/config.json`.
-* **Programador (Cron):** Integración con `stk_cron.sh` para la automatización y consulta de tareas programadas en el sistema. Las notificaciones de escritorio al finalizar cada tarea se pueden activar o desactivar desde la opción **5. Notificaciones** del menú de tareas automáticas.
+* **Programador (Cron):** Integración con `stk_cron.sh` para la automatización y consulta de tareas programadas en el sistema. El wrapper y el modo auto comparten `stk_auto_lib.sh` y el mismo lock `flock`. Las notificaciones de escritorio no instalan dependencias por su cuenta, leen el último bloque completo del resumen y se activan/desactivan desde la opción **5. Notificaciones** del menú de tareas automáticas.
 
 ### 🤖 Modo Auto Integral
 * **Checklist de pasos:** Menú `fzf --multi` para elegir actualización, limpieza, auditoría y servicios, todos marcados por defecto. `TAB` marca/desmarca, `ENTER` confirma y `ESC` cancela. Sin terminal interactiva se ejecutan todos.
 * **Preflight:** Comprueba red, espacio libre, gestor de paquetes ocupado y batería antes de empezar. Si algo no es seguro, omite la actualización y continúa con el resto.
 * **Snapshot previo:** Punto de recuperación con `snapper`, `timeshift` o respaldo de la lista de paquetes en `/var/lib/stk/snapshots/`.
-* **Ejecución robusta:** Lock `flock` contra ejecuciones simultáneas, timeouts por paso y `Ctrl+C` que libera el bloqueo y vuelve al menú.
-* **Informe:** Resumen por módulo, duración por paso, espacio liberado, alertas y reinicio pendiente. Se guarda en JSON (`/var/lib/stk/last_auto.json`) con historial en `auto_history.jsonl`.
+* **Ejecución robusta:** Lock `flock` compartido con el cron contra ejecuciones simultáneas, timeouts por paso y `Ctrl+C` que libera el bloqueo y vuelve al menú.
+* **Informe:** Resumen por módulo, duración por paso, preflight, espacio liberado, incidencias de actualización, alertas y reinicio pendiente. No se genera JSON: todo queda en pantalla y en la bitácora `/var/log/stk_mantenimiento.log` (con rotación que conserva el historial en `.1`).
 * **Códigos de salida:** `0` todo correcto, `1` completado con avisos, `2` error grave y `3` ya había una ejecución en curso.
 
 
@@ -165,7 +167,14 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.4 (Actual)
+### 📝 v6.6.5 (Actual)
+* **Seguridad:** La limpieza del Modo Auto pasa a ser segura y transparente: solo cachés, logs (7 días) y miniaturas. Fuera del auto se eliminaron `install -f -y` y `autoremove --purge -y`; la papelera y el `autoremove` viven en la limpieza completa con confirmación.
+* **Informe:** Se eliminan `last_auto.json` y `auto_history.jsonl` y la dependencia de `jq` en el informe. El resumen incorpora preflight, incidencias de actualización, kernel pendiente y `needrestart`; todos los avisos se registran ahora en la bitácora.
+* **Unificación:** Nueva `stk_auto_lib.sh` con una sola implementación de lock, preflight, snapshot, actualización, limpieza, auditoría y servicios para `stk2.sh` y el wrapper del cron, con umbrales y lock compartidos.
+* **Notificaciones:** El wrapper del cron ya no instala `libnotify`, lee el último bloque completo del resumen (antes se perdían los resultados) y envía por DBus con `runuser`/`sudo -u` sin depender de `DISPLAY`.
+* **Bitácora:** La rotación conserva el historial en `LOG_FILE.1` en lugar de vaciar el archivo.
+
+### 📝 v6.6.4
 * **Nuevo:** Integración de `install4me.sh` (v2.5.0) en el menú **Software** como opción 2. Instala por categorías desde repositorios nativos, Flatpak, GitHub Releases y AUR, con soporte para sistemas inmutables (`rpm-ostree`).
 * **Adaptación:** `install4me` usa ahora la paleta de colores FZF de STK, `--border-label` en sus menús y el log central `/var/log/stk_mantenimiento.log` con etiqueta `[INSTALL4ME]`.
 * **Menú:** El submenú de Software queda como `1. Actualización`, `2. Instalador por categorías`, `3. Instalar / Desinstalar programa` (submenú con las funciones rápidas ya existentes) y `4. Volver`.

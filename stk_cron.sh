@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 5.3 test programación manual"
+ver="v 5.4"
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -45,6 +45,26 @@ pintar() {
     local MENSAJE="$2" 
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
+
+# --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
+# Misma lógica de limpieza, auditoría, servicios, actualización y lock
+# que usa stk2.sh. La bitácora es el archivo común del proyecto.
+LOG_FILE="/var/log/stk_mantenimiento.log"
+LOG_INFO="INFO"
+LOG_WARN="WARN"
+LOG_ERR="ERROR"
+
+STK_AUTO_LIB="$SCRIPT_DIR/stk_auto_lib.sh"
+if [ ! -f "$STK_AUTO_LIB" ]; then
+    STK_AUTO_LIB=$(find /home /root /usr/local -maxdepth 5 -name "stk_auto_lib.sh" 2>/dev/null | head -n 1)
+fi
+if [ -f "$STK_AUTO_LIB" ]; then
+    # shellcheck source=stk_auto_lib.sh
+    source "$STK_AUTO_LIB"
+else
+    echo -e "\033[91m❌ Error: No se encontró la biblioteca $STK_AUTO_LIB.\033[0m" >&2
+    exit 1
+fi
 
 # mostrar_logo
 mostrar_logo() {
@@ -145,229 +165,151 @@ log_cron() {
 
 # CREAR WRAPPER 
 crear_wrapper_cron() {
-    cat << 'EOF' > "$STK_AUTO_WRAPPER"
+    # La ruta de la biblioteca se resuelve al generar el wrapper. El resto del
+    # script se escribe literalmente (comillas en el heredoc) para no expandir
+    # las variables que debe usar el cron en tiempo de ejecución.
+    local STK_AUTO_LIB_PATH="$SCRIPT_DIR/stk_auto_lib.sh"
+    {
+        cat << EOF
 #!/bin/bash
 # ==============================================================================
-#           STK - WRAPPER Y EJECUTOR DE TAREAS AUTOMÁTICAS (CRON)
+#  STK - WRAPPER Y EJECUTOR DE TAREAS AUTOMÁTICAS (CRON)
+#  Generado por stk_cron.sh. Comparte la lógica con el modo auto de stk2.sh.
 # ==============================================================================
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 export TERM="linux"
 export LANG="es_ES.UTF-8"
 
+STK_AUTO_LIB="$STK_AUTO_LIB_PATH"
+
 CRON_CONFIG_FILE="/etc/stk/cron/tasks.json"
 CRON_LOG_FILE="/var/log/stk_cron.log"
 CRON_RESUMEN_FILE="/var/log/stk_cron_resumen.log"
 
-verificar_dependencias() {
-    local pkgs_faltantes=()
-    if ! command -v notify-send &>/dev/null; then
-        pkgs_faltantes+=("libnotify")
-    fi
+if [ ! -f "\$STK_AUTO_LIB" ]; then
+    STK_AUTO_LIB=\$(find /home /root /usr/local -maxdepth 5 -name "stk_auto_lib.sh" 2>/dev/null | head -n 1)
+fi
+if [ -f "\$STK_AUTO_LIB" ]; then
+    # shellcheck source=stk_auto_lib.sh
+    source "\$STK_AUTO_LIB"
+else
+    echo "❌ No se encuentra \$STK_AUTO_LIB" >&2
+    exit 1
+fi
+EOF
 
-    if [ ${#pkgs_faltantes[@]} -gt 0 ]; then
-        if command -v pacman &>/dev/null; then
-            pacman -Sy --noconfirm --needed "${pkgs_faltantes[@]}" &>/dev/null
-        elif command -v apt-get &>/dev/null; then
-            apt-get update -y &>/dev/null && apt-get install -y "${pkgs_faltantes[@]}" &>/dev/null
-        fi
-    fi
+        cat << 'EOF'
+
+log_cron_exec() {
+    local nivel="${1:-INFO}"
+    local mensaje="${2}"
+    local fecha
+    fecha=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$fecha] [$nivel] [root] - $mensaje" >> "$CRON_LOG_FILE"
 }
 
+# ------------------------------------------------------------------------------
+# NOTIFICACIONES
+#  - No instalan paquetes automáticamente: si falta notify-send, se omite.
+#  - Leo el ÚLTIMO BLOQUE COMPLETO del resumen (no las últimas N líneas),
+#    porque el detalle de las tareas es largo y antes ocultaba los resultados.
+#  - Uso el bus DBus de la sesión del usuario; no necesito DISPLAY/WAYLAND.
+# ------------------------------------------------------------------------------
 enviar_notificacion() {
-    # 0. Respetar la preferencia del usuario (por defecto: notificaciones activadas)
     local notif_activas="true"
-    if command -v jq &>/dev/null; then
+    if command -v jq >/dev/null 2>&1; then
         notif_activas=$(jq -r 'if .configuracion.notificaciones == null then "true" else (.configuracion.notificaciones | tostring) end' "$CRON_CONFIG_FILE" 2>/dev/null)
         [ -z "$notif_activas" ] && notif_activas="true"
     elif grep -q '"notificaciones"[[:space:]]*:[[:space:]]*false' "$CRON_CONFIG_FILE" 2>/dev/null; then
         notif_activas="false"
     fi
     if [ "$notif_activas" != "true" ]; then
-        log_cron_exec "INFO" "Notificaciones desactivadas; se omite el aviso de escritorio."
+        log_cron_exec "INFO" "Notificaciones desactivadas; se omite el aviso."
         return 0
     fi
 
-    verificar_dependencias
+    if ! command -v notify-send >/dev/null 2>&1; then
+        log_cron_exec "INFO" "notify-send no disponible; no se instala nada automáticamente. Aviso omitido."
+        return 0
+    fi
 
-    # 1. Detectar usuario activo y socket de DBus de forma robusta
+    [ -f "$CRON_RESUMEN_FILE" ] || return 1
+
     local usuario_activo
-    usuario_activo=$(who | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
+    usuario_activo=$(who 2>/dev/null | grep -E '(:[0-9]|tty[0-9]|x11|wayland)' | awk '{print $1}' | head -n 1)
     [ -z "$usuario_activo" ] && usuario_activo=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -n 1)
-    [ -z "$usuario_activo" ] && usuario_activo=$(whoami)
+    if [ -z "$usuario_activo" ]; then
+        log_cron_exec "INFO" "Sin usuario con sesión activa; aviso omitido."
+        return 0
+    fi
 
     local user_id
     user_id=$(id -u "$usuario_activo" 2>/dev/null)
-    [ -z "$user_id" ] && return 1
+    local dbus_socket="/run/user/${user_id}/bus"
+    if [ -z "$user_id" ] || [ "$user_id" -eq 0 ] || [ ! -S "$dbus_socket" ]; then
+        log_cron_exec "INFO" "Sin bus de usuario activo ($dbus_socket); aviso omitido."
+        return 0
+    fi
 
-    [ ! -f "$CRON_RESUMEN_FILE" ] && return 1
-
-    # 2. Extraer ÚNICAMENTE la ejecución recién realizada (últimas 35 líneas)
-    local ultimo_bloque
-    ultimo_bloque=$(tail -n 35 "$CRON_RESUMEN_FILE")
-
-    # 3. Construir título y estado principal
-    local titulo="Cron4me: Informe de ejecución programada"
-    local mensaje=""
-    local urgencia="normal"
-    local icono="dialog-information"
-
-    if echo "$ultimo_bloque" | grep -q "❌"; then
-        urgencia="critical"
-        icono="dialog-error"
-        mensaje="❌ <b>ESTADO: HUBO FALLOS EN LA EJECUCIÓN</b>\n\n"
-    elif echo "$ultimo_bloque" | grep -q "⚠️"; then
-        urgencia="normal"
-        icono="dialog-warning"
-        mensaje="⚠️ <b>ESTADO: ATENCIÓN / ALERTAS</b>\n\n"
+    # Último bloque completo, delimitado por "RESUMEN EJECUCIÓN".
+    local ultimo_bloque inicio
+    inicio=$(grep -n "RESUMEN EJECUCIÓN" "$CRON_RESUMEN_FILE" 2>/dev/null | tail -1 | cut -d: -f1)
+    if [ -n "$inicio" ]; then
+        ultimo_bloque=$(tail -n +"$inicio" "$CRON_RESUMEN_FILE")
     else
-        urgencia="normal"
-        icono="emblem-ok-symbolic"
-        mensaje="✅ <b>ESTADO: EJECUCIÓN EXITOSA</b>\n\n"
+        ultimo_bloque=$(tail -n 60 "$CRON_RESUMEN_FILE")
+    fi
+    [ -n "$ultimo_bloque" ] || return 1
+
+    local titulo="Cron4me: Informe de ejecución programada"
+    local urgencia="normal" icono="dialog-information" estado="✅ EJECUCIÓN EXITOSA"
+    if printf '%s\n' "$ultimo_bloque" | grep -qE '^[[:space:]]*❌ Tarea \['; then
+        urgencia="critical"; icono="dialog-error"; estado="❌ HUBO FALLOS EN LA EJECUCIÓN"
+    elif printf '%s\n' "$ultimo_bloque" | grep -qE '⚠️|⚠ '; then
+        urgencia="normal"; icono="dialog-warning"; estado="⚠️ ATENCIÓN / ALERTAS"
     fi
 
-    # 4. Extraer el resultado de cada tarea ejecutada en este ciclo
-    local resumen_tareas
-    resumen_tareas=$(echo "$ultimo_bloque" | grep -E "✅|❌" | grep -v "RESUMEN EJECUCIÓN" | sed 's/^[[:space:]]*//')
-    
-    if [ -n "$resumen_tareas" ]; then
-        mensaje+="📋 <b>Resultado de Tareas:</b>\n${resumen_tareas}\n"
-    fi
+    local resumen_tareas avisos mensaje
+    resumen_tareas=$(printf '%s\n' "$ultimo_bloque" | grep -E '^[[:space:]]*[✅❌] Tarea \[' | sed 's/^[[:space:]]*//' | head -n 10)
+    avisos=$(printf '%s\n' "$ultimo_bloque" | grep -E '^[[:space:]]*(⚠️|⚠|🔄|🧠|♻️)' | sed 's/^[[:space:]]*//' | cut -c1-140 | head -n 5)
 
-    # Extraer detalle específico si Pacman / DB falló
-    if echo "$ultimo_bloque" | grep -q "no se pudo bloquear la base de datos"; then
-        mensaje+="\n⚠️ <i>Causa: Pacman bloqueado (db.lck).</i>"
-    fi
+    mensaje="$(printf 'Estado: %s\n\n' "$estado")"
+    [ -n "$resumen_tareas" ] && mensaje+="$(printf 'Tareas:\n%s\n' "$resumen_tareas")"
+    [ -n "$avisos" ] && mensaje+="$(printf '\nIncidencias:\n%s\n' "$avisos")"
 
-    # 5. Enviar notificación al escritorio del usuario
-    if command -v notify-send &>/dev/null; then
-        local dbus_socket="/run/user/${user_id}/bus"
-        
-        # Entorno gráfico
-        local user_display
-        user_display=$(pgrep -u "$usuario_activo" -a | grep -oP 'DISPLAY=:\d+(\.\d+)?' | head -n 1 | cut -d= -f2)
-        [ -z "$user_display" ] && user_display="${DISPLAY:-:0}"
-
-        local user_wayland
-        user_wayland=$(pgrep -u "$usuario_activo" -a | grep -oP 'WAYLAND_DISPLAY=wayland-\d+' | head -n 1 | cut -d= -f2)
-        [ -z "$user_wayland" ] && user_wayland="wayland-0"
-
-        sudo -u "$usuario_activo" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
-            DISPLAY="${user_display}" \
-            WAYLAND_DISPLAY="${user_wayland}" \
-            XDG_RUNTIME_DIR="/run/user/${user_id}" \
-            notify-send -u "$urgencia" -i "$icono" -t 10000 \
-            "$titulo" "$(echo -e "$mensaje")" 2>/dev/null
-    fi
-
-    return 0
-}
-
-
-
-log_cron_exec() {
-    local nivel="${1:-INFO}"
-    local mensaje="${2}"
-    local fecha=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$fecha] [$nivel] [root] - $mensaje" >> "$CRON_LOG_FILE"
-}
-
-esperar_bloqueos() {
-    local max_espera=120
-    local contador=0
-    
-    # Comprobar si existe algún archivo de bloqueo en el sistema
-    mientras_bloqueado() {
-        [ -f /var/lib/pacman/db.lck ] || \
-        [ -f /var/lib/dpkg/lock-frontend ] || \
-        [ -f /var/lib/dpkg/lock ] || \
-        [ -f /var/run/dnf.pid ] || \
-        [ -f /var/run/zypp.pid ]
-    }
-
-    while mientras_bloqueado && [ $contador -lt $max_espera ]; do
-        echo "⏳ Gestor de paquetes ocupado por otro proceso del sistema. Esperando 5s... ($contador/${max_espera}s)"
-        sleep 5
-        ((contador+=5))
-    done
-
-    if mientras_bloqueado; then
-        echo "⚠️ Tiempo de espera agotado. El bloqueo del gestor de paquetes no se liberó a tiempo."
-        return 1
-    fi
-    return 0
-}
-
-Actualizar_sistema() {
-    local status=0
-
-    # Esperar activamente a que finalicen las actualizaciones automáticas del sistema
-    esperar_bloqueos || return 1
-
-    if command -v pacman &>/dev/null; then
-        echo "📦 Sincronizando repositorios y sistema (PACMAN)..."
-        pacman -Syu --noconfirm --color never || status=$?
-    elif command -v apt-get &>/dev/null; then
-        echo "📦 Sincronizando repositorios y sistema (APT)..."
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -y && apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || status=$?
-    elif command -v dnf &>/dev/null; then
-        echo "📦 Sincronizando repositorios y sistema (DNF - Fedora/RHEL)..."
-        dnf upgrade -y --color=never || status=$?
-    elif command -v zypper &>/dev/null; then
-        echo "📦 Sincronizando repositorios y sistema (ZYPPER - openSUSE)..."
-        zypper --non-interactive update || status=$?
-    elif command -v apk &>/dev/null; then
-        echo "📦 Sincronizando repositorios y sistema (APK - Alpine)..."
-        apk update && apk upgrade || status=$?
-    fi
-
-    if command -v flatpak &>/dev/null; then
-        echo "📦 Actualizando paquetes Flatpak..."
-        flatpak update -y || true
-    fi
-
-    return $status
-}
-super_limpieza() {
-    local status=0
-    if command -v pacman &>/dev/null; then
-        echo "🧹 Limpiando caché de paquetes y huérfanos (PACMAN)..."
-        pacman -Sc --noconfirm &>/dev/null || true
-        local huerfanos=$(pacman -Qtdq 2>/dev/null)
-        if [ -n "$huerfanos" ]; then
-            pacman -Rns $huerfanos --noconfirm || status=$?
+    local -a notificar=(notify-send -u "$urgencia" -i "$icono" -t 10000 "$titulo" "$mensaje")
+    if [ "$(id -u)" -eq 0 ] && [ "$user_id" -ne 0 ]; then
+        if command -v runuser >/dev/null 2>&1; then
+            runuser -u "$usuario_activo" -- env \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+                XDG_RUNTIME_DIR="/run/user/${user_id}" \
+                "${notificar[@]}" 2>/dev/null
+        else
+            sudo -u "$usuario_activo" env \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+                XDG_RUNTIME_DIR="/run/user/${user_id}" \
+                "${notificar[@]}" 2>/dev/null
         fi
-    elif command -v apt-get &>/dev/null; then
-        echo "🧹 Limpiando caché y paquetes no requeridos (APT)..."
-        apt-get autoremove -y && apt-get clean || status=$?
-    elif command -v dnf &>/dev/null; then
-        echo "🧹 Limpiando caché y paquetes no requeridos (DNF)..."
-        dnf autoremove -y && dnf clean all || status=$?
-    elif command -v zypper &>/dev/null; then
-        echo "🧹 Limpiando caché (ZYPPER)..."
-        zypper clean --all || status=$?
-    elif command -v apk &>/dev/null; then
-        echo "🧹 Limpiando caché (APK)..."
-        apk cache clean || status=$?
+    else
+        DBUS_SESSION_BUS_ADDRESS="unix:path=${dbus_socket}" \
+        XDG_RUNTIME_DIR="/run/user/${user_id}" \
+        "${notificar[@]}" 2>/dev/null
     fi
-
-    if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=7d &>/dev/null || true
-    fi
-
-    return $status
+    return 0
 }
 
+# ------------------------------------------------------------------------------
+# EJECUCIÓN DE TAREAS (implementaciones en stk_auto_lib.sh)
+# ------------------------------------------------------------------------------
 ejecutar_auto_actualizacion() {
     log_cron_exec "INFO" "▶ Inicio: Actualización del sistema"
     echo "🔄 INICIANDO ACTUALIZACIÓN DEL SISTEMA..."
-    
-    # Muestra el resultado de la función en STDOUT para que se guarde en LOG_TEMP
-    Actualizar_sistema
+    echo "🛟 Punto de recuperación previo:"
+    stk_snapshot || echo "⚠️ No se pudo crear punto de recuperación"
+
+    stk_actualizar
     local res=$?
-    
     if [ $res -eq 0 ]; then
         log_cron_exec "INFO" "✅ Actualización completada"
         echo "✅ Actualización completada correctamente."
@@ -375,13 +317,18 @@ ejecutar_auto_actualizacion() {
         log_cron_exec "ERROR" "❌ Actualización falló con código $res"
         echo "❌ Error al ejecutar la actualización (Código $res)."
     fi
+    if [ ${#ACT_INCIDENCIAS[@]} -gt 0 ]; then
+        echo "⚠️ Incidencias detectadas (también en la bitácora):"
+        local inc
+        for inc in "${ACT_INCIDENCIAS[@]}"; do echo "   • $inc"; done
+    fi
     return $res
 }
 
 ejecutar_auto_limpieza() {
-    log_cron_exec "INFO" "▶ Inicio: Limpieza del sistema"
-    echo "🧹 INICIANDO LIMPIEZA DEL SISTEMA..."
-    super_limpieza
+    log_cron_exec "INFO" "▶ Inicio: Limpieza segura del sistema"
+    echo "🧹 INICIANDO LIMPIEZA SEGURA DEL SISTEMA..."
+    stk_limpieza auto
     local res=$?
     if [ $res -eq 0 ]; then
         log_cron_exec "INFO" "✅ Limpieza completada"
@@ -397,60 +344,12 @@ ejecutar_auto_auditoria() {
     log_cron_exec "INFO" "▶ Inicio: Auditoría de seguridad"
     echo "🔍 AUDITORÍA DE SEGURIDAD (RESUMEN)"
     echo "----------------------------------------"
-    
-    local total_checks=0
-    local checks_passed=0
-    local alertas=()
-    
-    ((total_checks++))
-    if [ $(awk -F: '$3 == 0 {print $1}' /etc/passwd 2>/dev/null | wc -l) -eq 1 ]; then
-        ((checks_passed++))
-    else
-        alertas+=("Múltiples usuarios con UID 0")
-    fi
-    
-    ((total_checks++))
-    if [ -z "$(awk -F: '($2 == "" || $2 == "!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
-        ((checks_passed++))
-    else
-        alertas+=("Cuentas inactivas o sin contraseña")
-    fi
-    
-    ((total_checks++))
-    if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
-        ((checks_passed++))
-    else
-        alertas+=("Firewall inactivo o sin reglas")
-    fi
-    
-    ((total_checks++))
-    if command -v ss &>/dev/null; then
-        if ! ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
-            ((checks_passed++))
-        else
-            alertas+=("SSH expuesto en puerto 22")
-        fi
-    else
-        ((checks_passed++))
-    fi
-    
-    ((total_checks++))
-    if command -v getenforce &>/dev/null && [ "$(getenforce 2>/dev/null)" == "Enforcing" ]; then
-        ((checks_passed++))
-    elif command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
-        ((checks_passed++))
-    else
-        alertas+=("Sin módulo MAC activo")
-    fi
-    
-    local score=$(( (checks_passed * 100) / total_checks ))
-    echo "📊 Puntuación: ${score}% (${checks_passed}/${total_checks})"
-    
-    if [ ${#alertas[@]} -gt 0 ]; then
+    stk_auditoria
+    echo "📊 $RES_SEGURIDAD"
+    if [ ${#SEC_ALERTAS[@]} -gt 0 ]; then
         echo "⚠️ Alertas detectadas:"
-        for alt in "${alertas[@]}"; do
-            echo "  • $alt"
-        done
+        local alt
+        for alt in "${SEC_ALERTAS[@]}"; do echo "  • $alt"; done
     else
         echo "✅ No se detectaron alertas de seguridad."
     fi
@@ -461,42 +360,29 @@ ejecutar_auto_servicios() {
     log_cron_exec "INFO" "▶ Inicio: Reporte de servicios"
     echo "📊 REPORTE DE SERVICIOS (Systemd)"
     echo "----------------------------------------"
-    
-    local failed_services
-    failed_services=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
-    
-    if [ -n "$failed_services" ]; then
-        local count=$(echo "$failed_services" | wc -l)
-        echo "⚠️ Servicios fallidos detectados: $count"
-        echo "$failed_services" | while read -r svc; do
-            echo "  • $svc"
-        done
-        return 1
-    else
-        echo "✅ Todos los servicios operan correctamente."
-        return 0
-    fi
+    stk_servicios
+    echo "$RES_SERVICIOS"
+    [ "$REBOOT_REQUIRED" = true ] && echo "🔄 Reinicio recomendado${REBOOT_PKGS:+ (paquetes: $REBOOT_PKGS)}"
+    [ "$KERNEL_PENDIENTE" = true ] && echo "🧠 Kernel nuevo instalado; se aplicará al reiniciar"
+    [ -n "$NEEDRESTART" ] && echo "♻️ Servicios que necesitan reinicio: $NEEDRESTART"
+    [ ${#SVC_FAILED_ARR[@]} -gt 0 ] && return 1
+    return 0
 }
 
 ejecutar_auto_ufw() {
     log_cron_exec "INFO" "▶ Inicio: Auditoría UFW"
     echo "🛡️ AUDITORÍA UFW"
     echo "----------------------------------------"
-    
-    if ! command -v ufw &>/dev/null; then
+    if ! command -v ufw >/dev/null 2>&1; then
         echo "❌ UFW no está instalado en el sistema."
         return 1
     fi
-    
     echo "📋 Estado de UFW:"
     ufw status verbose 2>/dev/null | head -20
-    
     if [ -f "/var/log/ufw.log" ]; then
         echo ""
         echo "📊 Estadísticas:"
-        local block_count=$(grep -c "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -1)
-        echo "  • Bloqueos totales: $block_count"
-        echo ""
+        echo "  • Bloqueos totales: $(grep -c "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -1)"
         echo "🔍 Últimos bloqueos:"
         grep "UFW BLOCK" /var/log/ufw.log 2>/dev/null | tail -5 | while read -r line; do
             echo "  • $line"
@@ -507,15 +393,26 @@ ejecutar_auto_ufw() {
     return 0
 }
 
-
 PARAM_SCHED="$1"
 
-
-if [ -n "$PARAM_SCHED" ] && command -v jq &>/dev/null; then
+if [ -n "$PARAM_SCHED" ] && command -v jq >/dev/null 2>&1; then
     TAREAS=$(jq -r --arg sched "$PARAM_SCHED" '.tareas[] | select((.schedule | gsub("&"; "") | trim) == $sched) | .id' "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
 else
-    
     TAREAS=$(jq -r ".tareas[] | .id" "$CRON_CONFIG_FILE" 2>/dev/null | tr "\n" " ")
+fi
+
+if [ -z "$(echo "$TAREAS" | tr -d '[:space:]')" ]; then
+    log_cron_exec "WARN" "No hay tareas programadas para este horario."
+    echo "⚠️ No hay tareas programadas para este horario."
+    exit 0
+fi
+
+# Lock COMPARTIDO con stk2.sh: evita que el cron y el modo auto interactivo
+# ejecuten apt/dnf/pacman al mismo tiempo.
+if ! stk_lock_adquirir; then
+    log_cron_exec "WARN" "Lock ocupado: ya hay otra ejecución del modo auto; se omiten las tareas."
+    echo "⚠️ Ya hay otra ejecución del modo auto en curso."
+    exit 0
 fi
 
 T_INICIO=$(date +%s)
@@ -525,7 +422,7 @@ DETALLES_INFORME=""
 for tarea in $TAREAS; do
     LOG_TEMP=$(mktemp)
     STATUS_CODE=0
-    
+
     case "$tarea" in
         "actualizacion") ejecutar_auto_actualizacion > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
         "limpieza")      ejecutar_auto_limpieza > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
@@ -534,28 +431,23 @@ for tarea in $TAREAS; do
         "ufw")           ejecutar_auto_ufw > "$LOG_TEMP" 2>&1; STATUS_CODE=$? ;;
     esac
 
-   
-    # 1. Registrar resultado visual 
     if [ $STATUS_CODE -eq 0 ]; then
         RESULTADOS+=("✅ Tarea [$tarea] finalizada exitosamente.")
     else
         RESULTADOS+=("❌ Tarea [$tarea] falló (Código: $STATUS_CODE).")
     fi
 
-    # 2. Capturar y acumular la salida producida en DETALLES_INFORME
     DETALLES_INFORME+="--- Salida de $tarea ---\n"
     DETALLES_INFORME+="$(cat "$LOG_TEMP")\n\n"
-
-    # 3. Limpiar el archivo temporal utilizado
     rm -f "$LOG_TEMP"
-    # ---------------------------
 
     while pgrep -x "pacman" >/dev/null || pgrep -x "apt-get" >/dev/null; do
         sleep 2
     done
-
     sleep 5
 done
+
+stk_lock_liberar
 
 T_FIN=$(date +%s)
 DURACION=$((T_FIN - T_INICIO))
@@ -565,7 +457,7 @@ DURACION=$((T_FIN - T_INICIO))
     echo "📊 RESUMEN EJECUCIÓN - $(date "+%Y-%m-%d %H:%M:%S")"
     echo "═══════════════════════════════════════════════════════════════"
     echo "⏱️  Duración: ${DURACION} segundos"
-    echo "📋 Tarea: $TAREA_ARG"
+    echo "📋 Tareas: $TAREAS"
     echo ""
     for resultado in "${RESULTADOS[@]}"; do
         echo "  $resultado"
@@ -578,11 +470,12 @@ DURACION=$((T_FIN - T_INICIO))
 
 TMP_JSON=$(mktemp)
 jq --arg fecha "$(date '+%Y-%m-%d %H:%M:%S')" '.configuracion.ultima_ejecucion = $fecha' "$CRON_CONFIG_FILE" > "$TMP_JSON" 2>/dev/null && mv "$TMP_JSON" "$CRON_CONFIG_FILE"
+rm -f "$TMP_JSON"
 
 enviar_notificacion
-
 exit 0
 EOF
+    } > "$STK_AUTO_WRAPPER"
 
     chmod +x "$STK_AUTO_WRAPPER"
 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.4"
+V="6.6.5"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -92,16 +92,16 @@ rotar_logs() {
     fi
 
     if [ "$SIZE" -ge "$MAX_SIZE" ]; then
-        [ "$MODO_SILENCIOSO" != "silencioso" ] && pintar "$AMARILLO" "⚠️ El archivo excede el límite. Procediendo con el vaciado y rotación..."
-        
-        # Guardar marca del reinicio en el log vaciando el contenido anterior
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Log reiniciado por alcanzar el límite de $MAX_SIZE KB (Tamaño anterior: ${SIZE} KB)." > "$LOG_FILE"
-        
-        # Ajustar permisos por seguridad
-        chmod 640 "$LOG_FILE"
+        [ "$MODO_SILENCIOSO" != "silencioso" ] && pintar "$AMARILLO" "⚠️ El archivo excede el límite. Procediendo con la rotación..."
+
+        # La bitácora es el único registro persistente del modo auto: se
+        # conserva el historial anterior en .1 en lugar de descartarlo.
+        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] - Bitácora rotada al superar ${MAX_SIZE} KB (tamaño anterior: ${SIZE} KB). Historial previo: ${LOG_FILE}.1." > "$LOG_FILE"
+        chmod 640 "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null
 
         if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
-            pintar "$VERDE_BRILLANTE" "✔ Se han liberado ${SIZE} KB de espacio en la bitácora."
+            pintar "$VERDE_BRILLANTE" "✔ Bitácora rotada; historial conservado en ${LOG_FILE}.1"
             pintar "$VERDE" "✔ Permisos reafirmados a 640 (root:root/adm)."
         fi
     else
@@ -1214,7 +1214,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                     accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
-                        1) super_limpieza ;;
+                        1) stk_limpieza completa ;;
                         2) ver_logs ;;
                         3) rotar_logs ;;
                     esac                   
@@ -1241,11 +1241,23 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 AUTO_MIN_ESPACIO_MB=1024          # Espacio libre mínimo en / para actualizar
 AUTO_TIMEOUT_ACTUALIZACION=1800   # 30 min para el bloque de actualización
 AUTO_TIMEOUT_LIMPIEZA=600         # 10 min por comando de limpieza
+AUTO_LIMPIEZA_LOG_DIAS=7          # Retención de logs del journal (limpieza segura)
 AUTO_LIMITE_SUID=60               # Umbral de binarios SUID considerados anormales en auditoria
-AUTO_ESTADO_DIR="/var/lib/stk"
-AUTO_JSON_FILE="$AUTO_ESTADO_DIR/last_auto.json"
-AUTO_JSON_HIST="$AUTO_ESTADO_DIR/auto_history.jsonl"
-AUTO_LOCK_FILE=""
+STK_ESTADO_DIR="/var/lib/stk"     # snapshots lógicos (sin informes JSON)
+
+# --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
+# Un sola implementación de lock, preflight, snapshot, actualización,
+# limpieza, auditoría y servicios para stk2.sh y para el cron.
+STK_AUTO_LIB="$SCRIPT_DIR/stk_auto_lib.sh"
+if [ ! -f "$STK_AUTO_LIB" ]; then
+    STK_AUTO_LIB=$(find /home /root /usr/local -maxdepth 5 -name "stk_auto_lib.sh" 2>/dev/null | head -n 1)
+fi
+if [ -f "$STK_AUTO_LIB" ]; then
+    # shellcheck source=stk_auto_lib.sh
+    source "$STK_AUTO_LIB"
+else
+    pintar "$ROJO" "❌ No se encuentra $STK_AUTO_LIB. El modo automático no está disponible."
+fi
 
 # Checklist de pasos. Sin TTY (scripts/cron) devuelve todos los pasos.
 auto_checklist() {
@@ -1284,437 +1296,18 @@ auto_checklist() {
     printf '%s\n' "$seleccion"
 }
 
-# Lock exclusivo para evitar dos ejecuciones simultáneas del modo auto.
-auto_lock_adquirir() {
-    command -v flock &>/dev/null || return 0
-
-    local lock_dir="/run/lock"
-    [ -d "$lock_dir" ] || lock_dir="/var/lock"
-    [ -d "$lock_dir" ] || return 0
-
-    AUTO_LOCK_FILE="$lock_dir/stk_auto.lock"
-    if ! { exec 9>"$AUTO_LOCK_FILE"; } 2>/dev/null; then
-        AUTO_LOCK_FILE=""
-        return 0
-    fi
-
-    if ! flock -n 9; then
-        exec 9>&-
-        return 1
-    fi
-    return 0
-}
-
-auto_lock_liberar() {
-    [ -n "${AUTO_LOCK_FILE:-}" ] || return 0
-    flock -u 9 2>/dev/null
-    exec 9>&-
-    AUTO_LOCK_FILE=""
-}
-
-# ¿Hay algún gestor de paquetes trabajando ahora mismo?
-auto_gestor_ocupado() {
-    local p
-    for p in apt-get apt dpkg dnf zypper pacman rpm-ostree; do
-        pgrep -x "$p" >/dev/null 2>&1 && return 0
-    done
-    return 1
-}
-
-# Preflight: red, espacio, gestor ocupado y batería.
-auto_preflight() {
-    PRE_RED="ok"
-    PRE_ESPACIO_MB=0
-    PRE_ESPACIO_OK=true
-    PRE_GESTOR_LIBRE=true
-    PRE_BATERIA="N/D"
-    PRE_AVISOS=()
-
-    pintar "$CIAN" "🔎 Preflight del sistema..."
-
-    # Red: probamos el mirror propio de la distro y alternativas
-    local -a urls_red=()
-    if [ "$IMMUTABLE" = true ]; then
-        urls_red=(https://fedoraproject.org)
-    else
-        case "$Package" in
-            apt) urls_red=(https://deb.debian.org https://archive.ubuntu.com) ;;
-            pacman) urls_red=(https://archlinux.org https://mirror.rackspace.com) ;;
-            dnf) urls_red=(https://fedoraproject.org) ;;
-            zypper) urls_red=(https://www.opensuse.org) ;;
-            *) urls_red=(https://deb.debian.org https://archlinux.org) ;;
-        esac
-    fi
-
-    local url red_ok=false
-    for url in "${urls_red[@]}"; do
-        if curl -sI --max-time 5 "$url" >/dev/null 2>&1; then
-            red_ok=true
-            break
-        fi
-    done
-    if [ "$red_ok" = false ]; then
-        PRE_RED="sin conexión"
-        PRE_AVISOS+=("Sin conexión a Internet: se omite la actualización")
-    fi
-
-    # Espacio libre
-    PRE_ESPACIO_MB=$(df -Pm / 2>/dev/null | awk 'NR==2 {print $4}')
-    [[ "$PRE_ESPACIO_MB" =~ ^[0-9]+$ ]] || PRE_ESPACIO_MB=0
-    if [ "$PRE_ESPACIO_MB" -lt "$AUTO_MIN_ESPACIO_MB" ]; then
-        PRE_ESPACIO_OK=false
-        PRE_AVISOS+=("Espacio libre bajo (${PRE_ESPACIO_MB} MB < ${AUTO_MIN_ESPACIO_MB} MB): se omite la actualización")
-    fi
-
-    # Gestor de paquetes ocupado: espera hasta 60 s
-    if auto_gestor_ocupado; then
-        PRE_GESTOR_LIBRE=false
-        pintar "$AMARILLO" "   ⏳ Gestor de paquetes ocupado; esperando hasta 60 s..."
-        local i
-        for i in $(seq 1 12); do
-            sleep 5
-            if ! auto_gestor_ocupado; then
-                PRE_GESTOR_LIBRE=true
-                break
-            fi
-        done
-        [ "$PRE_GESTOR_LIBRE" = false ] && PRE_AVISOS+=("Gestor de paquetes bloqueado: se omite la actualización")
-    fi
-
-    # Batería (solo aviso)
-    local bat cap estado
-    for bat in /sys/class/power_supply/BAT*; do
-        [ -r "$bat/capacity" ] || continue
-        cap=$(cat "$bat/capacity" 2>/dev/null)
-        estado=$(cat "$bat/status" 2>/dev/null)
-        PRE_BATERIA="${cap}% (${estado})"
-        if [ "$estado" = "Discharging" ] && [ "${cap:-100}" -lt 20 ]; then
-            PRE_AVISOS+=("Batería baja (${cap}%) y sin cargador")
-        fi
-        break
-    done
-
-    echo -e "   ${AMARILLO}Red:${RESET} ${BLANCO}${PRE_RED}${RESET}   ${AMARILLO}Espacio:${RESET} ${BLANCO}${PRE_ESPACIO_MB} MB${RESET}   ${AMARILLO}Batería:${RESET} ${BLANCO}${PRE_BATERIA}${RESET}"
-
-    local aviso
-    for aviso in "${PRE_AVISOS[@]}"; do
-        pintar "$AMARILLO" "   ⚠ $aviso"
-    done
-    echo ""
-}
-
-# Punto de recuperación previo: snapper/timeshift o lista de paquetes.
-auto_snapshot() {
-    SNAPSHOT_METODO="ninguno"
-    SNAPSHOT_OK=false
-
-    pintar "$CIAN" "🛟 Creando punto de recuperación previo..."
-
-    # 1. snapper (btrfs)
-    if command -v snapper &>/dev/null && snapper list-configs >/dev/null 2>&1; then
-        local cfg
-        cfg=$(snapper list-configs 2>/dev/null | awk -F'|' 'NF > 1 && $1 !~ /Config|^-/ {gsub(/ /, "", $1); print $1; exit}')
-        if [ -n "$cfg" ] && snapper -c "$cfg" create -d "STK auto pre-update $(date '+%F %T')" >/dev/null 2>&1; then
-            SNAPSHOT_METODO="snapper ($cfg)"
-            SNAPSHOT_OK=true
-            pintar "$VERDE" "   └─ Snapshot de snapper creado."
-            return 0
-        fi
-    fi
-
-    # 2. timeshift
-    if command -v timeshift &>/dev/null \
-       && { [ -f /etc/timeshift/timeshift.json ] || [ -f /etc/timeshift.json ]; }; then
-        local -a TMO_TS=()
-        command -v timeout &>/dev/null && TMO_TS=(timeout 300)
-        if "${TMO_TS[@]}" timeshift --create --scripted --comments "STK auto pre-update" >/dev/null 2>&1; then
-            SNAPSHOT_METODO="timeshift"
-            SNAPSHOT_OK=true
-            pintar "$VERDE" "   └─ Snapshot de timeshift creado."
-            return 0
-        fi
-    fi
-
-    # 3. Respaldo lógico de la lista de paquetes
-    local dir="$AUTO_ESTADO_DIR/snapshots/$(date '+%Y%m%d_%H%M%S')"
-    if mkdir -p "$dir" 2>/dev/null; then
-        case "$Package" in
-            apt) dpkg --get-selections > "$dir/dpkg-selections.txt" 2>/dev/null ;;
-            pacman) pacman -Qqe > "$dir/pacman-explicit.txt" 2>/dev/null ;;
-            dnf|zypper) rpm -qa > "$dir/rpm-packages.txt" 2>/dev/null ;;
-        esac
-        if [ "$IMMUTABLE" = true ]; then
-            rpm-ostree status > "$dir/rpm-ostree-status.txt" 2>/dev/null
-        fi
-        SNAPSHOT_METODO="lista de paquetes ($dir)"
-        SNAPSHOT_OK=true
-        pintar "$VERDE" "   └─ Lista de paquetes respaldada en $dir"
-        return 0
-    fi
-
-    pintar "$AMARILLO" "   └─ No se pudo crear ningún punto de recuperación."
-    return 1
-}
-
-auto_preparar_estado() {
-    if ! mkdir -p "$AUTO_ESTADO_DIR" 2>/dev/null || [ ! -w "$AUTO_ESTADO_DIR" ]; then
-        AUTO_ESTADO_DIR="$STK_TMP_DIR"
-        AUTO_JSON_FILE="$AUTO_ESTADO_DIR/last_auto.json"
-        AUTO_JSON_HIST="$AUTO_ESTADO_DIR/auto_history.jsonl"
-    else
-        chmod 750 "$AUTO_ESTADO_DIR" 2>/dev/null
-    fi
-}
-
-# Auditoría de seguridad ampliada. Rellena SEC_ALERTAS y SCORE_SEGURIDAD.
-auto_auditoria() {
-    local sec_checks=0 sec_passed=0
-    SEC_ALERTAS=()
-
-    # 1. UID 0
-    ((sec_checks++))
-    if [ "$(awk -F: '$3 == 0 {print $1}' /etc/passwd | wc -l)" -gt 1 ]; then
-        SEC_ALERTAS+=("Múltiples usuarios con UID 0 detectados")
-    else
-        ((sec_passed++))
-    fi
-
-    # 2. Cuentas sin contraseña
-    ((sec_checks++))
-    if [ -n "$(awk -F: '($2 == "" || $2 == "!!") {print $1}' /etc/shadow 2>/dev/null)" ]; then
-        SEC_ALERTAS+=("Cuentas inactivas o sin contraseña configurada")
-    else
-        ((sec_passed++))
-    fi
-
-    # 3. Cortafuegos
-    ((sec_checks++))
-    if comprobar_firewall; then
-        ((sec_passed++))
-    else
-        SEC_ALERTAS+=("Firewall inactivo o sin reglas configuradas")
-    fi
-
-    # 4. SSH expuesto
-    ((sec_checks++))
-    if command -v ss &>/dev/null; then
-        if ss -tulpn 2>/dev/null | grep LISTEN | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
-            SEC_ALERTAS+=("Puerto SSH (22) expuesto públicamente")
-        else
-            ((sec_passed++))
-        fi
-    else
-        ((sec_passed++))
-    fi
-
-    # 5. Módulos MAC (SELinux / AppArmor)
-    ((sec_checks++))
-    if command -v getenforce &>/dev/null && [ "$(getenforce)" = "Enforcing" ]; then
-        ((sec_passed++))
-    elif command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
-        ((sec_passed++))
-    else
-        SEC_ALERTAS+=("Sin módulo MAC activo (AppArmor/SELinux)")
-    fi
-
-    # 6. Actualizaciones de seguridad automáticas (solo Debian/Ubuntu)
-    if [ "$Package" = "apt" ]; then
-        ((sec_checks++))
-        if dpkg -s unattended-upgrades >/dev/null 2>&1 \
-           && grep -Rqs 'Unattended-Upgrade[[:space:]]*"1"' /etc/apt/apt.conf.d/ 2>/dev/null; then
-            ((sec_passed++))
-        else
-            SEC_ALERTAS+=("Actualizaciones de seguridad automáticas (unattended-upgrades) no activas")
-        fi
-    fi
-
-    # 7-8. Endurecimiento de SSH (solo si sshd está activo)
-    local ssh_activo=false
-    if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
-        ssh_activo=true
-    fi
-
-    if [ "$ssh_activo" = true ]; then
-        ((sec_checks++))
-        if systemctl is-active --quiet fail2ban 2>/dev/null || pgrep -x fail2ban-server >/dev/null 2>&1; then
-            ((sec_passed++))
-        else
-            SEC_ALERTAS+=("SSH activo sin fail2ban")
-        fi
-
-        if [ -f /etc/ssh/sshd_config ]; then
-            ((sec_checks++))
-            local ssh_root_login="" ssh_pass_auth=""
-            if command -v sshd &>/dev/null && sshd -T >/dev/null 2>&1; then
-                ssh_root_login=$(sshd -T 2>/dev/null | awk '$1 == "permitrootlogin" {print $2}')
-                ssh_pass_auth=$(sshd -T 2>/dev/null | awk '$1 == "passwordauthentication" {print $2}')
-            else
-                ssh_root_login=$(grep -Ei '^[[:space:]]*PermitRootLogin[[:space:]]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print tolower($2)}' | tail -n1)
-                ssh_pass_auth=$(grep -Ei '^[[:space:]]*PasswordAuthentication[[:space:]]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print tolower($2)}' | tail -n1)
-            fi
-            if [ "$ssh_root_login" = "yes" ] || [ "$ssh_pass_auth" = "yes" ]; then
-                SEC_ALERTAS+=("SSH poco endurecido (PermitRootLogin/PasswordAuthentication en 'yes')")
-            else
-                ((sec_passed++))
-            fi
-        fi
-    fi
-
-    # 9. NOPASSWD en sudoers
-    ((sec_checks++))
-    if grep -rEsq '^[[:space:]]*[^#[:space:]].*NOPASSWD' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
-        SEC_ALERTAS+=("Reglas NOPASSWD en sudoers")
-    else
-        ((sec_passed++))
-    fi
-
-    # 10. Archivos world-writable en rutas críticas
-    ((sec_checks++))
-    local ww
-    ww=$(find /etc /usr/local /var/www -xdev -type f -perm -0002 2>/dev/null | head -n 3 | tr '\n' ' ')
-    if [ -n "$ww" ]; then
-        SEC_ALERTAS+=("Archivos world-writable en rutas críticas: $ww")
-    else
-        ((sec_passed++))
-    fi
-
-    # 11. Puertos sensibles expuestos
-    ((sec_checks++))
-    if command -v ss &>/dev/null \
-       && ss -tulpn 2>/dev/null | awk 'NR > 1 {print $5}' \
-          | grep -qE '^(0\.0\.0\.0|\[::\]|\*):(21|23|3306|5432|6379|27017|11211)$'; then
-        SEC_ALERTAS+=("Puertos sensibles expuestos (21/23/3306/5432/6379/27017/11211)")
-    else
-        ((sec_passed++))
-    fi
-
-    SEC_CHECKS=$sec_checks
-    SEC_PASSED=$sec_passed
-    SCORE_SEGURIDAD=$(( (sec_passed * 100) / sec_checks ))
-    RES_SEGURIDAD="Puntuación: ${SCORE_SEGURIDAD}% (${sec_passed}/${sec_checks} pruebas). Alertas: ${#SEC_ALERTAS[@]}."
-}
-
-# Servicios fallidos, reinicio pendiente y kernel nuevo.
-auto_servicios() {
-    SVC_FAILED_ARR=()
-    if command -v systemctl &>/dev/null; then
-        local svcs_failed
-        svcs_failed=$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}')
-        if [ -n "$svcs_failed" ]; then
-            mapfile -t SVC_FAILED_ARR < <(printf '%s\n' "$svcs_failed")
-            RES_SERVICIOS="⚠️ Detectados ${#SVC_FAILED_ARR[@]} servicio(s) fallido(s): $(printf '%s ' "${SVC_FAILED_ARR[@]}")"
-        else
-            RES_SERVICIOS="✔ Todos los servicios operan correctamente (0 fallidos)."
-        fi
-    else
-        RES_SERVICIOS="N/D (systemd no disponible)."
-    fi
-
-    REBOOT_REQUIRED=false
-    REBOOT_PKGS=""
-    if [ -f /var/run/reboot-required ] || [ -f /run/reboot-required ]; then
-        REBOOT_REQUIRED=true
-        local f="/var/run/reboot-required.pkgs"
-        [ -f "$f" ] || f="/run/reboot-required.pkgs"
-        if [ -f "$f" ]; then
-            REBOOT_PKGS=$(sort -u "$f" 2>/dev/null | tr '\n' ' ')
-        fi
-    fi
-
-    KERNEL_PENDIENTE=false
-    local run_kernel latest_kernel
-    run_kernel=$(uname -r 2>/dev/null)
-    latest_kernel=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | grep -E '[0-9]' | sort -V | tail -n1)
-    if [ -n "$latest_kernel" ] && [ "$latest_kernel" != "$run_kernel" ]; then
-        KERNEL_PENDIENTE=true
-    fi
-
-    NEEDRESTART=""
-    if command -v needrestart &>/dev/null; then
-        NEEDRESTART=$(needrestart -b 2>/dev/null | awk -F': ' '/NEEDRESTART-SVC/ {print $2}' | tr '\n' ' ')
-    fi
-}
-
-# --- Utilidades JSON ---
-auto_json_escape() {
-    local s="$1"
-    s=${s//\\/\\\\}
-    s=${s//\"/\\\"}
-    s=${s//$'\n'/\\n}
-    s=${s//$'\t'/\\t}
-    s=${s//$'\r'/\\r}
-    printf '%s' "$s"
-}
-
-auto_json_arr() {
-    local out="" x
-    for x in "$@"; do
-        out+="${out:+,}\"$(auto_json_escape "$x")\""
-    done
-    printf '[%s]' "$out"
-}
-
-auto_escribir_json() {
-    local resultado="$1" duracion="$2"
-    auto_preparar_estado
-
-    # Usamos jq para construir el JSON de forma segura (evita inyección de caracteres especiales)
-    jq -n \
-        --arg fecha "$FECHA_INICIO" \
-        --argjson duracion "$duracion" \
-        --arg resultado "$resultado" \
-        --argjson pasos "$(auto_json_arr "${PASOS_EJECUTADOS[@]}")" \
-        --arg pre_red "$PRE_RED" \
-        --argjson pre_espacio_mb "$PRE_ESPACIO_MB" \
-        --argjson pre_espacio_ok "$PRE_ESPACIO_OK" \
-        --arg pre_bateria "$PRE_BATERIA" \
-        --argjson pre_avisos "$(auto_json_arr "${PRE_AVISOS[@]}")" \
-        --arg snapshot "$SNAPSHOT_METODO" \
-        --argjson esp_liberado "${ESPACIO_LIBERADO_MB:-0}" \
-        --argjson score "${SCORE_SEGURIDAD:-0}" \
-        --argjson alertas "$(auto_json_arr "${SEC_ALERTAS[@]}")" \
-        --argjson svcs_fallidos "$(auto_json_arr "${SVC_FAILED_ARR[@]}")" \
-        --argjson reboot "$REBOOT_REQUIRED" \
-        --argjson kernel "$KERNEL_PENDIENTE" \
-        '{
-            "fecha": $fecha,
-            "duracion_s": $duracion,
-            "resultado": $resultado,
-            "pasos": $pasos,
-            "preflight": {
-                "red": $pre_red,
-                "espacio_libre_mb": $pre_espacio_mb,
-                "espacio_ok": $pre_espacio_ok,
-                "bateria": $pre_bateria,
-                "avisos": $pre_avisos
-            },
-            "snapshot": $snapshot,
-            "espacio_liberado_mb": $esp_liberado,
-            "score_seguridad": $score,
-            "alertas": $alertas,
-            "servicios_fallidos": $svcs_fallidos,
-            "reboot_required": $reboot,
-            "kernel_pendiente": $kernel
-        }' > "$AUTO_JSON_FILE" 2>/dev/null && chmod 640 "$AUTO_JSON_FILE" 2>/dev/null
-
-    if [ -f "$AUTO_JSON_FILE" ]; then
-        tr '\n' ' ' < "$AUTO_JSON_FILE" >> "$AUTO_JSON_HIST" 2>/dev/null
-        echo >> "$AUTO_JSON_HIST" 2>/dev/null
-
-        local tam
-        tam=$(stat -c %s "$AUTO_JSON_HIST" 2>/dev/null || echo 0)
-        if [ "$tam" -gt 1048576 ]; then
-            tail -n 200 "$AUTO_JSON_HIST" > "$AUTO_JSON_HIST.tmp" 2>/dev/null \
-                && mv "$AUTO_JSON_HIST.tmp" "$AUTO_JSON_HIST"
-        fi
-    fi
-}
-
 # --- MODO AUTOMÁTICO ---
 
 modo_auto() {
+    if ! declare -F stk_lock_adquirir >/dev/null 2>&1; then
+        pintar "$ROJO" "❌ Falta la biblioteca del modo automático (stk_auto_lib.sh)."
+        echo ""
+        read -p "Presione Enter para volver al menú principal..."
+        return 1
+    fi
+
     # Capturar Ctrl+C para liberar el lock y volver de forma segura al menú
-    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; auto_lock_liberar; clear; return' SIGINT
+    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; clear; return' SIGINT
 
     clear
     mostrar_logo
@@ -1748,8 +1341,8 @@ modo_auto() {
         return 0
     fi
 
-    # --- Lock: evita ejecuciones simultáneas ---
-    if ! auto_lock_adquirir; then
+    # --- Lock: evita ejecuciones simultáneas (también con el cron) ---
+    if ! stk_lock_adquirir; then
         pintar "$ROJO" "❌ Ya hay otra ejecución del modo auto en curso."
         echo ""
         trap - SIGINT
@@ -1772,29 +1365,39 @@ modo_auto() {
     local ESPACIO_LIBERADO_MB=0
     local FALLO_CRITICO=false
     local AUDITORIA_EJECUTADA=false
-    local -a PKGS_ACTUALIZADOS=() FLATPAKS_ACT=() SNAPS_ACT=()
-    local RES_FLATPAK="" RES_SNAP=""
-    local -a SEC_ALERTAS=() SVC_FAILED_ARR=() PRE_AVISOS=() TIEMPOS=()
+    local -a FLATPAKS_ACT=() SNAPS_ACT=() TIEMPOS=()
+    local -a PKGS_ACTUALIZADOS=()
+    ACT_INCIDENCIAS=()
+    SEC_ALERTAS=()
+    SVC_FAILED_ARR=()
+    PRE_AVISOS=()
     local SCORE_SEGURIDAD=0
     local PRE_RED="ok" PRE_ESPACIO_MB=0 PRE_ESPACIO_OK=true PRE_GESTOR_LIBRE=true PRE_BATERIA="N/D"
     local SNAPSHOT_METODO="ninguno"
     local REBOOT_REQUIRED=false REBOOT_PKGS="" KERNEL_PENDIENTE=false NEEDRESTART=""
     local ETIQUETA_GESTOR="$Package"
-    [ "$IMMUTABLE" = true ] && ETIQUETA_GESTOR="rpm-ostree"
+    [ "${IMMUTABLE:-false}" = true ] && ETIQUETA_GESTOR="rpm-ostree"
 
     # Contadores para la numeración [x/N]
     local N_PASOS=${#PASOS_EJECUTADOS[@]}
     local PASO_IDX=0
     local T_PASO
 
-    # --- Preflight ---
-    auto_preflight
-    auto_preparar_estado
+    # --- Preflight (los avisos ya se registran en bitácora desde la librería) ---
+    pintar "$CIAN" "🔎 Preflight del sistema..."
+    stk_preflight
+    echo ""
 
     # --- Snapshot previo (solo si se va a actualizar) ---
     if printf '%s\n' "${PASOS_EJECUTADOS[@]}" | grep -qx "actualizacion" \
        && [ "$PRE_RED" = "ok" ] && [ "$PRE_ESPACIO_OK" = true ] && [ "$PRE_GESTOR_LIBRE" = true ]; then
-        auto_snapshot
+        pintar "$CIAN" "🛟 Creando punto de recuperación previo..."
+        stk_snapshot
+        case "$SNAPSHOT_METODO" in
+            ninguno) pintar "$AMARILLO" "   └─ No se pudo crear ningún punto de recuperación." ;;
+            *)       pintar "$VERDE" "   └─ Punto de recuperación: $SNAPSHOT_METODO" ;;
+        esac
+        echo ""
     fi
 
     # ======================================================================
@@ -1810,120 +1413,43 @@ modo_auto() {
             RES_ACTUALIZACION="⏭ Omitida por el preflight (red/espacio/gestor)."
             pintar "$AMARILLO" "   └─ $RES_ACTUALIZACION"
         else
-            local LOG_TEMP_ACT ESTADO_ACT=1
-            LOG_TEMP_ACT=$(mktemp)
-            local -a TMO_ACT=()
-            command -v timeout &>/dev/null && TMO_ACT=(timeout "$AUTO_TIMEOUT_ACTUALIZACION")
+            stk_actualizar
+            local ESTADO_ACT=$?
 
-            if [ "$IMMUTABLE" = true ]; then
-                "${TMO_ACT[@]}" rpm-ostree upgrade 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
-            else
-                case "$Package" in
-                    apt)
-                        mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
-                        "${TMO_ACT[@]}" bash -c 'apt-get update -y && apt-get full-upgrade -y && apt-get autoremove -y' 2>&1 | tee "$LOG_TEMP_ACT"
-                        ESTADO_ACT=${PIPESTATUS[0]}
-                        ;;
-                    pacman)
-                        "${TMO_ACT[@]}" pacman -Syu --noconfirm 2>&1 | tee "$LOG_TEMP_ACT"
-                        ESTADO_ACT=${PIPESTATUS[0]}
-                        if [ "$ESTADO_ACT" -eq 0 ]; then
-                            if grep -qiE "there is nothing to do|ya está actualizado|nada que hacer" "$LOG_TEMP_ACT"; then
-                                PKGS_ACTUALIZADOS=()
-                            else
-                                mapfile -t PKGS_ACTUALIZADOS < <(grep -E ' -> ' "$LOG_TEMP_ACT" | awk '{print $1}')
-                            fi
-                        fi
-                        ;;
-                    dnf)
-                        "${TMO_ACT[@]}" bash -c 'dnf upgrade --refresh -y && dnf autoremove -y' 2>&1 | tee "$LOG_TEMP_ACT"
-                        ESTADO_ACT=${PIPESTATUS[0]}
-                        if [ "$ESTADO_ACT" -eq 0 ]; then
-                            mapfile -t PKGS_ACTUALIZADOS < <(awk '/^Upgraded:/{f=1; next} /^$/{f=0} f{print $1}' "$LOG_TEMP_ACT")
-                        fi
-                        ;;
-                    zypper)
-                        "${TMO_ACT[@]}" bash -c 'zypper refresh && zypper update -y' 2>&1 | tee "$LOG_TEMP_ACT"
-                        ESTADO_ACT=${PIPESTATUS[0]}
-                        ;;
-                esac
+            case "$ESTADO_ACT" in
+                0)   pintar "$VERDE" "   └─ $RES_ACTUALIZACION" ;;
+                124) pintar "$ROJO" "   └─ $RES_ACTUALIZACION"; FALLO_CRITICO=true ;;
+                *)   pintar "$ROJO" "   └─ $RES_ACTUALIZACION"; FALLO_CRITICO=true ;;
+            esac
+
+            # Las incidencias detectadas en la salida del gestor ya están en
+            # la bitácora; también se muestran aquí para que no se pierdan.
+            if [ ${#ACT_INCIDENCIAS[@]} -gt 0 ]; then
+                pintar "$AMARILLO" "   └─ ⚠ ${#ACT_INCIDENCIAS[@]} incidencia(s) registrada(s) en la bitácora:"
+                local inc
+                for inc in "${ACT_INCIDENCIAS[@]}"; do
+                    echo "      • $inc"
+                done
             fi
-
-            # --- Flatpak ---
-            if command -v flatpak &>/dev/null; then
-                echo -e "\n${AZUL}📦 Comprobando y actualizando Flatpak...${RESET}"
-                local LOG_FLATPAK
-                LOG_FLATPAK=$(mktemp)
-                "${TMO_ACT[@]}" flatpak update -y 2>&1 | tee "$LOG_FLATPAK"
-
-                if grep -qi -E "nothing to do|nothing updated|nada que hacer" "$LOG_FLATPAK"; then
-                    RES_FLATPAK="Flatpak: Sin cambios."
-                else
-                    mapfile -t FLATPAKS_ACT < <(grep -E "Updating|Installing|Actualizando" "$LOG_FLATPAK" | awk -F"'" '{print $2}')
-                    RES_FLATPAK="Flatpak: ${#FLATPAKS_ACT[@]} aplicación(es) actualizada(s)."
-                fi
-                rm -f "$LOG_FLATPAK"
-            fi
-
-            # --- Snap ---
-            if command -v snap &>/dev/null; then
-                echo -e "\n${AZUL}📦 Comprobando y actualizando Snap...${RESET}"
-                local LOG_SNAP
-                LOG_SNAP=$(mktemp)
-                "${TMO_ACT[@]}" snap refresh 2>&1 | tee "$LOG_SNAP"
-
-                if grep -qi -E "all snaps are up to date|todos los snaps están actualizados" "$LOG_SNAP"; then
-                    RES_SNAP="Snap: Sin cambios."
-                else
-                    mapfile -t SNAPS_ACT < <(grep -v "All snaps" "$LOG_SNAP" | awk 'NR>1 {print $1}')
-                    RES_SNAP="Snap: ${#SNAPS_ACT[@]} paquete(s) actualizado(s)."
-                fi
-                rm -f "$LOG_SNAP"
-            fi
-
-            echo ""
-            if [ "$ESTADO_ACT" -eq 0 ]; then
-                if [ "$IMMUTABLE" = true ]; then
-                    RES_ACTUALIZACION="✔ Imagen del sistema preparada (rpm-ostree). Reinicia para aplicar."
-                else
-                    RES_ACTUALIZACION="✔ Sistema al día ($ETIQUETA_GESTOR: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
-                    [ -n "$RES_SNAP" ] && RES_ACTUALIZACION="$RES_ACTUALIZACION | $RES_SNAP"
-                    RES_ACTUALIZACION="$RES_ACTUALIZACION)"
-                fi
-                pintar "$VERDE" "   └─ $RES_ACTUALIZACION"
-            elif [ "$ESTADO_ACT" -eq 124 ]; then
-                RES_ACTUALIZACION="⏱ Tiempo agotado en la actualización (${AUTO_TIMEOUT_ACTUALIZACION}s)."
-                FALLO_CRITICO=true
-                pintar "$ROJO" "   └─ $RES_ACTUALIZACION"
-            else
-                RES_ACTUALIZACION="❌ Error en la actualización del gestor principal ($ETIQUETA_GESTOR)."
-                FALLO_CRITICO=true
-                pintar "$ROJO" "   └─ $RES_ACTUALIZACION"
-            fi
-            rm -f "$LOG_TEMP_ACT"
         fi
         TIEMPOS+=("Actualización: $(( $(date +%s) - T_PASO ))s")
         echo ""
     fi
 
     # ======================================================================
-    # PASO: LIMPIEZA
+    # PASO: LIMPIEZA (modo seguro: solo cachés y logs)
     # ======================================================================
     if printf '%s\n' "${PASOS_EJECUTADOS[@]}" | grep -qx "limpieza"; then
         ((PASO_IDX++))
         T_PASO=$(date +%s)
-        pintar "$AZUL_BRILLANTE" "📌 [${PASO_IDX}/${N_PASOS}] Ejecutando Limpieza del Sistema..."
-        echo ""
-
-        local LIMPIAR_TIMEOUT_SEG="$AUTO_TIMEOUT_LIMPIEZA"
-        SUPER_LIMPIEZA_LIBERADO=0
-        if super_limpieza auto; then
+        pintar "$AZUL_BRILLANTE" "📌 [${PASO_IDX}/${N_PASOS}] Ejecutando Limpieza Segura del Sistema..."
+        stk_limpieza auto
+        if [ $? -eq 0 ]; then
             ESPACIO_LIBERADO_MB=${SUPER_LIMPIEZA_LIBERADO:-0}
             if [ "$ESPACIO_LIBERADO_MB" -gt 0 ]; then
-                RES_LIMPIEZA="✔ Liberados aprox. ${ESPACIO_LIBERADO_MB} MB."
+                RES_LIMPIEZA="✔ Liberados aprox. ${ESPACIO_LIBERADO_MB} MB (cachés y logs; sin paquetes ni papeleras)."
             else
-                RES_LIMPIEZA="✔ Limpieza completada (el sistema ya estaba optimizado)."
+                RES_LIMPIEZA="✔ Limpieza completada (solo cachés y logs; el sistema ya estaba optimizado)."
             fi
         else
             RES_LIMPIEZA="⚠ La limpieza no pudo completarse."
@@ -1939,7 +1465,7 @@ modo_auto() {
         ((PASO_IDX++))
         T_PASO=$(date +%s)
         pintar "$AZUL_BRILLANTE" "📌 [${PASO_IDX}/${N_PASOS}] Auditando Parámetros Críticos de Seguridad..."
-        auto_auditoria
+        stk_auditoria
         AUDITORIA_EJECUTADA=true
         if [ "$SCORE_SEGURIDAD" -ge 80 ]; then
             pintar "$VERDE" "   └─ $RES_SEGURIDAD"
@@ -1957,7 +1483,7 @@ modo_auto() {
         ((PASO_IDX++))
         T_PASO=$(date +%s)
         pintar "$AZUL_BRILLANTE" "📌 [${PASO_IDX}/${N_PASOS}] Analizando Servicios y Estado de Reinicio..."
-        auto_servicios
+        stk_servicios
 
         if [ ${#SVC_FAILED_ARR[@]} -gt 0 ]; then
             pintar "$AMARILLO" "   └─ $RES_SERVICIOS"
@@ -1965,19 +1491,15 @@ modo_auto() {
         else
             pintar "$VERDE" "   └─ $RES_SERVICIOS"
         fi
-        if [ "$REBOOT_REQUIRED" = true ]; then
-            pintar "$AMARILLO" "   └─ 🔄 Reinicio recomendado${REBOOT_PKGS:+ (paquetes: $REBOOT_PKGS)}"
-        fi
-        if [ "$KERNEL_PENDIENTE" = true ]; then
-            pintar "$AMARILLO" "   └─ 🧠 Kernel nuevo instalado; se aplicará al reiniciar."
-        fi
+        [ "$REBOOT_REQUIRED" = true ] && pintar "$AMARILLO" "   └─ 🔄 Reinicio recomendado${REBOOT_PKGS:+ (paquetes: $REBOOT_PKGS)}"
+        [ "$KERNEL_PENDIENTE" = true ] && pintar "$AMARILLO" "   └─ 🧠 Kernel nuevo instalado; se aplicará al reiniciar."
         [ -n "$NEEDRESTART" ] && pintar "$AMARILLO" "   └─ Servicios que necesitan reinicio: $NEEDRESTART"
         TIEMPOS+=("Servicios: $(( $(date +%s) - T_PASO ))s")
         echo ""
     fi
 
     # ======================================================================
-    # INFORME Y REGISTRO FINAL
+    # RESUMEN FINAL (en pantalla + bitácora; sin ficheros JSON)
     # ======================================================================
     local T_FIN DURACION
     T_FIN=$(date +%s)
@@ -2002,6 +1524,11 @@ modo_auto() {
     echo -e "${AMARILLO}➤ Tiempo Transcurrido:${RESET}  ${BLANCO}${DURACION} segundos${RESET}"
     echo -e "${AMARILLO}➤ Pasos ejecutados:${RESET}    ${BLANCO}${PASOS_EJECUTADOS[*]}${RESET}"
     [ ${#TIEMPOS[@]} -gt 0 ] && { local TIEMPOS_TXT="" t; for t in "${TIEMPOS[@]}"; do TIEMPOS_TXT+="${TIEMPOS_TXT:+ · }$t"; done; echo -e "${AMARILLO}➤ Duración por paso:${RESET}   ${BLANCO}${TIEMPOS_TXT}${RESET}"; }
+    echo -e "${AMARILLO}➤ Preflight:${RESET}           ${BLANCO}Red: $PRE_RED · Espacio: ${PRE_ESPACIO_MB} MB · Batería: $PRE_BATERIA${RESET}"
+    if [ ${#PRE_AVISOS[@]} -gt 0 ]; then
+        local av
+        for av in "${PRE_AVISOS[@]}"; do echo -e "   ${AMARILLO}⚠ $av${RESET}"; done
+    fi
     echo -e "${AMARILLO}➤ Snapshot previo:${RESET}     ${BLANCO}${SNAPSHOT_METODO}${RESET}"
     echo -e "${AMARILLO}➤ Espacio liberado:${RESET}    ${BLANCO}${ESPACIO_LIBERADO_MB} MB${RESET}"
     echo -e "${AMARILLO}➤ Resultado:${RESET}           ${BLANCO}${resultado}${RESET}\n"
@@ -2011,6 +1538,13 @@ modo_auto() {
     printf '%s\n' "${PASOS_EJECUTADOS[@]}" | grep -qx "limpieza" && echo -e " ${AZUL}• Limpieza:${RESET}       $RES_LIMPIEZA"
     printf '%s\n' "${PASOS_EJECUTADOS[@]}" | grep -qx "auditoria" && echo -e " ${AZUL}• Seguridad:${RESET}      $RES_SEGURIDAD"
     printf '%s\n' "${PASOS_EJECUTADOS[@]}" | grep -qx "servicios" && echo -e " ${AZUL}• Servicios:${RESET}      $RES_SERVICIOS"
+
+    # Incidencias de la actualización: antes se perdían al borrar el log temporal.
+    if [ ${#ACT_INCIDENCIAS[@]} -gt 0 ]; then
+        echo -e "\n${AMARILLO}⚠️ Incidencias de actualización (guardadas en la bitácora):${RESET}"
+        local inc
+        for inc in "${ACT_INCIDENCIAS[@]}"; do echo -e "   • $inc"; done
+    fi
 
     # Desglose detallado si se detectaron paquetes actualizados
     if [ ${#PKGS_ACTUALIZADOS[@]} -gt 0 ] || [ ${#FLATPAKS_ACT[@]} -gt 0 ] || [ ${#SNAPS_ACT[@]} -gt 0 ]; then
@@ -2030,39 +1564,26 @@ modo_auto() {
     if [ ${#SEC_ALERTAS[@]} -gt 0 ]; then
         echo -e "\n${AMARILLO}⚠️ Alertas de Seguridad Detectadas:${RESET}"
         local alt
-        for alt in "${SEC_ALERTAS[@]}"; do
-            echo -e "   • $alt"
-        done
+        for alt in "${SEC_ALERTAS[@]}"; do echo -e "   • $alt"; done
     fi
 
-    if [ "$REBOOT_REQUIRED" = true ] || [ "$KERNEL_PENDIENTE" = true ]; then
+    if [ "$REBOOT_REQUIRED" = true ] || [ "$KERNEL_PENDIENTE" = true ] || [ -n "$NEEDRESTART" ]; then
         echo -e "\n${AMARILLO}🔄 Reinicio:${RESET}"
         [ "$REBOOT_REQUIRED" = true ] && echo -e "   • Hay un reinicio pendiente${REBOOT_PKGS:+ (paquetes: $REBOOT_PKGS)}"
         [ "$KERNEL_PENDIENTE" = true ] && echo -e "   • Kernel nuevo instalado; se aplicará al reiniciar"
+        [ -n "$NEEDRESTART" ] && echo -e "   • Servicios que necesitan reinicio: $NEEDRESTART"
     fi
     pintar "$CIAN" "════════════════════════════════════════════════════════════════"
 
-    # Bitácora
+    # Bitácora: el detalle de cada módulo ya lo registró la biblioteca compartida.
     registrar_log "$LOG_INFO" "=== RESUMEN MODO AUTO (Duración: ${DURACION}s) ==="
-    registrar_log "$LOG_INFO" "RESULTADO: $resultado (código $rc)"
-    registrar_log "$LOG_INFO" "ACTUALIZACIÓN: $RES_ACTUALIZACION"
+    registrar_log "$LOG_INFO" "RESULTADO: $resultado (código $rc) | pasos: ${PASOS_EJECUTADOS[*]}"
+    registrar_log "$LOG_INFO" "PREFLIGHT: red=$PRE_RED espacio=${PRE_ESPACIO_MB}MB batería=$PRE_BATERIA"
     registrar_log "$LOG_INFO" "LIMPIEZA: $RES_LIMPIEZA"
-    registrar_log "$LOG_INFO" "SEGURIDAD: $RES_SEGURIDAD"
-    local alt
-    for alt in "${SEC_ALERTAS[@]}"; do
-        registrar_log "$LOG_WARN" "SEG-ALERTA: $alt"
-    done
-    registrar_log "$LOG_INFO" "SERVICIOS: $RES_SERVICIOS"
-    [ "$REBOOT_REQUIRED" = true ] && registrar_log "$LOG_WARN" "REINICIO RECOMENDADO${REBOOT_PKGS:+: $REBOOT_PKGS}"
     registrar_log "$LOG_INFO" "=== FIN DE MODO AUTO ==="
 
-    # Informe JSON
-    auto_escribir_json "$resultado" "$DURACION"
-    if [ -f "$AUTO_JSON_FILE" ]; then
-        echo -e "\n${AMARILLO}➤ Informe JSON:${RESET} ${BLANCO}${AUTO_JSON_FILE}${RESET}"
-    fi
-
-    auto_lock_liberar
+    echo -e "\n${AMARILLO}➤ Bitácora:${RESET} ${BLANCO}${LOG_FILE}${RESET}"
+    stk_lock_liberar
     trap - SIGINT
     echo ""
     read -p "Presione Enter para volver al menú principal..."
@@ -2786,103 +2307,7 @@ pedir_nombre() {
     echo "$nombre"  
 }
 #--------------------------
-super_limpieza() {
-    # Modo "auto": sin pausa final y con timeout opcional por comando.
-    local MODO="${1:-interactivo}"
-    local -a TMO=()
-    if [ -n "${LIMPIAR_TIMEOUT_SEG:-}" ] && command -v timeout &>/dev/null; then
-        TMO=(timeout "$LIMPIAR_TIMEOUT_SEG")
-    fi
-
-    echo ""
-    pintar $MAGENTA "Iniciando Súper Limpieza..."
-    
-    # 1. Feedback visual mientras trabaja
-    mostrar_spinner & SPINNER_PID=$!
-
-    # 2. Medir espacio libre inicial en la raíz y en /home (si está separado)
-    local ANTES_RAIZ=$(df --output=avail / | tail -n 1)
-    local ANTES_HOME=$(df --output=avail /home 2>/dev/null | tail -n 1)
-
-    # 3. Limpieza de logs antiguos de systemd (libera mucho espacio en todas las distros)
-    if command -v journalctl &>/dev/null; then
-        "${TMO[@]}" journalctl --vacuum-time=3d >/dev/null 2>&1
-    fi
-
-    # 4. Limpieza del gestor de paquetes según la distro
-    if [ "$IMMUTABLE" = true ]; then
-        # Solo metadatos: no eliminar deployments pendientes ni la capa actual.
-        "${TMO[@]}" rpm-ostree cleanup -m >/dev/null 2>&1
-    else
-        case "$Package" in
-            apt)
-                "${TMO[@]}" apt-get install -f -y >/dev/null 2>&1
-                "${TMO[@]}" apt-get autoremove --purge -y >/dev/null 2>&1
-                "${TMO[@]}" apt-get autoclean -y >/dev/null 2>&1
-                "${TMO[@]}" apt-get clean >/dev/null 2>&1
-                ;;
-            dnf)
-                "${TMO[@]}" dnf clean all >/dev/null 2>&1
-                "${TMO[@]}" dnf autoremove -y >/dev/null 2>&1
-                ;;
-            pacman)
-                # Limpia paquetes no instalados y antiguas versiones de la caché
-                "${TMO[@]}" pacman -Sc --noconfirm >/dev/null 2>&1
-                # Elimina paquetes huérfanos si existen (usando array para seguridad)
-                local huerfanos=()
-                mapfile -t huerfanos < <(pacman -Qtdq 2>/dev/null)
-                if [ ${#huerfanos[@]} -gt 0 ]; then
-                    "${TMO[@]}" pacman -Rns "${huerfanos[@]}" --noconfirm >/dev/null 2>&1
-                fi
-                ;;
-            zypper)
-                "${TMO[@]}" zypper clean --all >/dev/null 2>&1
-                "${TMO[@]}" zypper clean --packages >/dev/null 2>&1
-                ;;
-            *)
-                kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-                printf "\r\e[K"
-                pintar $ROJO "❌ Limpieza automática no soportada para $Package"
-                return 1
-                ;;
-        esac
-    fi
-
-    # 5. Limpieza profunda de papeleras de usuarios (evaluando dinámicamente)
-    find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
-    find /root/.local/share/Trash/files /root/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
-
-    # 6. Limpieza segura de miniatura de imágenes (Caché de thumbnails)
-    find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
-
-    # 7. Detener spinner
-    kill "$SPINNER_PID" 2>/dev/null; wait "$SPINNER_PID" 2>/dev/null
-    printf "\r\e[K"
-
-    # 8. Medir espacio final
-    local DESPUES_RAIZ=$(df --output=avail / | tail -n 1)
-    local DESPUES_HOME=$(df --output=avail /home 2>/dev/null | tail -n 1)
-
-    local DIF_RAIZ=$(( (DESPUES_RAIZ - ANTES_RAIZ) / 1024 ))
-    local DIF_HOME=0
-    [ -n "$ANTES_HOME" ] && [ -n "$DESPUES_HOME" ] && DIF_HOME=$(( (DESPUES_HOME - ANTES_HOME) / 1024 ))
-
-    local LIBERADO=$(( DIF_RAIZ + DIF_HOME ))
-    SUPER_LIMPIEZA_LIBERADO=$LIBERADO
-
-    # 9. Reporte de resultados
-    if [ "$LIBERADO" -gt 0 ]; then
-        pintar $VERDE_BRILLANTE "¡Sistema limpio! ✨"
-        echo -e "Se han liberado aprox. ${BLANCO}${LIBERADO} MB${RESET}."
-        registrar_log "$LOG_INFO" "LIMPIEZA: Se liberaron aprox. ${LIBERADO} MB"
-    else
-        pintar $VERDE "Limpieza completada (el sistema ya estaba optimizado)."
-        registrar_log "$LOG_INFO" "LIMPIEZA: Completada sin cambios significativos"
-    fi
-
-    echo ""
-    [ "$MODO" = "auto" ] || read -p "Pulse Enter para volver..."
-}
+# La limpieza vive en stk_auto_lib.sh: stk_limpieza auto|completa
 
 
 #Gestión de servicios   
@@ -3890,7 +3315,7 @@ case "$1" in
         ;;
 
     -c|--clean|limpieza)
-        super_limpieza
+        stk_limpieza completa
         ;;
 
     -l|--logs|bitacora)
