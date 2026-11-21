@@ -163,6 +163,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Mejora:** El umbral de binarios SUID en la auditoría es configurable mediante `AUTO_LIMITE_SUID` (por defecto 60).
 * **Menú:** Nueva sección **2. Seguridad** en el menú principal. PROC4ME, auditoría de seguridad y el gestor de UFW se mudan desde Monitorización, que ahora contiene rendimiento, red y análisis de servicios.
 * **Nuevo:** `jobs4me.sh`, dashboard de análisis (sin menú, sin exigir root) con top de consumo, timers, cron, veredictos interpretados y explorador FZF con detalle en árbol de cada servicio. Integrado en Monitorización como **3. Análisis de Servicios**.
+* **Corrección (JOBS4ME v1.1):** El redibujado cada 3 segundos ya no parpadea. Se calculan los datos antes de mover el cursor y se usa la misma técnica de `dash4me`: `\e[H` sin borrar, `\e[K` por línea y `\e[J` al final.
 
 ### 📝 v6.6.1
 * **Corrección:** El mini-dashboard vuelve a mostrarse en la cabecera de todos los menús (se había perdido al quitar las líneas de separación).

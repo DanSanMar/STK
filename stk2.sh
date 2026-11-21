@@ -1134,7 +1134,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     clear
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios (JOBS4ME)\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;

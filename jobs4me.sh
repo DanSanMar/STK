@@ -8,7 +8,7 @@
 # Pensado para ejecutarse solo (bash jobs4me.sh) o integrarse en STK.
 # ==============================================================================
 
-V="1.0"
+V="1.1"
 DESCRIPCION="Dashboard de análisis de servicios, procesos y tareas programadas"
 AUTOR="DanSanMar"
 
@@ -384,8 +384,8 @@ cargar_tareas() {
 # --- RENDERIZADO DEL DASHBOARD ---
 # ==============================================================================
 
-renderizar_pantalla() {
-    printf '\033[H\033[J'
+# Construye el contenido del dashboard en STDOUT (sin códigos de control de pantalla).
+construir_pantalla() {
     logo_texto
 
     local total=${#SVC_UNITS[@]}
@@ -447,6 +447,21 @@ renderizar_pantalla() {
     echo -e " ${AMARILLO}➤ Colas:${RESET} systemd jobs: ${BLANCO}${CONT_JOBS}${RESET} | tareas at: ${BLANCO}${CONT_ATQ}${RESET}"
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e " ${VERDE_BRILLANTE}[f]${RESET} explorar servicio (FZF + detalle en árbol)   ${VERDE_BRILLANTE}[r]${RESET} refrescar   ${VERDE_BRILLANTE}[i]${RESET} informe   ${ROJO_BRILLANTE}[q]${RESET} salir"
+}
+
+# Redibujo sin parpadeo, igual que dash4me:
+#   1) \e[H  -> llevar el cursor arriba SIN borrar la pantalla
+#   2) \e[K  -> borrar cada línea antes de escribirla (evita restos de líneas más largas)
+#   3) \e[J  -> borrar desde el cursor hasta el final (por si hay menos líneas que antes)
+# El contenido se genera antes de mover el cursor, para que nunca se vea una pantalla vacía.
+renderizar_pantalla() {
+    local contenido linea
+    contenido=$(construir_pantalla)
+    printf '\033[H'
+    while IFS= read -r linea; do
+        printf '\033[K%s\n' "$linea"
+    done <<< "$contenido"
+    printf '\033[J'
 }
 
 # ==============================================================================
