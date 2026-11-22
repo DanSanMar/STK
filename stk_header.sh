@@ -33,6 +33,12 @@ GRIS_CLARO='\e[37m'
 
 FZF_COLORES="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,prompt:#5fb2ff,marker:#92ff92"
 
+# Impresora de color compartida. Los módulos que definen la suya propia la
+# sobrescriben sin problema; los que no (p. ej. hard4me) heredan esta.
+pintar() {
+    printf '%b\n' "${1:-}${2:-}${RESET}"
+}
+
 PALETA_STK=(
     "$ROJO" "$AZUL_BRILLANTE" "$VERDE_BRILLANTE" "$AMARILLO_BRILLANTE"
     "$CIAN_BRILLANTE" "$ROJO_BRILLANTE" "$AZUL_CLARO" "$VERDE" "$AMARILLO" "$CIAN"

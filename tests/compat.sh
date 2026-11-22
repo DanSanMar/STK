@@ -143,6 +143,10 @@ printf '1. Uno\n' | PATH="$STUB_DIR:$PATH" stk_fzf_ejecutar "Probar" "" "TITULO"
 true_if '[ "$(grep -c "^ARGS=" "$STK_TEST_LOG")" -eq 3 ]' "error (2) provoca reintento con opciones mínimas"
 unset STK_TEST_FZF_RC
 
+echo "== 9. Helper pintar compartido =="
+salida=$(pintar '\033[32m' "OK")
+true_if '[[ "$salida" == *"OK"* ]]' "pintar disponible desde la librería (hard4me)"
+
 echo
 printf 'Resultado: %d PASS, %d FAIL\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
