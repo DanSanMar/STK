@@ -923,7 +923,7 @@ explorar_discos() {
     # Con un solo disco FZF no aporta nada (una única línea que además ya se
     # está previsualizando): se muestra el detalle directamente.
     if [ ${#DISCOS[@]} -eq 1 ]; then
-        clear
+        stk_limpiar
         stk_header
         detalle_dispositivo "${DISCOS[0]}"
         pausa
@@ -935,7 +935,8 @@ explorar_discos() {
     header_cmd=$(stk_header_cmd "$SELF_PATH")
     header=$(stk_header)   # cabecera inicial: bg-transform-header la refresca después
 
-    printf '%b' "$lista" | fzf --ansi \
+    printf '%b' "$lista" | stk_fzf_ejecutar "Disco" "$header" "ANÁLISIS DE DISCOS" \
+        --ansi \
         --height=~90% \
         --layout=reverse \
         --no-sort \
@@ -953,7 +954,7 @@ explorar_discos() {
 # --- Espacio por directorios, bajo demanda ---
 analizar_espacio() {
     actualizar_layout
-    clear
+    stk_limpiar
     stk_header
     echo -e " ${MAGENTA}--- TOP DE ESPACIO POR DIRECTORIOS (bajo demanda) ---${RESET}"
     echo -e " ${GRIS_CLARO}Rutas seguras, sin cruzar montajes. '/' no se analiza por defecto.${RESET}"
@@ -1122,13 +1123,10 @@ main() {
         exit 0
     fi
 
-    local tiene_tput=false
-    command -v tput >/dev/null 2>&1 && tiene_tput=true
-    if [ "$tiene_tput" = true ]; then
-        tput smcup 2>/dev/null
-        tput civis 2>/dev/null
-    fi
-    trap 'tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; exit 0' SIGINT SIGTERM
+    # Pantalla alternativa sin terminfo (secuencias ANSI de stk_header.sh).
+    stk_alt_screen_on
+    stk_cursor_off
+    trap 'stk_alt_screen_off; stk_cursor_on; exit 0' SIGINT SIGTERM
 
     local tecla=""
     while true; do
@@ -1139,19 +1137,19 @@ main() {
         read -r -n 1 -s -t 3 tecla || tecla=""
         case "$tecla" in
             f|F)
-                [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+                stk_alt_screen_off; stk_cursor_on
                 explorar_discos
-                [ "$tiene_tput" = true ] && { tput smcup 2>/dev/null; tput civis 2>/dev/null; }
+                stk_alt_screen_on; stk_cursor_off
                 ;;
             d|D)
-                [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+                stk_alt_screen_off; stk_cursor_on
                 analizar_espacio
-                [ "$tiene_tput" = true ] && { tput smcup 2>/dev/null; tput civis 2>/dev/null; }
+                stk_alt_screen_on; stk_cursor_off
                 ;;
             i|I)
-                [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+                stk_alt_screen_off; stk_cursor_on
                 generar_informe
-                [ "$tiene_tput" = true ] && { tput smcup 2>/dev/null; tput civis 2>/dev/null; }
+                stk_alt_screen_on; stk_cursor_off
                 ;;
             q|Q|$'\e')
                 break
@@ -1161,7 +1159,7 @@ main() {
         esac
     done
 
-    [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+    stk_alt_screen_off; stk_cursor_on
     pintar "$VERDE" "Análisis completado. No se ha modificado ningún disco."
     stk_salir "HARD4ME" "Saliendo de HARD4ME..."
 }

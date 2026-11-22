@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# --- CAPA DE COMPATIBILIDAD STK (TERM / fzf / TTY / rutas) ---
+STK_COMPAT_HEADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_header.sh"
+if [ -r "$STK_COMPAT_HEADER" ]; then
+    # shellcheck source=stk_header.sh
+    source "$STK_COMPAT_HEADER"
+fi
+
 # --- CONFIGURACIÓN DE COLORES ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
@@ -611,12 +618,11 @@ renderizar_pantalla() {
 }
 
 monitor_rendimiento() {
-    if command -v tput &> /dev/null; then
-        tput smcup
-        tput civis
-    fi
+    # Pantalla alternativa sin terminfo (secuencias ANSI de stk_header.sh).
+    stk_alt_screen_on
+    stk_cursor_off
 
-    trap "tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; exit 0" SIGINT SIGTERM
+    trap 'stk_alt_screen_off; stk_cursor_on; exit 0' SIGINT SIGTERM
 
     while true; do
 

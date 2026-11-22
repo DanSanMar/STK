@@ -107,7 +107,15 @@ stk_repetir() {
 # ==============================================================================
 
 STK_COMPAT_INICIALIZADA=false
-STK_CAP_TTY=false
+# Detección silenciosa al cargar la librería: así stk_limpiar funciona incluso
+# en módulos que aún no han llamado a stk_caps_init (y en previews de fzf).
+# Se prueba a abrir /dev/tty: dentro de $(...) stdin es una tubería, pero el
+# terminal sigue disponible, así que [ -t 0 ] daría un falso "sin TTY".
+if { : < /dev/tty; } 2>/dev/null; then
+    STK_CAP_TTY=true
+else
+    STK_CAP_TTY=false
+fi
 STK_TERM_ORIGINAL=""
 STK_FZF_VERSION=""
 STK_FZF_DISPONIBLE=false
@@ -240,7 +248,7 @@ stk_caps_init() {
 
     stk_term_sanitizar
 
-    if [ -t 0 ] && [ -t 1 ] && [ -r /dev/tty ]; then
+    if { : < /dev/tty; } 2>/dev/null; then
         STK_CAP_TTY=true
     else
         stk_avisar info sin_tty "Sin TTY: los menús pasarán a modo no interactivo."
@@ -265,13 +273,19 @@ stk_caps_init() {
     fi
 
     stk_elegir_log
-    if [ -z "${STK_TMP_DIR:-}" ]; then
-        stk_elegir_tmp >/dev/null
-        STK_TMP_DIR="$STK_TMP_DIR_ELEGIDO"
-    fi
+    # No se crea aquí un directorio temporal: en módulos, stk_caps_init puede
+    # ejecutarse dentro de $(...) y el trap de limpieza no se heredaría.
+    # stk_fzf_ejecutar usa STK_TMP_DIR si existe, o TMPDIR directamente.
     if [ -n "${FZF_DEFAULT_OPTS:-}" ]; then
         stk_avisar info fzf_env \
             "FZF_DEFAULT_OPTS se ignora en los menús STK para evitar conflictos de opciones."
+    fi
+
+    local locale_actual="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    if [ -z "$locale_actual" ] || [ "$locale_actual" = "POSIX" ] \
+        || [[ "$locale_actual" =~ ^C(\.|_|$) ]]; then
+        stk_avisar info locale_c \
+            "Locale sin UTF-8 ('${locale_actual:-vacío}'): emoji y caracteres anchos pueden medirse mal. Usa LANG=C.UTF-8."
     fi
 }
 
@@ -358,7 +372,8 @@ stk_fzf_ejecutar() {
     fi
 
     if [ "$STK_FZF_CON_SOCK" = true ]; then
-        local sock="$STK_TMP_DIR/fzf_${UID:-0}_${BASHPID:-$$}.sock"
+        local sockdir="${STK_TMP_DIR:-${TMPDIR:-/tmp}}"
+        local sock="$sockdir/fzf_${UID:-0}_${BASHPID:-$$}.sock"
         local ticker header
         (
             sleep_pid=""
@@ -409,7 +424,7 @@ stk_diagnostico() {
     printf '  fzf socket    : %s\n' "$STK_FZF_CON_SOCK"
     printf '  fzf border-lbl: %s\n' "$STK_FZF_FLAG_BORDER_LABEL"
     printf '  curl --unix   : %s\n' "$STK_CURL_UNIX"
-    printf '  Temporal      : %s\n' "${STK_TMP_DIR:-?}"
+    printf '  Temporal      : %s\n' "${STK_TMP_DIR:-${TMPDIR:-/tmp}}"
     printf '  Log           : %s\n' "${LOG_FILE:-?}"
     printf '  Avisos        : %s\n' "${#STK_AVISOS[@]}"
     stk_resumen_avisos

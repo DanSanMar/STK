@@ -779,7 +779,7 @@ instalar_paquetes() {
 # --- NUEVA FUNCIÓN: INSTALAR GESTORES ADICIONALES ---
 menu_gestores_paquetes() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         local opciones="1. 🧊 Flatpak + Flathub  - Sistema de paquetes sandbox universal
 2. 📦 Snapcraft           - Gestor de paquetes canónico (Ubuntu/Debian/Fedora)
@@ -889,9 +889,11 @@ seleccionar_programas() {
     local nota_ocultos=""
     [ "$ocultos" -gt 0 ] && nota_ocultos=" | ⚠️ No disponible(s): ${nombres_ocultos% }"
 
-    local seleccionados
+    local seleccionados cabecera="PROGRAMAS - $nombre_cat (TAB: Marcar | Esc/0: Volver)${nota_ocultos}"
     seleccionados=$(printf '%s\n0. ⬅️ Volver|Volver al menú anterior\n' "$raw_data" \
-        | sed '/^[[:space:]]*$/d' | fzf --ansi \
+        | sed '/^[[:space:]]*$/d' \
+        | stk_fzf_ejecutar "Seleccione programas" "$cabecera" "PROGRAMAS - $nombre_cat" \
+        --ansi \
         --multi \
         --height=18 \
         --reverse \
@@ -899,7 +901,7 @@ seleccionar_programas() {
         --delimiter="|" \
         --with-nth=1 \
         --prompt="➤ Seleccione programas: " \
-        --header="PROGRAMAS - $nombre_cat (TAB: Marcar | Esc/0: Volver)${nota_ocultos}" \
+        --header="$cabecera" \
         --border-label=" PROGRAMAS - $nombre_cat " \
         --color="$FZF_COLORES" \
         --preview-window="right:50%:wrap" \
@@ -920,7 +922,7 @@ menu_categoria() {
     local cat_key="$1"
     local nombre_categoria="$2"
     
-    clear
+    stk_limpiar
     mostrar_logo
     
     local seleccionados
@@ -935,7 +937,7 @@ menu_categoria() {
 
 menu_escritorio() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         local opciones="1. 🌐 NAVEGADORES  - Navegadores web
 2. 📄 OFIMÁTICA     - Suite ofimática
@@ -962,7 +964,7 @@ menu_escritorio() {
 
 menu_desarrollo() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         local opciones="1. 📝 EDITORES      - Editores de código y terminal
 2. 🔀 VERSIONES     - Git y GitHub CLI
@@ -991,7 +993,7 @@ menu_desarrollo() {
 
 menu_sistemas() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         local opciones="1. 📊 MONITOREO     - Procesos y recursos en tiempo real
 2. 💾 DISCOS        - Análisis, espacio y particiones
@@ -1020,7 +1022,7 @@ menu_sistemas() {
 
 menu_all4me() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         local opciones="1. 🔍 SCAN4ME    - Herramientas de escaneo y auditoría
 2. ⚙️  ADMIN4ME   - Herramientas de administración de sistemas
@@ -1053,7 +1055,7 @@ menu_all4me() {
 
 menu_principal() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         
         local opciones="1. 🖥️  ESCRITORIO      - Navegadores, ofimática, multimedia

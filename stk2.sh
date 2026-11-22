@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.8"
+V="6.6.9"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -516,7 +516,9 @@ check_dependencies() {
 
 # --- FLUJO PRINCIPAL DE DEPENDENCIAS ---
 if ! ping -c 1 -W 1 -n 8.8.8.8 &>/dev/null; then
-    pintar "$ROJO" "❌ No hay conexión a internet. Algunas funciones fallarán."
+    # ICMP suele estar bloqueado en servidores: es un aviso, no un error fatal.
+    stk_avisar warn sin_red \
+        "No se pudo verificar Internet con ping (puede estar bloqueado o faltar ping). Algunas funciones podrían fallar."
 fi
 
 check_dependencies
@@ -995,7 +997,8 @@ mostrar_logo() {
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$header_text" "" \
+        --ansi \
         --height=15 \
         --reverse \
         --border=rounded \
@@ -1268,7 +1271,8 @@ auto_checklist() {
     fi
 
     local seleccion
-    seleccion=$(printf '%s\n' "${pasos[@]}" | fzf --ansi \
+    seleccion=$(printf '%s\n' "${pasos[@]}" | stk_fzf_ejecutar "Seleccione pasos" "Selecciona los pasos a ejecutar (todos marcados por defecto)." "PASOS DEL MODO AUTO" \
+        --ansi \
         --multi \
         --delimiter='|' \
         --with-nth=2 \
@@ -2769,7 +2773,8 @@ fzf_seleccionar_directorio() {
 
         # Ejecutar FZF mostrando solo la primera columna (el texto legible/icono)
         local sel
-        sel=$(echo -e "$lineas_menu" | fzf --ansi --height=18 --reverse --border=rounded \
+        sel=$(echo -e "$lineas_menu" | stk_fzf_ejecutar "Navegar" "Directorio actual: $dir_actual" "EXPLORADOR DE DIRECTORIOS" \
+            --ansi --height=18 --reverse --border=rounded \
             --prompt="Navegar ❯ " \
             --header="Directorio actual: $dir_actual" \
             --color="$FZF_COLORES" \
@@ -2833,7 +2838,8 @@ ver_backups_existentes() {
         return
     fi
 
-    echo "$archivos" | fzf --ansi \
+    echo "$archivos" | stk_fzf_ejecutar "Inspeccionar Backup" "VISTA PREVIA DEL CONTENIDO (.tar.gz)" "INSPECCIÓN DE BACKUPS" \
+        --ansi \
         --height=18 \
         --reverse \
         --border=rounded \

@@ -5,6 +5,13 @@ V="1.7"
 DESCRIPCION="Instalación, Gestión y Configuración de Cortafuegos UFW para Linux"
 AUTOR="DanSanMar"
 
+# --- CAPA DE COMPATIBILIDAD STK (TERM / fzf / TTY / rutas) ---
+STK_COMPAT_HEADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_header.sh"
+if [ -r "$STK_COMPAT_HEADER" ]; then
+    # shellcheck source=stk_header.sh
+    source "$STK_COMPAT_HEADER"
+fi
+
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
@@ -208,7 +215,8 @@ stop4me_fzf_menu() {
     logo=$(logo_texto)
     printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
 
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
+        --ansi \
         --height="$altura" \
         --layout=reverse \
         --no-sort \
@@ -234,7 +242,7 @@ salir_stop4me() {
 # --- VERIFICACIÓN DE DEPENDENCIAS ---
 verificar_e_instalar_ufw() {
     if ! command -v ufw &>/dev/null; then
-        clear
+        stk_limpiar
         mostrar_logo_stop4me
         pintar "$AMARILLO" "⚠️ No se detectó el cortafuegos 'ufw' instalado en el sistema."
 
@@ -293,7 +301,7 @@ verificar_e_instalar_ufw() {
 
 gestionar_reglas_menu() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo_stop4me
         pintar "$MAGENTA" "--- 🔒 GESTIÓN INTERACTIVA DE REGLAS UFW ---"
 
@@ -322,7 +330,7 @@ gestionar_reglas_menu() {
 }
 
 agregar_regla_unificada() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$CIAN" "--- ➕ CREAR NUEVA REGLA DE FILTRADO ---"
 
@@ -435,7 +443,7 @@ gestionar_regla_existente() {
 }
 
 gestionar_estado_ufw() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$MAGENTA" "--- CONTROL DE ESTADO DE UFW ---"
 
@@ -479,7 +487,7 @@ gestionar_estado_ufw() {
 }
 
 ver_estado_y_reglas() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$CIAN" "--- ESTADO Y REGLAS DE FILTRADO (UFW) ---"
     echo ""
@@ -496,7 +504,7 @@ ver_estado_y_reglas() {
 }
 
 resetear_cortafuegos() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$ROJO_BRILLANTE" "--- ⚠️ REINICIO DE FÁBRICA / RESET UFW ---"
     echo -e "${AMARILLO}Esta acción eliminará TODAS las reglas e inhabilitará el cortafuegos.${RESET}\n"
@@ -534,7 +542,7 @@ obtener_logs_trafico() {
 }
 
 detectar_escaneo_puertos() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$ROJO_BRILLANTE" "--- DETECTOR DE ESCANEOS DE PUERTOS (PORT SCAN) ---"
     echo -e "${AZUL}Analizando IPs que impactaron múltiples puertos distintos...${RESET}\n"
@@ -594,7 +602,7 @@ detectar_escaneo_puertos() {
 }
 
 detector_fuerza_bruta(){
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$ROJO_BRILLANTE" "--- DETECTOR DE INTENTOS DE FUERZA BRUTA (SSH / AUTH) ---"
     echo -e "${AZUL}Buscando accesos fallidos en /var/log/auth.log y systemd journal...${RESET}\n"
@@ -634,7 +642,7 @@ detector_fuerza_bruta(){
 }
 
 informe_auditoria_seguridad(){
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$MAGENTA" "--- GENERADOR DE INFORME DE AUDITORÍA DE SEGURIDAD---"
     
@@ -669,7 +677,8 @@ informe_auditoria_seguridad(){
     fi
     
     local seleccion_ip
-    seleccion_ip=$(echo "$lista_ips" | fzf --ansi \
+    seleccion_ip=$(echo "$lista_ips" | stk_fzf_ejecutar "Seleccione IP" "IP ORIGEN | IMPACTOS | PROTOCOLO ULTIMO" "INFORME FORENSE" \
+        --ansi \
         --height=18 \
         --reverse \
         --border=rounded \
@@ -680,7 +689,7 @@ informe_auditoria_seguridad(){
         local target_ip
         target_ip=$(echo "$seleccion_ip" | awk '{print $1}')
 
-        clear
+        stk_limpiar
         local logs_ip
         logs_ip=$(echo "$raw_blocks" | grep "SRC=$target_ip")
 
@@ -731,7 +740,8 @@ informe_auditoria_seguridad(){
             }
             if(flag == "") flag="N/A"
             printf " %-15s | Int: %-5s | Proto: %-4s | Puertos: %-5s -> %-5s | Tam: %-4s B | Flag: %-4s\n", fecha, iface, proto, sport, dport, len, flag
-        }' | fzf --ansi --height=15 --reverse --border=rounded \
+        }' | stk_fzf_ejecutar "Explorar logs" "LOGS DE $target_ip" "EXPLORADOR DE LOGS" \
+            --ansi --height=15 --reverse --border=rounded \
             --prompt="🔍 Explorar logs de $target_ip: " \
             --header="FECHA/HORA       | INTERFAZ  | PROTO | ORIGEN -> DESTINO     | TAMAÑO   | FLAGS"
 
@@ -748,7 +758,7 @@ informe_auditoria_seguridad(){
 
 analizar_trafico_red() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo_stop4me
         pintar "$MAGENTA" "--- AUDITORÍA DE SEGURIDAD, ESCANEOS E INFORMES ---"
 
@@ -762,7 +772,7 @@ analizar_trafico_red() {
 
         case ${sel_tr:0:1} in
             1)
-                clear
+                stk_limpiar
                 pintar "$CIAN" "--- TRÁFICO BLOQUEADO REGISTRADO ---"
                 echo -e "${AZUL}Filtra en tiempo real por IP (SRC=) o Puerto (DPT=) usando FZF${RESET}\n"
                 
@@ -772,7 +782,7 @@ analizar_trafico_red() {
                 if [ -z "$datos_block" ]; then
                     pintar "$AMARILLO" "⚠️ No hay logs de tráfico bloqueado. Comprueba si 'Logging' está activado."
                 else
-                    echo "$datos_block" | fzf --ansi --height=20 --reverse --border=rounded --prompt="🔍 Buscar evento: "
+                    echo "$datos_block" | stk_fzf_ejecutar "Buscar evento" "TRÁFICO BLOQUEADO" "EVENTOS" --ansi --height=20 --reverse --border=rounded --prompt="🔍 Buscar evento: "
                 fi
                 read -p "Presione Enter para continuar..."
                 ;;
@@ -782,7 +792,7 @@ analizar_trafico_red() {
                 informe_auditoria_seguridad
                 ;;
             3)
-                clear
+                stk_limpiar
                 mostrar_logo_stop4me
                 pintar "$CIAN" "--- CONFIGURAR NIVEL DE REGISTRO (LOGGING) DE UFW ---"
                 local opt_log="1. 🔴 off (Desactivar registro)\n2. 🟢 low (Básico: registra paquetes bloqueados - Recomendado)\n3. 🟡 medium (Medio: incluye paquetes rechazados e inválidos)\n4. 🟠 high (Alto: registra todos los paquetes con limitación)\n5. ↩ Volver"
@@ -808,7 +818,7 @@ analizar_trafico_red() {
 }
 
 gestionar_logs_script() {
-    clear
+    stk_limpiar
     mostrar_logo_stop4me
     pintar "$MAGENTA" "--- AUDITORÍA DE BITÁCORA DE ACCIONES (stk_mantenimiento.log) ---"
 
@@ -831,11 +841,12 @@ gestionar_logs_script() {
         *) return ;;
     esac
 
-    clear
+    stk_limpiar
     pintar "$CIAN" "--- LOGS FILTRADOS POR: $tipo_filtro ---"
     echo -e "${AZUL}Tip: Usa FZF para buscar términos dentro de los logs.${RESET}\n"
 
-    grep "STOP4ME" "$LOG_FILE" | grep "$tipo_filtro" | fzf --ansi \
+    grep "STOP4ME" "$LOG_FILE" | grep "$tipo_filtro" | stk_fzf_ejecutar "Buscar evento" "Pulsar ESC o Ctrl+C para salir" "LOGS FILTRADOS" \
+        --ansi \
         --height=20 \
         --reverse \
         --border=rounded \
@@ -852,7 +863,7 @@ stop4me_main_menu() {
     fi
 
     while true; do
-        clear
+        stk_limpiar
 
         local opciones="1. ⚡ ESTADO      | Activar / Desactivar / Recargar UFW\n2. 🔌 GESTIÓN     | Reglas por Puerto o Servicio o IP\n3. 🛡️ CONTROL     | Tráfico de Red y Auditoria de Eventos\n4. ⚠️ RESTART     | Vuelve a la Configuración de Fábrica\n5. ↩  Volver"
         local seleccion

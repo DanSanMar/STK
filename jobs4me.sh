@@ -12,6 +12,13 @@ V="1.1"
 DESCRIPCION="Dashboard de análisis de servicios, procesos y tareas programadas"
 AUTOR="DanSanMar"
 
+# --- CAPA DE COMPATIBILIDAD STK (TERM / fzf / TTY / rutas) ---
+STK_COMPAT_HEADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_header.sh"
+if [ -r "$STK_COMPAT_HEADER" ]; then
+    # shellcheck source=stk_header.sh
+    source "$STK_COMPAT_HEADER"
+fi
+
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
@@ -137,7 +144,8 @@ jobs4me_fzf_menu() {
     local logo logo_cmd
     logo=$(logo_texto)
     printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
+        --ansi \
         --height="$altura" \
         --layout=reverse \
         --no-sort \
@@ -586,7 +594,8 @@ explorar_servicios() {
     printf -v preview_cmd 'bash %q --detalle {1}' "$SELF_PATH"
     printf -v header_cmd 'bash %q --logo-header' "$SELF_PATH"
 
-    printf '%b' "$lista" | fzf --ansi \
+    printf '%b' "$lista" | stk_fzf_ejecutar "Seleccione servicio" "ANÁLISIS DE SERVICIOS" "ANÁLISIS DE SERVICIOS" \
+        --ansi \
         --height=~90% \
         --layout=reverse \
         --no-sort \
@@ -683,13 +692,10 @@ main() {
         exit 0
     fi
 
-    local tiene_tput=false
-    command -v tput &>/dev/null && tiene_tput=true
-    if [ "$tiene_tput" = true ]; then
-        tput smcup 2>/dev/null
-        tput civis 2>/dev/null
-    fi
-    trap 'tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; exit 0' SIGINT SIGTERM
+    # Pantalla alternativa sin terminfo (secuencias ANSI de stk_header.sh).
+    stk_alt_screen_on
+    stk_cursor_off
+    trap 'stk_alt_screen_off; stk_cursor_on; exit 0' SIGINT SIGTERM
 
     local tecla=""
     while true; do
@@ -701,14 +707,14 @@ main() {
         read -r -n 1 -s -t 3 tecla || tecla=""
         case "$tecla" in
             f|F)
-                [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+                stk_alt_screen_off; stk_cursor_on
                 explorar_servicios
-                [ "$tiene_tput" = true ] && { tput smcup 2>/dev/null; tput civis 2>/dev/null; }
+                stk_alt_screen_on; stk_cursor_off
                 ;;
             i|I)
-                [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+                stk_alt_screen_off; stk_cursor_on
                 generar_informe
-                [ "$tiene_tput" = true ] && { tput smcup 2>/dev/null; tput civis 2>/dev/null; }
+                stk_alt_screen_on; stk_cursor_off
                 ;;
             q|Q|$'\e')
                 break
@@ -718,7 +724,7 @@ main() {
         esac
     done
 
-    [ "$tiene_tput" = true ] && { tput rmcup 2>/dev/null; tput cnorm 2>/dev/null; }
+    stk_alt_screen_off; stk_cursor_on
     salir_jobs4me
 }
 

@@ -11,6 +11,13 @@ V="1.2"
 DESCRIPCION="Investigador de procesos, puertos, persistencia y amenazas silenciosas en Linux"
 AUTOR="DanSanMar"
 
+# --- CAPA DE COMPATIBILIDAD STK (TERM / fzf / TTY / rutas) ---
+STK_COMPAT_HEADER="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_header.sh"
+if [ -r "$STK_COMPAT_HEADER" ]; then
+    # shellcheck source=stk_header.sh
+    source "$STK_COMPAT_HEADER"
+fi
+
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
@@ -116,7 +123,8 @@ estado_tcp() {
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$header_text" "" \
+        --ansi \
         --height=15 \
         --reverse \
         --border=rounded \
@@ -135,7 +143,8 @@ proc4me_fzf_menu() {
     logo=$(logo_texto)
     printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
 
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
+        --ansi \
         --height="$altura" \
         --layout=reverse \
         --no-sort \
@@ -601,7 +610,8 @@ fzf_lista_educativa() {
 
     printf -v preview_cmd 'bash %q --preview-educativo %q {}' "$SELF_PATH" "$categoria"
 
-    fzf --ansi \
+    stk_fzf_ejecutar "${prompt#➤ }" "$titulo" "$titulo" \
+        --ansi \
         --height=85% \
         --min-height=20 \
         --layout=reverse \
@@ -715,7 +725,7 @@ comprobar_dependencias() {
     done
 
     if [ ${#faltan[@]} -gt 0 ]; then
-        clear
+        stk_limpiar
         mostrar_logo_proc4me
         pintar "$ROJO_BRILLANTE" "⚠️ Faltan dependencias obligatorias: ${faltan[*]}"
         echo ""
@@ -1636,7 +1646,7 @@ menu_acciones_pid() {
                 [ -z "$sel" ] && return 0
 
         case ${sel%%.*} in
-            1) clear; mostrar_logo_proc4me; detalle_pid "$pid"; pausa ;;
+            1) stk_limpiar; mostrar_logo_proc4me; detalle_pid "$pid"; pausa ;;
             2) accion_enviar_senal "$pid" TERM ;;
             3) accion_enviar_senal "$pid" KILL ;;
             4) accion_enviar_senal "$pid" STOP ;;
@@ -1653,14 +1663,14 @@ menu_acciones_pid() {
 # ==============================================================================
 
 listar_todos_procesos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PROCESOS DEL SISTEMA (ordenados por CPU)"
 
     local sel
     sel=$(ps -eo pid=,ppid=,user=,%cpu=,%mem=,stat=,etimes=,comm=,args= --sort=-%cpu 2>/dev/null \
         | sed 's/^ *//' \
-        | fzf --ansi --height=80% --reverse --border=rounded \
+        | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
             --prompt="🔍 Seleccione PID para inspeccionar: " \
             --header="PID PPID USUARIO %CPU %MEM STAT ETIMES COMMAND" \
             --preview "$(preview_proceso_campo1)" \
@@ -1677,7 +1687,7 @@ listar_todos_procesos() {
 }
 
 mostrar_procesos_sospechosos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PROCESOS SOSPECHOSOS"
 
@@ -1690,7 +1700,7 @@ mostrar_procesos_sospechosos() {
     fi
 
     local sel
-    sel=$(printf '%s\n' "$datos" | fzf --ansi --height=80% --reverse --border=rounded \
+    sel=$(printf '%s\n' "$datos" | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
         --delimiter='\t' --with-nth=1,2,3,4 \
         --prompt="🔍 Seleccione proceso sospechoso: " \
         --header="PID | USUARIO | MOTIVO | EJECUTABLE / CMD" \
@@ -1708,7 +1718,7 @@ mostrar_procesos_sospechosos() {
 }
 
 mostrar_procesos_ram() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PROCESOS EN RAM / BINARIOS BORRADOS / MEMFD"
 
@@ -1723,7 +1733,7 @@ mostrar_procesos_ram() {
     fi
 
     local sel
-    sel=$(printf '%s\n' "$filtrado" | fzf --ansi --height=80% --reverse --border=rounded \
+    sel=$(printf '%s\n' "$filtrado" | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
         --delimiter='\t' --with-nth=1,2,3,4 \
         --prompt="🔍 Seleccione proceso: " \
         --header="PID | USUARIO | MOTIVO | EJECUTABLE / CMD" \
@@ -1741,7 +1751,7 @@ mostrar_procesos_ram() {
 }
 
 mostrar_reverse_shells() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "SHELLS CON SOCKETS / POSIBLES REVERSE SHELLS"
 
@@ -1754,7 +1764,7 @@ mostrar_reverse_shells() {
     fi
 
     local sel
-    sel=$(printf '%s\n' "$datos" | fzf --ansi --height=80% --reverse --border=rounded \
+    sel=$(printf '%s\n' "$datos" | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
         --delimiter='\t' --with-nth=1,2,3,4,5,6 \
         --prompt="🔍 Seleccione conexión sospechosa: " \
         --header="PID | USUARIO | PROCESO | LOCAL | REMOTO | ESTADO" \
@@ -1772,7 +1782,7 @@ mostrar_reverse_shells() {
 }
 
 mostrar_procesos_ocultos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PROCESOS OCULTOS (/proc vs ps)"
 
@@ -1783,7 +1793,7 @@ mostrar_procesos_ocultos() {
 }
 
 mostrar_top_procesos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "TOP PROCESOS POR CPU Y MEMORIA"
 
@@ -1799,14 +1809,14 @@ mostrar_top_procesos() {
 }
 
 inspector_pid() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "INSPECTOR INTERACTIVO DE PID"
 
     local sel
     sel=$(ps -eo pid=,ppid=,user=,%cpu=,%mem=,stat=,etimes=,comm=,args= --sort=-%cpu 2>/dev/null \
         | sed 's/^ *//' \
-        | fzf --ansi --height=80% --reverse --border=rounded \
+        | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
             --prompt="🔍 Seleccione PID para inspeccionar: " \
             --header="PID PPID USUARIO %CPU %MEM STAT ETIMES COMMAND" \
             --preview "$(preview_proceso_campo1)" \
@@ -1842,7 +1852,7 @@ seleccionar_pid_de_ss() {
     local prompt="$3"
     local sel pid
 
-    sel=$(printf '%s\n' "$datos" | fzf --ansi --height=80% --reverse --border=rounded \
+    sel=$(printf '%s\n' "$datos" | stk_fzf_ejecutar "Seleccione" "Detalles" "PROC4ME" --ansi --height=80% --reverse --border=rounded \
         --prompt="$prompt" \
         --header="$header" \
         --preview "$(preview_puerto_campo1)" \
@@ -1862,7 +1872,7 @@ seleccionar_pid_de_ss() {
 }
 
 mostrar_puertos_escucha() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PUERTOS EN ESCUCHA"
 
@@ -1880,7 +1890,7 @@ mostrar_puertos_escucha() {
 }
 
 mostrar_puertos_publicos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PUERTOS EXPUESTOS PÚBLICAMENTE (0.0.0.0 / ::)"
 
@@ -1904,7 +1914,7 @@ mostrar_puertos_publicos() {
 }
 
 mostrar_conexiones_establecidas() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "CONEXIONES ESTABLECIDAS"
 
@@ -1922,7 +1932,7 @@ mostrar_conexiones_establecidas() {
 }
 
 mostrar_sockets_ocultos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "COMPARACIÓN ss vs /proc/net (SOCKETS OCULTOS)"
 
@@ -1943,7 +1953,7 @@ mostrar_sockets_ocultos() {
 # ==============================================================================
 
 ver_archivos_tmp() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "EJECUTABLES EN /tmp Y RAM"
     local datos
@@ -1953,7 +1963,7 @@ ver_archivos_tmp() {
 }
 
 ver_archivos_ocultos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "ARCHIVOS OCULTOS EN TEMPORALES"
     local datos
@@ -1963,7 +1973,7 @@ ver_archivos_ocultos() {
 }
 
 ver_cambios_recientes() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "CAMBIOS RECIENTES (48h)"
     local datos
@@ -1973,7 +1983,7 @@ ver_cambios_recientes() {
 }
 
 ver_suid() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "BINARIOS SUID / SGID"
     local datos
@@ -1983,7 +1993,7 @@ ver_suid() {
 }
 
 ver_capabilities() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "CAPABILITIES"
     local datos
@@ -1993,7 +2003,7 @@ ver_capabilities() {
 }
 
 ver_archivos_borrados() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "ARCHIVOS BORRADOS ABIERTOS"
     local datos
@@ -2003,7 +2013,7 @@ ver_archivos_borrados() {
 }
 
 ver_integridad() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "INTEGRIDAD DE PAQUETES"
     echo -ne "${AMARILLO}Este análisis puede tardar varios minutos. ¿Continuar? (s/N): ${RESET}"
@@ -2020,7 +2030,7 @@ ver_integridad() {
 }
 
 ver_persistencia_cron() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "CRON Y TAREAS PROGRAMADAS"
     local datos
@@ -2030,7 +2040,7 @@ ver_persistencia_cron() {
 }
 
 ver_persistencia_systemd() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "SYSTEMD: UNIDADES Y TIMERS"
     local datos
@@ -2040,7 +2050,7 @@ ver_persistencia_systemd() {
 }
 
 ver_persistencia_ld_preload() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "LD_PRELOAD Y LIBRERÍAS"
     local datos
@@ -2050,7 +2060,7 @@ ver_persistencia_ld_preload() {
 }
 
 ver_persistencia_ssh_sudo() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "SSH, AUTHORIZED_KEYS Y SUDOERS"
     local datos
@@ -2060,7 +2070,7 @@ ver_persistencia_ssh_sudo() {
 }
 
 ver_persistencia_reciente() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PERSISTENCIA MODIFICADA RECIENTEMENTE"
     local datos
@@ -2070,7 +2080,7 @@ ver_persistencia_reciente() {
 }
 
 ver_usuarios_uid0() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "USUARIOS CON UID 0"
     local datos
@@ -2080,7 +2090,7 @@ ver_usuarios_uid0() {
 }
 
 ver_usuarios_shell() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "USUARIOS CON SHELL VÁLIDA"
     local datos
@@ -2090,7 +2100,7 @@ ver_usuarios_shell() {
 }
 
 ver_sesiones() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "SESIONES ACTIVAS"
     local datos
@@ -2100,7 +2110,7 @@ ver_sesiones() {
 }
 
 ver_ultimos_accesos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "ÚLTIMOS ACCESOS Y FALLOS"
     local datos
@@ -2110,7 +2120,7 @@ ver_ultimos_accesos() {
 }
 
 ver_ssh_logs() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "REGISTROS SSH RECIENTES"
     local datos
@@ -2120,7 +2130,7 @@ ver_ssh_logs() {
 }
 
 ver_ssh_keys() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "AUTHORIZED_KEYS"
     local datos
@@ -2130,7 +2140,7 @@ ver_ssh_keys() {
 }
 
 ver_sudoers() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "SUDOERS"
     local datos
@@ -2140,7 +2150,7 @@ ver_sudoers() {
 }
 
 ver_ssh_config() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "CONFIGURACIÓN SSH"
     local datos
@@ -2150,7 +2160,7 @@ ver_ssh_config() {
 }
 
 ver_kernel_info() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "INFORMACIÓN DEL KERNEL"
     local datos
@@ -2160,7 +2170,7 @@ ver_kernel_info() {
 }
 
 ver_modulos() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "MÓDULOS DEL KERNEL"
     local datos
@@ -2170,7 +2180,7 @@ ver_modulos() {
 }
 
 ver_dmesg() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "DMESG RECIENTE"
     local datos
@@ -2180,7 +2190,7 @@ ver_dmesg() {
 }
 
 ver_rootkit_tools() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "HERRAMIENTAS ROOTKIT"
     local datos
@@ -2195,7 +2205,7 @@ ver_rootkit_tools() {
 
 menu_procesos() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 📋 Listar todos los procesos (FZF)
 2. 🚨 Procesos sospechosos
 3. 🧠 Binarios borrados / memfd / RAM
@@ -2223,7 +2233,7 @@ menu_procesos() {
 
 menu_puertos() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 🔌 Puertos en escucha
 2. 🌐 Puertos públicos (0.0.0.0 / ::)
 3. 🔗 Conexiones establecidas
@@ -2242,7 +2252,7 @@ menu_puertos() {
             4) mostrar_reverse_shells ;;
             5) mostrar_sockets_ocultos ;;
             6)
-                clear
+                stk_limpiar
                 mostrar_logo_proc4me
                 seccion "NOTA SOBRE PUERTOS Y FIREWALL"
                 echo -e " ${AMARILLO}Un puerto en escucha no es sinónimo de malware.${RESET}"
@@ -2270,7 +2280,7 @@ menu_puertos() {
 }
 
 mostrar_persistencia_todo() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "PERSISTENCIA: CRON"
     datos_persistencia_cron
@@ -2291,7 +2301,7 @@ mostrar_persistencia_todo() {
 
 menu_persistencia() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 📋 Ver toda la persistencia
 2. ⏰ Cron y tareas programadas
 3. ⚙️ Systemd (unidades y timers)
@@ -2317,7 +2327,7 @@ menu_persistencia() {
 
 menu_archivos() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 📂 Ejecutables y scripts en /tmp y RAM
 2. 👁️ Archivos ocultos en directorios temporales
 3. 🕒 Cambios recientes en directorios críticos
@@ -2344,7 +2354,7 @@ menu_archivos() {
 }
 
 mostrar_usuarios_todo() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "USUARIOS CON UID 0"
     datos_usuarios_uid0
@@ -2374,7 +2384,7 @@ mostrar_usuarios_todo() {
 
 menu_usuarios() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 👤 Usuarios con UID 0
 2. 🐚 Usuarios con shell válida
 3. 🖥️ Sesiones activas
@@ -2405,7 +2415,7 @@ menu_usuarios() {
 }
 
 mostrar_kernel_todo() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "INFORMACIÓN DEL KERNEL"
     datos_kernel_info
@@ -2423,7 +2433,7 @@ mostrar_kernel_todo() {
 
 menu_kernel() {
     while true; do
-        clear
+        stk_limpiar
         local opciones="1. 🧠 Información y estado tainted
 2. 🧩 Módulos cargados y fuera del árbol
 3. 📜 dmesg reciente
@@ -2608,7 +2618,7 @@ menu_acciones_informe() {
     fi
 
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo_proc4me
         seccion "INFORME: $archivo"
         echo -e " ${AZUL}Ruta:${RESET} $ruta"
@@ -2624,7 +2634,7 @@ menu_acciones_informe() {
 
         case ${sel%%.*} in
             1)
-                clear
+                stk_limpiar
                 mostrar_logo_proc4me
                 seccion "INFORME: $archivo"
                 if command -v less >/dev/null 2>&1; then
@@ -2653,7 +2663,8 @@ seleccionar_informe() {
 
     printf -v preview_cmd 'bash %q --preview-informe {4}' "$SELF_PATH"
 
-    sel=$(printf '%s\n' "$datos" | fzf --ansi \
+    sel=$(printf '%s\n' "$datos" | stk_fzf_ejecutar "Seleccione un informe" "INFORMES DISPONIBLES" "INFORMES" \
+        --ansi \
         --height=85% --min-height=20 \
         --layout=reverse \
         --border=rounded \
@@ -2671,7 +2682,7 @@ seleccionar_informe() {
 
 
 menu_ayuda() {
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "AYUDA Y LIMITACIONES"
     cat <<'AYUDA'
@@ -3307,7 +3318,7 @@ generar_informe() {
 escaneo_rapido() {
     local interactivo="${1:-si}"
 
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "ESCANEO RÁPIDO DE AMENAZAS"
     echo -e "${AZUL}Analizando procesos, puertos, persistencia y accesos...${RESET}\n"
@@ -3348,7 +3359,7 @@ auditoria_completa() {
     local interactivo="${1:-si}"
     local resp
 
-    clear
+    stk_limpiar
     mostrar_logo_proc4me
     seccion "AUDITORÍA COMPLETA"
     echo -e "${AZUL}Recopilando información de todos los módulos...${RESET}\n"
@@ -3405,14 +3416,10 @@ auditoria_completa() {
 # ==============================================================================
 
 proc4me_main_menu() {
-    if command -v tput >/dev/null 2>&1; then
-        trap 'tput cnorm 2>/dev/null; echo; exit 130' INT TERM
-    else
-        trap 'echo; exit 130' INT TERM
-    fi
+    trap 'stk_cursor_on; echo; exit 130' INT TERM
 
     while true; do
-        clear
+        stk_limpiar
 
         local procesos puertos resumen
         procesos=$(ps -e --no-headers 2>/dev/null | wc -l)

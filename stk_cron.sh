@@ -26,6 +26,12 @@ if [ ! -f "$STK2_SCRIPT" ]; then
     fi
 fi
 
+# --- CAPA DE COMPATIBILIDAD STK (TERM / fzf / TTY / rutas) ---
+if [ -r "$SCRIPT_DIR/stk_header.sh" ]; then
+    # shellcheck source=stk_header.sh
+    source "$SCRIPT_DIR/stk_header.sh"
+fi
+
 # Definir colores propios
 RESET='\e[0m'
 VERDE_BRILLANTE='\e[92m'
@@ -81,7 +87,8 @@ mostrar_logo() {
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "$header_text" "" \
+        --ansi \
         --height=18 \
         --reverse \
         --border=rounded \
@@ -557,7 +564,7 @@ programar_nueva_tarea() {
     # ------------------------------------------------------------------------
     # PASO 1: SELECCIÓN DE TAREAS
     # ------------------------------------------------------------------------
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     pintar "$CIAN" "--- PASO 1: SELECCIONAR LA TAREA A PROGRAMAR ---"
@@ -616,7 +623,8 @@ programar_nueva_tarea() {
                 done
             else
                 local seleccionadas
-                seleccionadas=$(echo -e -n "$fzf_input" | fzf --ansi --height=18 --reverse --border=rounded \
+                seleccionadas=$(echo -e -n "$fzf_input" | stk_fzf_ejecutar "Seleccione tareas" "SELECCIONAR MÚLTIPLES (TAB + ENTER)" "TAREAS" \
+                    --ansi --height=18 --reverse --border=rounded \
                     --prompt="➤ Usa TAB para marcar varias: " \
                     --header="SELECCIONAR MÚLTIPLES (TAB + ENTER)" --multi)
                 
@@ -643,7 +651,7 @@ programar_nueva_tarea() {
     # ------------------------------------------------------------------------
     # PASO 2: SELECCIÓN DE FRECUENCIA / PERÍODO
     # ------------------------------------------------------------------------
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     pintar "$CIAN" "--- PASO 2: SELECCIONAR EL PERÍODO / FRECUENCIA ---"
@@ -715,7 +723,7 @@ programar_nueva_tarea() {
             descripcion_freq="Semanal día $dia a las ${hora}:00"
             ;;
         5)
-            clear
+            stk_limpiar
             mostrar_logo
             echo ""
             pintar "$CIAN" "════════════════════════════════════════════════════════════"
@@ -920,7 +928,7 @@ eliminar_tarea_especifica() {
 
 gestionar_tareas_individuales() {
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         echo ""
         pintar "$CIAN" "--- ELIMINACIÓN DE TAREAS ---"
@@ -1022,7 +1030,7 @@ mostrar_resumen_final() {
     local cron_line="$1"
     local descripcion="$2"
     
-    clear
+    stk_limpiar
     echo -e "${VERDE_BRILLANTE}"
     echo "╔═════════════════════════════════════════════════════════════╗"
     echo "║                                                             ║"
@@ -1056,7 +1064,7 @@ mostrar_resumen_final() {
 # ============================================================================
 
 ver_configuracion_cron() {
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     pintar "$CIAN" "--- CONFIGURACIÓN ACTUAL ---"
@@ -1098,7 +1106,7 @@ ver_configuracion_cron() {
 }
 
 ver_logs_cron() {
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     pintar "$CIAN" "--- LOGS DE EJECUCIÓN CRON ---"
@@ -1132,7 +1140,7 @@ ver_logs_cron() {
 }
 
 ver_resumen_cron() {
-    clear
+    stk_limpiar
     mostrar_logo
         
     if [ -f "$CRON_RESUMEN_FILE" ]; then
@@ -1157,7 +1165,7 @@ configurar_notificaciones() {
     fi
 
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         echo ""
         pintar "$CIAN" "--- NOTIFICACIONES DE TAREAS AUTOMÁTICAS ---"
@@ -1225,7 +1233,7 @@ configurar_notificaciones() {
 }
 
 desactivar_cron() {
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     pintar "$CIAN" "--- DESACTIVAR TAREAS AUTOMÁTICAS ---"
@@ -1297,13 +1305,13 @@ EOF
 #                   MENÚ PRINCIPAL
 # ============================================================================
 logs_resumen() {
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
     
     ver_logs_cron
 
-    clear
+    stk_limpiar
     mostrar_logo
     echo ""
 
@@ -1313,7 +1321,7 @@ gestionar_tareas_auto() {
     inicializar_estructura
     
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         echo ""
         pintar "$MAGENTA" "═══════════════════════════════════════════════"

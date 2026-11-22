@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.8-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-6.6.9-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.8)
+# 🛠️ STK - System Tool Kit (v6.6.9)
 
 </div>
 
@@ -41,6 +41,8 @@
 * **Mejoras de la v.6.6.7:** `hard4me.sh` v1.1 adopta la cabecera compartida `stk_header.sh` (la misma que `install4me`), con modos completo/normal/compacto y FZF unificado; la búsqueda de directorios usa rutas seguras con `du -x` y `timeout`, y el dashboard se adapta a terminales estrechas sin desbordes.
 * **Corrección de la v.6.6.8:** El explorador `[f]` de `hard4me` v1.2 vuelve a mostrar la cabecera (`stk_header` + `stk_header_cmd`), perdida al migrar; con un solo disco muestra el detalle directamente en lugar de un FZF inútil.
 * **Compatibilidad (fase 1):** Nueva capa de degradación elegante en `stk_header.sh`: sanea `TERM` desconocido (Ghostty, Kitty, tmux…), detecta la versión real de `fzf` antes de usar sockets UNIX (`--listen` requiere ≥ 0.66), retira opciones no soportadas, ignora `FZF_DEFAULT_OPTS` en los menús, sustituye `clear`/`tput` por secuencias ANSI y ofrece menú textual sin TTY. Avisos deduplicados, resumen al salir y flag `-d, --diagnostico`.
+* **Compatibilidad (fase 2):** Todos los módulos (`hard4me`, `jobs4me`, `dash4me`, `proc4me`, `stop4me`, `stk_cron`, `install4me`) cargan la capa, sustituyen `clear`/`tput` por los equivalentes ANSI y enrutan sus menús FZF por `stk_fzf_ejecutar`, heredando los fallbacks.
+* **Compatibilidad (fase 3):** El resto de selectores (menús secundarios, exploradores de directorios y backups, checklist del modo auto, búsquedas de logs e informes) también pasan por el wrapper. Se añade aviso de locale sin UTF-8, el chequeo de red deja de ser un error fatal y la detección de TTY usa `/dev/tty` para no dar falsos avisos dentro de `$(...)`.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -74,6 +76,7 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Sin TTY o sin fzf:** los menús pasan a un menú textual con `select`; en cron o redirecciones se devuelve un fallo controlado en lugar de un error de fzf.
 * **Aislamiento:** `FZF_DEFAULT_OPTS` se vacía en los menús de STK para que la configuración del usuario no provoque conflictos.
 * **Rutas y logs:** el directorio temporal se elige entre `TMPDIR`, `XDG_RUNTIME_DIR`, `/run/user/$UID`, `/tmp` y `/dev/shm`; si `/var/log` no es escribible se redirige la bitácora a `$HOME/.local/state/stk/`.
+* **Cobertura:** la capa la usan `stk2.sh` y todos los módulos; **todas** las selecciones FZF pasan por `stk_fzf_ejecutar` (salvo el reintento mínimo interno de emergencia).
 * **Diagnóstico:** `./stk2.sh --diagnostico` (o `-d`) imprime todo el estado detectado sin arrancar menús. Las pruebas están en `tests/compat.sh`.
 ---
 
@@ -183,7 +186,14 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.8 (Actual)
+### 📝 v6.6.9 (Actual)
+* **Compatibilidad:** Nueva capa de degradación elegante en `stk_header.sh` para sobrevivir a entornos distintos (Debian con ncurses/fzf antiguos, Ghostty/Kitty/tmux, sudo con `env_reset`, sin TTY, cron, locales C).
+* **Errores resueltos:** `invalid listen port: …fzf_….sock` (fzf < 0.66 no entiende sockets UNIX en `--listen`) y `'xterm-ghostty': unknown terminal type` (terminfo ausente + `clear`/`tput`).
+* **Menús:** `stk_fzf_ejecutar` centraliza todas las selecciones: retira opciones no soportadas, aísla `FZF_DEFAULT_OPTS`, ofrece menú textual sin TTY/sin fzf y reintenta con opciones mínimas solo ante error real de fzf.
+* **Módulos:** `hard4me`, `jobs4me`, `dash4me`, `proc4me`, `stop4me`, `stk_cron` e `install4me` cargan la capa y usan secuencias ANSI en lugar de `tput`.
+* **Diagnóstico:** Nuevo flag `-d, --diagnostico`, avisos deduplicados y resumen de compatibilidad al salir. Pruebas en `tests/compat.sh` (23 PASS).
+
+### 📝 v6.6.8
 * **Corrección:** `hard4me.sh` v1.2 restaura `--header` en el explorador FZF (`f`), que se había quedado sin logo al eliminar `logo_texto` durante la migración a `stk_header.sh`. La cabecera viva sigue refrescándose con `stk_header_cmd`.
 * **Mejora:** Con un solo disco detectado, `[f]` muestra el detalle en árbol directamente en pantalla; con varios discos se abre FZF con preview.
 
