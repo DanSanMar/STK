@@ -99,6 +99,322 @@ stk_repetir() {
     printf '%s' "$salida"
 }
 
+# ==============================================================================
+# CAPA DE COMPATIBILIDAD: terminfo / fzf / TTY / rutas / avisos
+# ------------------------------------------------------------------------------
+# Se activa explícitamente con `stk_caps_init` desde cada script principal.
+# Nada de esto es fatal: se degrada la funcionalidad y se avisa una sola vez.
+# ==============================================================================
+
+STK_COMPAT_INICIALIZADA=false
+STK_CAP_TTY=false
+STK_TERM_ORIGINAL=""
+STK_FZF_VERSION=""
+STK_FZF_DISPONIBLE=false
+STK_FZF_CON_SOCK=false
+STK_FZF_FLAG_BORDER_LABEL=false
+STK_CURL_UNIX=false
+STK_TMP_DIR_ELEGIDO=""
+STK_HEADER_REFRESH_CMD=()
+STK_AVISOS=()
+declare -A STK_AVISOS_VISTOS=()
+
+# Comparador de versiones sin `sort -V` (GNU-only). 0 si "$1" >= "$2".
+stk_version_ge() {
+    local v1="${1//[^0-9.]/}" v2="${2//[^0-9.]/}"
+    local -a a=() b=()
+    local IFS=.
+    read -r -a a <<< "$v1"
+    read -r -a b <<< "$v2"
+    local n=${#a[@]} i x y
+    [ ${#b[@]} -gt "$n" ] && n=${#b[@]}
+    for (( i = 0; i < n; i++ )); do
+        x="${a[i]:-0}"; y="${b[i]:-0}"
+        [[ "$x" =~ ^[0-9]+$ ]] || x=0
+        [[ "$y" =~ ^[0-9]+$ ]] || y=0
+        [ "$x" -gt "$y" ] && return 0
+        [ "$x" -lt "$y" ] && return 1
+    done
+    return 0
+}
+
+# Aviso centralizado: nivel informacion/aviso/error, deduplicado por codigo.
+stk_avisar() {
+    local nivel="${1:-info}" codigo="${2:-general}" mensaje="${3:-}"
+    local prefijo
+    case "$nivel" in
+        error) prefijo="${ROJO}ERROR${RESET}" ;;
+        warn)  prefijo="${AMARILLO}AVISO${RESET}" ;;
+        *)     prefijo="${AZUL}INFO ${RESET}" ;;
+    esac
+    [ -n "${STK_AVISOS_VISTOS[$codigo]:-}" ] && return 0
+    STK_AVISOS_VISTOS[$codigo]=1
+    STK_AVISOS+=("$nivel|$codigo|$mensaje")
+    printf '[STK][%b] %b\n' "$prefijo" "$mensaje" >&2
+    local logf="${LOG_FILE:-}"
+    if [ -n "$logf" ] && [ -w "$logf" ]; then
+        printf '[%s] [%s] [STK-CAPS] - %s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" "${nivel^^}" "$mensaje" >> "$logf" 2>/dev/null || true
+    fi
+}
+
+stk_resumen_avisos() {
+    [ ${#STK_AVISOS[@]} -gt 0 ] || return 0
+    local entrada nivel codigo mensaje errores=0 avisos=0
+    for entrada in "${STK_AVISOS[@]}"; do
+        IFS='|' read -r nivel codigo mensaje <<< "$entrada"
+        if [ "$nivel" = "error" ]; then errores=$((errores + 1)); else avisos=$((avisos + 1)); fi
+    done
+    printf '%b\n' "${AZUL}Resumen de compatibilidad:${RESET} $avisos aviso(s), $errores error(es). Detalles en ${LOG_FILE:-log}."
+}
+
+# --- TERMINFO ---
+stk_term_valido() {
+    local t="${1:-}"
+    [ -z "$t" ] && return 1
+    [ "$t" = "dumb" ] && return 1
+    if command -v infocmp >/dev/null 2>&1; then
+        infocmp -1 "$t" >/dev/null 2>&1 && return 0
+    fi
+    if command -v tput >/dev/null 2>&1; then
+        tput -T "$t" longname >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+stk_term_sanitizar() {
+    STK_TERM_ORIGINAL="${TERM:-<vacío>}"
+    stk_term_valido "${TERM:-}" && return 0
+    local candidato
+    for candidato in xterm-256color screen-256color xterm vt100; do
+        if stk_term_valido "$candidato"; then
+            export TERM="$candidato"
+            stk_avisar warn term_fallback \
+                "TERM='$STK_TERM_ORIGINAL' no existe en este servidor; usando $candidato. Para conservarlo: infocmp -x $STK_TERM_ORIGINAL | ssh usuario@servidor -- tic -x -"
+            return 0
+        fi
+    done
+    stk_avisar warn term_fallback \
+        "TERM='$STK_TERM_ORIGINAL' no es válido y no hay alternativa conocida; la interfaz puede degradarse."
+    return 1
+}
+
+# --- RUTAS TEMPORALES Y LOG ---
+# Deja la ruta elegida en STK_TMP_DIR_ELEGIDO (sin subshell para conservar avisos).
+stk_elegir_tmp() {
+    local base dir
+    for base in "${TMPDIR:-}" "${XDG_RUNTIME_DIR:-}" "/run/user/${UID:-}" /tmp /dev/shm; do
+        [ -n "$base" ] || continue
+        dir=$(mktemp -d "$base/stk.XXXXXX" 2>/dev/null) || continue
+        [ -d "$dir" ] && [ -w "$dir" ] || continue
+        if [ -n "${TMPDIR:-}" ] && [ "$base" != "$TMPDIR" ]; then
+            stk_avisar warn tmp_fallback "TMPDIR no escribible; usando $dir"
+        fi
+        STK_TMP_DIR_ELEGIDO="$dir"
+        printf '%s' "$dir"
+        return 0
+    done
+    STK_TMP_DIR_ELEGIDO="${TMPDIR:-/tmp}"
+    printf '%s' "$STK_TMP_DIR_ELEGIDO"
+    return 1
+}
+
+stk_elegir_log() {
+    local logf="${LOG_FILE:-}"
+    [ -z "$logf" ] && return 0
+    if [ -e "$logf" ]; then
+        [ -w "$logf" ] && return 0
+    else
+        [ -w "$(dirname "$logf" 2>/dev/null)" ] && return 0
+    fi
+    local alt="${XDG_STATE_HOME:-$HOME/.local/state}/stk/stk_mantenimiento.log"
+    mkdir -p "$(dirname "$alt")" 2>/dev/null || alt="${TMPDIR:-/tmp}/stk_mantenimiento_${UID:-0}.log"
+    LOG_FILE="$alt"
+    stk_avisar warn log_fallback "Sin permiso para escribir el log del sistema; usando $LOG_FILE"
+}
+
+# --- SONDEO ÚNICO ---
+stk_caps_init() {
+    [ "$STK_COMPAT_INICIALIZADA" = true ] && return 0
+    STK_COMPAT_INICIALIZADA=true
+
+    stk_term_sanitizar
+
+    if [ -t 0 ] && [ -t 1 ] && [ -r /dev/tty ]; then
+        STK_CAP_TTY=true
+    else
+        stk_avisar info sin_tty "Sin TTY: los menús pasarán a modo no interactivo."
+    fi
+
+    if command -v fzf >/dev/null 2>&1; then
+        STK_FZF_DISPONIBLE=true
+        STK_FZF_VERSION=$(fzf --version 2>/dev/null | awk '{print $1}')
+        if fzf --help 2>/dev/null | grep -q -- '--border-label'; then
+            STK_FZF_FLAG_BORDER_LABEL=true
+        fi
+        if stk_curl_soporta_unix; then STK_CURL_UNIX=true; fi
+        if stk_version_ge "$STK_FZF_VERSION" 0.66.0 && [ "$STK_CURL_UNIX" = true ]; then
+            STK_FZF_CON_SOCK=true
+        elif [ -n "$STK_FZF_VERSION" ] && ! stk_version_ge "$STK_FZF_VERSION" 0.66.0; then
+            stk_avisar info fzf_header_plano \
+                "fzf $STK_FZF_VERSION: cabecera animada desactivada (los sockets UNIX requieren >= 0.66)."
+        fi
+    else
+        stk_avisar warn fzf_ausente \
+            "fzf no está en el PATH; los menús usarán el modo textual. Revisa el PATH bajo sudo (secure_path)."
+    fi
+
+    stk_elegir_log
+    if [ -z "${STK_TMP_DIR:-}" ]; then
+        stk_elegir_tmp >/dev/null
+        STK_TMP_DIR="$STK_TMP_DIR_ELEGIDO"
+    fi
+    if [ -n "${FZF_DEFAULT_OPTS:-}" ]; then
+        stk_avisar info fzf_env \
+            "FZF_DEFAULT_OPTS se ignora en los menús STK para evitar conflictos de opciones."
+    fi
+}
+
+stk_curl_soporta_unix() {
+    command -v curl >/dev/null 2>&1 || return 1
+    { curl --help all 2>/dev/null || curl --help 2>/dev/null; } | grep -q -- '--unix-socket'
+}
+
+# --- SUSTITUTOS TERMINFO-INDEPENDIENTES ---
+stk_limpiar() {
+    if [ "$STK_CAP_TTY" = true ]; then
+        printf '\e[H\e[2J\e[3J'
+    else
+        printf '\n'
+    fi
+}
+
+stk_alt_screen_on()  { printf '\e[?1049h\e[22;0;0t'; }
+stk_alt_screen_off() { printf '\e[?1049l\e[23;0;0t'; }
+stk_cursor_off()     { printf '\e[?25l'; }
+stk_cursor_on()      { printf '\e[?12l\e[?25h'; }
+
+# --- MENÚ TEXTUAL (sin fzf o sin TTY) ---
+stk_menu_texto() {
+    local prompt="$1"; shift
+    local -a opciones=("$@")
+    [ ${#opciones[@]} -gt 0 ] || return 1
+
+    printf '%b\n' "${AMARILLO}➤ $prompt (modo textual):${RESET}" >&2
+    local i
+    for i in "${!opciones[@]}"; do
+        printf '  %2d) %s\n' "$((i + 1))" "${opciones[$i]}" >&2
+    done
+
+    if [ "$STK_CAP_TTY" != true ]; then
+        stk_avisar info menu_sin_tty "Sin TTY: no se puede elegir en '$prompt'."
+        return 1
+    fi
+
+    local respuesta=""
+    while :; do
+        printf '%b' "${CIAN}Elige un número (Enter=cancelar): ${RESET}" >&2
+        IFS= read -r respuesta </dev/tty || respuesta=""
+        [ -z "$respuesta" ] && return 130
+        [[ "$respuesta" =~ ^[0-9]+$ ]] || continue
+        [ "$respuesta" -ge 1 ] && [ "$respuesta" -le ${#opciones[@]} ] || continue
+        printf '%s\n' "${opciones[$((respuesta - 1))]}"
+        return 0
+    done
+}
+
+# --- EJECUTOR UNIFICADO DE FZF CON FALLBACKS ---
+# Uso: printf ... | stk_fzf_ejecutar <prompt> <header> <titulo> [args de fzf...]
+stk_fzf_ejecutar() {
+    local prompt="$1" header_inicial="$2" titulo="$3"; shift 3
+    local -a args=("$@")
+    local -a lineas=()
+    local rc
+
+    # Inicialización perezosa: los módulos que aún no llaman a stk_caps_init
+    # siguen teniendo menús con todas las capacidades detectadas.
+    [ "$STK_COMPAT_INICIALIZADA" = true ] || stk_caps_init
+
+    mapfile -t lineas
+
+    if [ "$STK_CAP_TTY" != true ] || [ "$STK_FZF_DISPONIBLE" != true ]; then
+        stk_menu_texto "$prompt" "${lineas[@]}"
+        return $?
+    fi
+
+    # fzf antiguo: quitar --border-label y el '~' de --height=~NN%.
+    if [ "$STK_FZF_FLAG_BORDER_LABEL" != true ]; then
+        local -a filtrados=() arg
+        for arg in "${args[@]}"; do
+            case "$arg" in
+                --border-label*) continue ;;
+                --height=~*) arg="--height=${arg#--height=~}" ;;
+            esac
+            filtrados+=("$arg")
+        done
+        args=("${filtrados[@]}")
+        stk_avisar warn fzf_flags_antiguos \
+            "fzf $STK_FZF_VERSION: se omitieron opciones no soportadas (border-label, height ~)."
+    fi
+
+    if [ "$STK_FZF_CON_SOCK" = true ]; then
+        local sock="$STK_TMP_DIR/fzf_${UID:-0}_${BASHPID:-$$}.sock"
+        local ticker header
+        (
+            sleep_pid=""
+            trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM INT
+            while :; do
+                sleep "${LOGO_INTERVALO:-3}" & sleep_pid=$!
+                wait "$sleep_pid" || exit 0
+                header="$header_inicial"
+                if [ ${#STK_HEADER_REFRESH_CMD[@]} -gt 0 ]; then
+                    header=$("${STK_HEADER_REFRESH_CMD[@]}" 2>/dev/null) || header="$header_inicial"
+                fi
+                [ -n "$header" ] || header="$header_inicial"
+                curl -s -o /dev/null --max-time 2 --unix-socket "$sock" \
+                    -X POST http://localhost/ \
+                    --data-binary "change-header($header)" 2>/dev/null || exit 0
+            done
+        ) </dev/null >/dev/null 2>&1 &
+        ticker=$!
+        printf '%s\n' "${lineas[@]}" | FZF_DEFAULT_OPTS="" fzf "${args[@]}" --listen="$sock"
+        rc=$?
+        kill "$ticker" 2>/dev/null
+        wait "$ticker" 2>/dev/null
+        rm -f "$sock"
+    else
+        printf '%s\n' "${lineas[@]}" | FZF_DEFAULT_OPTS="" fzf "${args[@]}"
+        rc=$?
+    fi
+
+    # Red de seguridad: 2 = error de fzf (opción desconocida, socket inválido...).
+    # 1 = sin coincidencias y 130 = cancelación con ESC: no se reintenta.
+    if [ "$rc" -eq 2 ]; then
+        stk_avisar error fzf_reintento \
+            "fzf devolvió $rc en '$prompt'; se reintenta con opciones mínimas."
+        printf '%s\n' "${lineas[@]}" | FZF_DEFAULT_OPTS="" \
+            fzf --ansi --height=15 --reverse --prompt="➤ $prompt: "
+        rc=$?
+    fi
+    return "$rc"
+}
+
+stk_diagnostico() {
+    printf '%b\n' "${AZUL}=== STK · diagnóstico de compatibilidad ===${RESET}"
+    printf '  Sistema       : %s\n' "$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-${ID:-Linux}}")"
+    printf '  Bash          : %s\n' "${BASH_VERSION:-?}"
+    printf '  TERM          : %s (original: %s)\n' "${TERM:-<vacío>}" "${STK_TERM_ORIGINAL:-?}"
+    printf '  TTY           : %s\n' "$STK_CAP_TTY"
+    printf '  fzf           : %s\n' "${STK_FZF_VERSION:-no instalado}"
+    printf '  fzf socket    : %s\n' "$STK_FZF_CON_SOCK"
+    printf '  fzf border-lbl: %s\n' "$STK_FZF_FLAG_BORDER_LABEL"
+    printf '  curl --unix   : %s\n' "$STK_CURL_UNIX"
+    printf '  Temporal      : %s\n' "${STK_TMP_DIR:-?}"
+    printf '  Log           : %s\n' "${LOG_FILE:-?}"
+    printf '  Avisos        : %s\n' "${#STK_AVISOS[@]}"
+    stk_resumen_avisos
+}
+
 # --- INICIALIZACIÓN ---
 stk_init() {
     STK_MODULO="${1:-STK}"
@@ -198,12 +514,13 @@ stk_header() {
     printf '%b%s%b\n' "$CIAN" "$(stk_repetir '━' "$cols")" "$RESET"
 }
 
-# --- MENÚ FZF ESTÁNDAR ---
+# --- MENÚ FZF ESTÁNDAR (con fallback textual) ---
 stk_fzf_menu() {
     local prompt_text="$1"
     local titulo="$2"
     local altura="${3:-18}"
-    fzf --ansi \
+    stk_fzf_ejecutar "$prompt_text" "" "$titulo" \
+        --ansi \
         --height="$altura" \
         --reverse \
         --border=rounded \

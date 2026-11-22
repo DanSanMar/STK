@@ -37,14 +37,24 @@ DATE=$(date +"%d/%m/%Y")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Biblioteca compartida: estética + capa de compatibilidad (terminfo/fzf/TTY).
+if [ -r "$SCRIPT_DIR/stk_header.sh" ]; then
+    # shellcheck source=stk_header.sh
+    source "$SCRIPT_DIR/stk_header.sh"
+fi
+
 # Directorio temporal privado (700) para caché y sockets de esta ejecución.
-# Evita rutas predecibles en /tmp cuando el script corre como root.
-STK_TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/stk.XXXXXX" 2>/dev/null)
+# stk_elegir_tmp prueba TMPDIR, XDG_RUNTIME_DIR, /run/user, /dev/shm y /tmp.
+stk_elegir_tmp >/dev/null
+STK_TMP_DIR="$STK_TMP_DIR_ELEGIDO"
 if [ -d "$STK_TMP_DIR" ]; then
     trap 'rm -rf "$STK_TMP_DIR"' EXIT
 else
     STK_TMP_DIR="${TMPDIR:-/tmp}"
 fi
+
+# Sanitiza TERM y sondea fzf/curl/TTY antes de cualquier stk_limpiar o menú.
+stk_caps_init
 
 registrar_log() {
     local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
@@ -62,7 +72,7 @@ rotar_logs() {
     local MODO_SILENCIOSO="${1:-modo_interactivo}"
 
     if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
-        clear
+        stk_limpiar
         mostrar_logo
         pintar "$CIAN" "--- ROTACIÓN Y MANTENIMIENTO DE LOGS ---"
         echo -e "${AMARILLO}➤ Archivo de bitácora:${RESET} ${BLANCO}$LOG_FILE${RESET}"
@@ -118,7 +128,7 @@ rotar_logs() {
 }
 
 ver_logs() {
-    clear
+    stk_limpiar
     mostrar_logo
     
     if [ -f "$LOG_FILE" ]; then
@@ -309,7 +319,7 @@ install_tools() {
 }
 
 mostrar_instrucciones() {
-    clear
+    stk_limpiar
     local pkg_upper
     pkg_upper=$(echo "$Package" | tr '[:lower:]' '[:upper:]')
 
@@ -475,6 +485,7 @@ salir() {
     pintar "$VERDE" "¡Gracias por usar STK, hasta pronto!"
     echo ""
     echo -e "${VERDE}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    stk_resumen_avisos
     exit 0
 }
 
@@ -589,12 +600,8 @@ KERNEL_STK=$(uname -r 2>/dev/null || echo "N/D")
 HOST_STK=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "Desconocido")
 SO_STK="${PRETTY_NAME:-${OS_ID:-Desconocido}}"
 
-# Detección única de la cabecera dinámica de fzf (evita lanzar `fzf --help` en cada menú).
-FZF_CON_LISTEN=false
-if command -v fzf &>/dev/null && command -v curl &>/dev/null \
-    && fzf --help 2>/dev/null | grep -q -- '--listen'; then
-    FZF_CON_LISTEN=true
-fi
+# La detección de fzf/socket la hace stk_caps_init (ver stk_header.sh).
+# FZF_CON_SOCK solo es true si fzf >= 0.66 y curl soporta --unix-socket.
 
 actualizar_colores_logo() {
     # El color avanza una posición cada LOGO_INTERVALO segundos (epoch / intervalo).
@@ -998,6 +1005,7 @@ fzf_estilo() {
 }
 
 # Menú con marco global: logo + dashboard + opciones dentro del mismo recuadro.
+# La lógica de fallback (TTY, fzf ausente, socket no soportado) vive en stk_header.sh.
 stk_fzf_menu() {
     local prompt_text="$1"
     local titulo="$2"
@@ -1031,40 +1039,9 @@ stk_fzf_menu() {
         --color="$FZF_COLORES"
     )
 
-    # fzf antiguo (sin --listen) o sin curl: cabecera estática.
-    if [ "$FZF_CON_LISTEN" != true ]; then
-        fzf "${fzf_args[@]}"
-        return
-    fi
-
-    # Socket privado para inyectar la cabecera animada en caliente.
-    local sock ticker rc
-    sock="$STK_TMP_DIR/fzf_${UID:-0}_${BASHPID:-$$}.sock"
-
-    (
-        sleep_pid=""
-        trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM INT
-        # Refresca logo + hora cada LOGO_INTERVALO segundos.
-        while :; do
-            sleep "$LOGO_INTERVALO" & sleep_pid=$!
-            wait "$sleep_pid" || exit 0
-            logo=$(logo_texto "$modo")
-            curl -s -o /dev/null --max-time 2 \
-                --unix-socket "$sock" \
-                -X POST http://localhost/ \
-                --data-binary "change-header($logo)" 2>/dev/null || exit 0
-        done
-    ) </dev/null >/dev/null 2>&1 &
-    ticker=$!
-
-    fzf "${fzf_args[@]}" --listen="$sock"
-    rc=$?
-
-    kill "$ticker" 2>/dev/null
-    wait "$ticker" 2>/dev/null
-    rm -f "$sock"
-
-    return $rc
+    # El ticker usa este comando para regenerar el logo en caliente.
+    STK_HEADER_REFRESH_CMD=(logo_texto "$modo")
+    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" "${fzf_args[@]}"
 }
 
 ejecutar_stop4me() {
@@ -1135,7 +1112,7 @@ menu() {
     # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
     dashboard_cacheado </dev/null >/dev/null 2>&1 &
     while true; do
-        clear
+        stk_limpiar
 
 opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 1. 📊 | MONITORIZACIÓN  | Rendimiento, red, disco y servicios
@@ -1161,7 +1138,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
-                    clear
+                    stk_limpiar
                     accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios\n4. Análisis de Disco (HARD4ME)\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
@@ -1175,7 +1152,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             2) # --- SUBMENÚ SEGURIDAD ---
                 while true; do
-                    clear
+                    stk_limpiar
                     accion=$(echo -e "1. Analisis de Procesos\n2. Auditoría de Seguridad\n3. Gestor de Firewall UFW\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SEGURIDAD")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
@@ -1188,7 +1165,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             3) # --- SUBMENÚ SOFTWARE ---
                 while true; do
-                    clear
+                    stk_limpiar
                     accion=$(echo -e "1. Actualización del Sistema\n2. Instalador por categorías (INSTALL4ME)\n3. Instalar / Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
@@ -1196,7 +1173,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                         2) ejecutar_install4me ;;
                         3)
                             while true; do
-                                clear
+                                stk_limpiar
                                 accion_inst=$(echo -e "1. Instalar programa\n2. Desinstalar programa\n3. ↩ Volver" | stk_fzf_menu "Seleccione" "INSTALAR / DESINSTALAR")
                                 if [[ $? -ne 0 || "$accion_inst" == *"Volver"* ]]; then break; fi
                                 case ${accion_inst%%.*} in
@@ -1211,7 +1188,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             4) # --- SUBMENÚ ADMINISTRACIÓN ---
                 while true; do
-                    clear
+                    stk_limpiar
                     accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "ADMINISTRACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
@@ -1225,7 +1202,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             5) # --- SUBMENÚ MANTENIMIENTO ---
                 while true; do
-                    clear
+                    stk_limpiar
                     accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
@@ -1322,9 +1299,9 @@ modo_auto() {
     fi
 
     # Capturar Ctrl+C para liberar el lock y volver de forma segura al menú
-    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; clear; return' SIGINT
+    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; stk_limpiar; return' SIGINT
 
-    clear
+    stk_limpiar
     mostrar_logo
     pintar "$MAGENTA" "════════════════════════════════════════════════════════════════"
     pintar "$BLANCO"  " 🤖 MODO AUTOMÁTICO INTEGRAL DE MANTENIMIENTO"
@@ -1606,8 +1583,8 @@ modo_auto() {
 }
 
 auditoria_seguridad() {
-    trap "clear; return" SIGINT
-    clear
+    trap "stk_limpiar; return" SIGINT
+    stk_limpiar
     mostrar_logo
     pintar $MAGENTA "--- AUDITORÍA Y RECOMENDACIONES DE SEGURIDAD ---"
     echo ""
@@ -1873,8 +1850,8 @@ auditoria_seguridad() {
 }
 
 Actualizar_sistema() {
-    trap "clear; return" SIGINT
-    clear
+    trap "stk_limpiar; return" SIGINT
+    stk_limpiar
     mostrar_logo
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
     echo ""
@@ -1960,8 +1937,8 @@ Actualizar_sistema() {
 }
 
 instalar_programa() {
-    trap "clear; return" SIGINT
-    clear
+    trap "stk_limpiar; return" SIGINT
+    stk_limpiar
     mostrar_logo 
     echo ""
     read -p "Escriba el nombre del programa que desea instalar/actualizar: " programa
@@ -2045,8 +2022,8 @@ instalar_programa() {
 }
 
 desinstalar_programa() {
-    trap "clear; return" SIGINT
-    clear
+    trap "stk_limpiar; return" SIGINT
+    stk_limpiar
     mostrar_logo 
     echo ""
     read -p "Escriba el nombre del programa que desea desinstalar: " programa
@@ -2157,9 +2134,9 @@ modificar_permisos_usuario() {
 }
 
 gestionar_usuarios() {
-    trap "clear; return" SIGINT
+    trap "stk_limpiar; return" SIGINT
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         
         local opciones="1. 📋 Listar usuarios humanos\n2. ➕ Crear usuario (Con permisos)\n3. 🛡️ Modificar permisos de usuario\n4. 🗑️ Eliminar usuario\n5. ↩ Volver"
@@ -2214,7 +2191,7 @@ gestionar_usuarios() {
                 ;;
 
             3)
-                clear
+                stk_limpiar
                 mostrar_logo
                 pintar $CIAN "--- MODIFICAR PERMISOS DE USUARIOS ---"
                 
@@ -2327,10 +2304,10 @@ pedir_nombre() {
 
 #Gestión de servicios   
 gestionar_servicios() {
-    trap "clear; return" SIGINT
+    trap "stk_limpiar; return" SIGINT
     while true; do
         
-        clear
+        stk_limpiar
         mostrar_logo
         pintar $MAGENTA "--- PANEL DE CONTROL DE SERVICIOS (Systemd) ---"
         echo -e "${BLANCO}Seleccione un estado para filtrar servicios:${RESET}"
@@ -2362,10 +2339,10 @@ gestionar_servicios() {
 
 menu_operaciones_servicio() {
     local svc=$1
-    trap "clear; return" SIGINT
+    trap "stk_limpiar; return" SIGINT
     while true; do
         
-        clear
+        stk_limpiar
         pintar $CIAN "⚙️ Gestionando: $svc"
         echo "------------------------------------------------"
         # Mostramos el estado actual muy brevemente para tener contexto
@@ -2545,8 +2522,8 @@ campo_red() {
 }
 
 mostrar_info_red() {
-    trap "clear; return" SIGINT
-    clear
+    trap "stk_limpiar; return" SIGINT
+    stk_limpiar
     mostrar_logo
 
     local ok="${VERDE_BRILLANTE}"
@@ -2838,7 +2815,7 @@ fzf_seleccionar_directorio() {
 # ==============================================================================
 
 ver_backups_existentes() {
-    clear
+    stk_limpiar
     mostrar_logo
     pintar $CIAN "--- BACKUPS LOCALES EXISTENTES ---"
 
@@ -2870,7 +2847,7 @@ ver_backups_existentes() {
 }
 
 eliminar_backups() {
-    clear
+    stk_limpiar
     mostrar_logo
     pintar $CIAN "--- ELIMINAR COPIAS DE SEGURIDAD ---"
 
@@ -2900,7 +2877,7 @@ eliminar_backups() {
 }
 
 restaurar_backup() {
-    clear
+    stk_limpiar
     mostrar_logo
     pintar $CIAN "--- RESTAURAR COPIA DE SEGURIDAD ---"
 
@@ -2959,10 +2936,10 @@ restaurar_backup() {
 # ==============================================================================
 
 autocopy_atomatic() {
-    trap "clear; return" SIGINT
+    trap "stk_limpiar; return" SIGINT
 
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         pintar $CIAN "--- RESPALDO LOCAL AUTOMÁTICO (PC) ---"
 
@@ -3102,7 +3079,7 @@ copy4me_tui_main() {
     local USUARIO_REAL=${SUDO_USER:-$USER}
 
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         pintar $CIAN "--- COPY4ME ENGINE TUI (RSYNC & PERFILES) ---"
 
@@ -3231,7 +3208,7 @@ copy4me_tui_main() {
                 ;;
 
             3)
-                clear
+                stk_limpiar
                 mostrar_logo
                 pintar $CIAN "--- DISPOSITIVOS Y PUNTOS DE MONTAJE DETECTADOS ---"
                 lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,TRAN | grep -v "^$"
@@ -3249,10 +3226,10 @@ copy4me_tui_main() {
 # ==============================================================================
 
 hacer_backup() {
-    trap "clear; return" SIGINT
+    trap "stk_limpiar; return" SIGINT
 
     while true; do
-        clear
+        stk_limpiar
         mostrar_logo
         pintar $CIAN "--- GESTIÓN INTEGRAL DE COPIAS DE SEGURIDAD ---"
         
@@ -3348,6 +3325,12 @@ case "$1" in
 
     -D|--disk|hard4me)
         ejecutar_hard4me
+        ;;
+
+    -d|--diagnostico)
+        stk_caps_init
+        stk_diagnostico
+        exit 0
         ;;
 
     -v|--version)

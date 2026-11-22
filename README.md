@@ -40,6 +40,7 @@
 * **Mejoras de la v.6.6.6:** `hard4me.sh`, dashboard de monitorización del disco con salud SMART/NVMe, veredictos interpretados, capacidad e inodos, rendimiento, capas (LVM/RAID/Btrfs/ZFS/LUKS/swap) y temperatura. Solo lectura, sin exigir root, con instalación de dependencias bajo pregunta.
 * **Mejoras de la v.6.6.7:** `hard4me.sh` v1.1 adopta la cabecera compartida `stk_header.sh` (la misma que `install4me`), con modos completo/normal/compacto y FZF unificado; la búsqueda de directorios usa rutas seguras con `du -x` y `timeout`, y el dashboard se adapta a terminales estrechas sin desbordes.
 * **Corrección de la v.6.6.8:** El explorador `[f]` de `hard4me` v1.2 vuelve a mostrar la cabecera (`stk_header` + `stk_header_cmd`), perdida al migrar; con un solo disco muestra el detalle directamente en lugar de un FZF inútil.
+* **Compatibilidad (fase 1):** Nueva capa de degradación elegante en `stk_header.sh`: sanea `TERM` desconocido (Ghostty, Kitty, tmux…), detecta la versión real de `fzf` antes de usar sockets UNIX (`--listen` requiere ≥ 0.66), retira opciones no soportadas, ignora `FZF_DEFAULT_OPTS` en los menús, sustituye `clear`/`tput` por secuencias ANSI y ofrece menú textual sin TTY. Avisos deduplicados, resumen al salir y flag `-d, --diagnostico`.
 ---
 
 ## 🏗️ Arquitectura y Robustez Técnica
@@ -65,6 +66,15 @@ El script lee las variables de `/etc/os-release` con lógica de caída escalonad
 * **Tres modos:** completo (≥90 columnas y ≥20 filas), normal (≥60) y compacto (pantallas estrechas o bajas), con truncado seguro del título cuando no cabe (corregido en v6.6.7).
 * **Estilo PROC4ME:** módulo, subtítulo, `By: DanSanMar`, versión y hora con colores rotativos por segmentos; el autor siempre en la barra superior.
 * **Módulos migrados:** `install4me` y `hard4me` (v1.1) ya comparten esta cabecera; `stk_header_cmd` alimenta la cabecera viva del explorador FZF de discos.
+
+### 5. Capa de Compatibilidad y Degradación Elegante
+`stk_header.sh` incluye un sondeo único (`stk_caps_init`) que evita que diferencias de entorno rompan la interfaz:
+* **TERM desconocido:** si `infocmp`/`tput` no reconocen el terminal (p. ej. `xterm-ghostty` en Debian con ncurses antiguo, `xterm-kitty`, `tmux-256color`), se usa el primer candidato válido (`xterm-256color`, `screen-256color`, `xterm`, `vt100`) y se avisa con el comando para instalar el terminfo.
+* **fzf antiguo:** los sockets UNIX de `--listen` solo existen desde fzf **0.66.0**. En versiones anteriores se desactiva la cabecera animada (no es un error) y se retiran `--border-label` y el `~` de `--height=~90%`. Si fzf rechaza opciones (`rc=2`) se reintenta con un conjunto mínimo.
+* **Sin TTY o sin fzf:** los menús pasan a un menú textual con `select`; en cron o redirecciones se devuelve un fallo controlado en lugar de un error de fzf.
+* **Aislamiento:** `FZF_DEFAULT_OPTS` se vacía en los menús de STK para que la configuración del usuario no provoque conflictos.
+* **Rutas y logs:** el directorio temporal se elige entre `TMPDIR`, `XDG_RUNTIME_DIR`, `/run/user/$UID`, `/tmp` y `/dev/shm`; si `/var/log` no es escribible se redirige la bitácora a `$HOME/.local/state/stk/`.
+* **Diagnóstico:** `./stk2.sh --diagnostico` (o `-d`) imprime todo el estado detectado sin arrancar menús. Las pruebas están en `tests/compat.sh`.
 ---
 
 ## 🛡️ Medidas de Seguridad y Fiabilidad
@@ -260,7 +270,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 * **Nuevo:** Opción **Notificaciones** en el gestor de tareas automáticas para activar o desactivar los avisos de escritorio de Cron sin tocar las tareas programadas.
 
 ### 📝 v5.9.7
-* **Nuevo:** Soporte para ejecución directa por línea de comandos mediante banderas CLI (`-m`, `-a`, `-u`, `-c`, `-l`, `-b`, `-A`, `-v`, `-h`).
+* **Nuevo:** Soporte para ejecución directa por línea de comandos mediante banderas CLI (`-m`, `-a`, `-u`, `-c`, `-l`, `-b`, `-A`, `-d/--diagnostico`, `-v`, `-h`).
 * **Mejora:** Sistema interactivo de ayuda (`--help`) para recordar el uso de las flags desde la terminal.
 * **Optimización:** Resolución dinámica y creación de enlace simbólico de compatibilidad para el intérprete de JavaScript (`js`).
 
