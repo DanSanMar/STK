@@ -250,17 +250,20 @@ actualizar_extra() {
     STK_EXTRA="${VERDE}Modo:${RESET} ${AZUL}Auditoría interna${RESET} | ${CIAN}Objetivo:${RESET} ${BLANCO}${redes_txt}${RESET} | ${CIAN}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET}"
 }
 
-# Logo compartido: se usa en pantalla y como header de FZF (con refresco vivo).
+# Logo compartido: se usa como header de FZF (con refresco vivo) y, en modo
+# textual (sin fzf), se imprime una sola vez por menú en la salida de error.
 logo_texto() {
     actualizar_extra
     stk_header
 }
 
-mostrar_logo() {
-    echo ""
-    logo_texto
-    echo ""
-    echo -e "${AMARILLO}   Uso exclusivo en redes propias o autorizadas. Solo lectura.${RESET}"
+MENU_TEXTO=""
+header_refresco() {
+    local logo
+    logo=$(logo_texto)
+    printf '%s\n%s\n%s' "$logo" \
+        "${AMARILLO}   Uso exclusivo en redes propias o autorizadas. Solo lectura.${RESET}" \
+        "$MENU_TEXTO"
 }
 
 salir() {
@@ -401,12 +404,17 @@ check_tools() {
 # Menú FZF con el logo de STK como header (y refresco en caliente).
 fzf_con_logo() {
     local prompt="$1" titulo="$2" texto="$3"; shift 3
-    local logo header
+    local header
     local -a extra=()
-    logo=$(logo_texto)
-    header=$(printf '%s\n%s' "$logo" "$texto")
+    MENU_TEXTO="$texto"
+    header=$(header_refresco)
     [ "${STK_FZF_FLAG_BORDER_LABEL:-false}" = true ] && extra+=(--border-label=" $titulo ")
-    STK_HEADER_REFRESH_CMD=(logo_texto)
+    STK_HEADER_REFRESH_CMD=(header_refresco)
+    # Sin fzf o sin TTY el menú es textual y no muestra cabecera: se imprime
+    # aquí una sola vez (por stderr, fuera del pipe de las opciones).
+    if [ "${STK_CAP_TTY:-false}" != true ] || [ "${STK_FZF_DISPONIBLE:-false}" != true ]; then
+        printf '%s\n' "$header" >&2
+    fi
     stk_fzf_ejecutar "$prompt" "$header" "$titulo" \
         --ansi --reverse --no-sort --border=rounded \
         --prompt="➤ $prompt: " \
@@ -473,7 +481,6 @@ seleccionar_red() {
     [ ${#fisicas[@]} -gt 0 ] || fisicas=("${REDES_DISPONIBLES[@]}")
 
     actualizar_extra
-    mostrar_logo
     echo -e "${AZUL}Seleccione la red a auditar:${RESET}"
 
     opciones+=("1. Redes físicas detectadas (${#fisicas[@]})")
