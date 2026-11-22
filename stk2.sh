@@ -1110,6 +1110,20 @@ ejecutar_install4me() {
     read -p "Presione Enter para continuar..."
   fi
 }
+
+ejecutar_localscan4me() {
+  # Lanza el dashboard de auditoría de redes locales (inventario y puertos)
+  if [ -f "$SCRIPT_DIR/localscan4me.sh" ]; then
+    bash "$SCRIPT_DIR/localscan4me.sh"
+  elif command -v localscan4me.sh &>/dev/null; then
+    localscan4me.sh
+  elif command -v localscan4me &>/dev/null; then
+    localscan4me
+  else
+    echo -e "${ROJO}❌ Error: No se encuentra localscan4me.sh en $SCRIPT_DIR${RESET}"
+    read -p "Presione Enter para continuar..."
+  fi
+}
 #función del menú principal
 menu() {
     # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
@@ -1142,11 +1156,22 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Información de Red\n3. Análisis de Servicios\n4. Análisis de Disco (HARD4ME)\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
+                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Redes y puertos abiertos (LOCALSCAN4ME)\n3. Análisis de Servicios\n4. Análisis de Disco (HARD4ME)\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
-                        2) mostrar_info_red ;;
+                        2)
+                            # --- SUBMENÚ FUSIONADO DE REDES ---
+                            while true; do
+                                stk_limpiar
+                                red_accion=$(echo -e "1. Información de red\n2. Escaneo de redes y puertos abiertos (LOCALSCAN4ME)\n3. ↩ Volver" | stk_fzf_menu "Seleccione" "REDES Y PUERTOS ABIERTOS")
+                                if [[ $? -ne 0 || "$red_accion" == *"Volver"* ]]; then break; fi
+                                case ${red_accion%%.*} in
+                                    1) mostrar_info_red ;;
+                                    2) ejecutar_localscan4me ;;
+                                esac
+                            done
+                            ;;
                         3) ejecutar_jobs4me ;;
                         4) ejecutar_hard4me ;;
                     esac
