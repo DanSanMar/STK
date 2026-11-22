@@ -106,7 +106,7 @@ mkdir -p "$RESULTS_DIR"
 : > "$HOSTS_FILE"
 
 cleanup() { [ -d "$WORKDIR" ] && rm -rf "$WORKDIR"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
 
 # --- ESTADO ---
 REDES_DISPONIBLES=()   # "iface|CIDR"
@@ -114,6 +114,7 @@ REDES_ELEGIDAS=()      # "iface|CIDR"
 TARGET_IP=""
 TARGET_RED=""
 MODO=0
+MODO_DIRECTO=false     # true = auditar un host sin inventariar la red
 REPORTE_ACTUAL=""
 
 # ---------- UTILIDADES ----------
@@ -122,6 +123,116 @@ seccion()  { echo ""; pintar "$MAGENTA" "── $1 ──"; }
 aviso()    { pintar "$AMARILLO_BRILLANTE" "  ⚠️  $1"; }
 ok()       { pintar "$VERDE_BRILLANTE" "  ✔ $1"; }
 pausa()    { echo ""; read -r -p "  Presione Enter para continuar..." _ || true; }
+
+# --- VALIDACIÓN Y CÁLCULO DE REDES ---
+validar_cidr() {
+    local cidr="$1" ip pref o
+    [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] || return 1
+    ip="${cidr%/*}"
+    pref="${cidr#*/}"
+    (( 10#$pref >= 0 && 10#$pref <= 32 )) || return 1
+    local IFS='.'
+    for o in $ip; do
+        (( 10#$o >= 0 && 10#$o <= 255 )) || return 1
+    done
+    return 0
+}
+
+ip_a_int() {
+    local IFS=. a b c d
+    [[ "${1:-}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    read -r a b c d <<< "$1" || return 1
+    printf '%s' "$(( (10#$a << 24) + (10#$b << 16) + (10#$c << 8) + 10#$d ))"
+}
+
+# ¿La red $1 (CIDR) contiene a la red/host $2 (CIDR)?
+cidr_contiene() {
+    local base="$1" sub="$2" bip bpref sip spref bint sint mask
+    bip="${base%/*}"; bpref="${base#*/}"
+    sip="${sub%/*}";  spref="${sub#*/}"
+    [[ "$bpref" =~ ^[0-9]+$ && "$spref" =~ ^[0-9]+$ ]] || return 1
+    [ "$spref" -lt "$bpref" ] && return 1
+    bint=$(ip_a_int "$bip") || return 1
+    sint=$(ip_a_int "$sip") || return 1
+    mask=$(( (0xFFFFFFFF << (32 - bpref)) & 0xFFFFFFFF ))
+    [ $(( bint & mask )) -eq $(( sint & mask )) ]
+}
+
+# Número aproximado de direcciones de un CIDR (para avisar de barridos largos).
+cidr_hosts() {
+    local pref="${1##*/}"
+    [[ "$pref" =~ ^[0-9]+$ ]] || { echo 0; return; }
+    [ "$pref" -ge 31 ] && { echo 1; return; }
+    echo $(( 2 ** (32 - pref) ))
+}
+
+es_iface_virtual() {
+    case "${1:-}" in
+        docker*|br-*|virbr*|veth*|vmnet*|vboxnet*|tailscale*|tun*|tap*|wg*|zt*|podman*|cni*|flannel*|lxcbr*|lxdbr*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+iface_para_cidr() {
+    local cidr="$1" e ifc icidr
+    for e in "${REDES_DISPONIBLES[@]}"; do
+        ifc="${e%%|*}"; icidr="${e#*|}"
+        if cidr_contiene "$icidr" "$cidr" || cidr_contiene "$cidr" "$icidr"; then
+            echo "$ifc"
+            return 0
+        fi
+    done
+    ifc=$(ip route get "${cidr%/*}" 2>/dev/null | awk '/dev/ {print $5; exit}') || ifc=""
+    if [ -z "$ifc" ]; then
+        ifc=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}') || ifc=""
+    fi
+    echo "${ifc:-eth0}"
+}
+
+# nmap con reintento sin privilegios: -sS necesita CAP_NET_RAW; si falla, -sT.
+# NMAP_MOSTRAR_ERR=true deja pasar stderr (progreso de --stats-every).
+nmap_ejecutar() {
+    local errf="$WORKDIR/nmap.err" rc=0
+    local mostrar="${NMAP_MOSTRAR_ERR:-false}"
+    local -a alt=()
+    local a tiene_ss=false
+    for a in "$@"; do
+        [ "$a" = "-sS" ] && { tiene_ss=true; a="-sT"; }
+        alt+=("$a")
+    done
+
+    if [ "$mostrar" = true ]; then
+        nmap "$@" || rc=$?
+    else
+        : > "$errf"
+        nmap "$@" 2>"$errf" || rc=$?
+    fi
+
+    if [ "$rc" -ne 0 ] && [ "$tiene_ss" = true ]; then
+        rc=0
+        if [ "$mostrar" = true ]; then
+            nmap "${alt[@]}" || rc=$?
+        else
+            nmap "${alt[@]}" 2>>"$errf" || rc=$?
+        fi
+    fi
+
+    if [ "$rc" -ne 0 ] && [ "$mostrar" != true ]; then
+        sed 's/^/  [nmap] /' "$errf" >&2 || true
+    fi
+    return "$rc"
+}
+
+nombre_modo() {
+    case "${1:-0}" in
+        1) echo "Inventario e identificación" ;;
+        2) echo "Exposición de servicios" ;;
+        3) echo "Higiene de configuración" ;;
+        4) echo "Revisión TLS/cifrado" ;;
+        5) echo "Barrido de red" ;;
+        *) echo "—" ;;
+    esac
+}
 
 actualizar_extra() {
     local redes_txt="N/D" pkg_mostrar="${Package:-N/A}" e
@@ -133,7 +244,10 @@ actualizar_extra() {
         redes_txt=$(unir "${cidrs[@]}")
     fi
     [ "$INMUTABLE" = true ] && pkg_mostrar="rpm-ostree"
-    STK_EXTRA="${VERDE}Modo:${RESET} ${AZUL}Auditoría interna${RESET} | ${CIAN}Redes:${RESET} ${BLANCO}${redes_txt}${RESET} | ${CIAN}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET}"
+    if [ "$MODO_DIRECTO" = true ] && [ -n "$TARGET_IP" ]; then
+        redes_txt="host $TARGET_IP"
+    fi
+    STK_EXTRA="${VERDE}Modo:${RESET} ${AZUL}Auditoría interna${RESET} | ${CIAN}Objetivo:${RESET} ${BLANCO}${redes_txt}${RESET} | ${CIAN}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET}"
 }
 
 # Logo compartido: se usa en pantalla y como header de FZF (con refresco vivo).
@@ -219,7 +333,7 @@ instalar_dependencias() {
     case "$Package" in
         apt)    apt update -y -qq || true; apt install -y "${paquetes[@]}" ;;
         dnf)    dnf install -y "${paquetes[@]}" ;;
-        pacman) pacman -Sy --noconfirm || true; pacman -S --noconfirm "${paquetes[@]}" ;;
+        pacman) pacman -S --needed --noconfirm "${paquetes[@]}" ;;
         zypper) zypper refresh >/dev/null 2>&1 || true; zypper install -y "${paquetes[@]}" ;;
         *)
             echo -e "${ROJO}❌ No se detectó un gestor de paquetes compatible.${RESET}"
@@ -230,28 +344,38 @@ instalar_dependencias() {
 }
 
 # Comprueba herramientas y pregunta antes de instalar lo que falte.
+# nmap es obligatorio; arp-scan (inventario ARP rápido) y fzf (menús) son
+# opcionales: sin ellos se usan el fallback nmap -sn y los menús de texto.
 check_tools() {
-    local requeridas=(arp-scan nmap fzf)
+    local requeridas=(nmap)
+    local opcionales=(arp-scan fzf)
     local basicas=(ip awk sed grep mktemp)
-    local faltantes=() restantes=() t respuesta=""
+    local faltantes=() opc_faltantes=() restantes=() t respuesta=""
     for t in "${requeridas[@]}" "${basicas[@]}"; do
         command -v "$t" >/dev/null 2>&1 || faltantes+=("$t")
     done
-    [ ${#faltantes[@]} -eq 0 ] && return 0
+    for t in "${opcionales[@]}"; do
+        command -v "$t" >/dev/null 2>&1 || opc_faltantes+=("$t")
+    done
+    if [ ${#faltantes[@]} -eq 0 ] && [ ${#opc_faltantes[@]} -eq 0 ]; then
+        return 0
+    fi
 
     seccion "DEPENDENCIAS FALTANTES"
-    echo -e "${AMARILLO}  Faltan: ${BLANCO}$(unir "${faltantes[@]}")${RESET}"
-    echo -e "${CIAN}  Se necesitan para el inventario, el escaneo y los menús.${RESET}"
+    [ ${#faltantes[@]} -gt 0 ] && echo -e "${AMARILLO}  Obligatorias: ${BLANCO}$(unir "${faltantes[@]}")${RESET}"
+    [ ${#opc_faltantes[@]} -gt 0 ] && echo -e "${CIAN}  Recomendadas: ${BLANCO}$(unir "${opc_faltantes[@]}")${RESET}"
+    echo -e "${CIAN}  arp-scan acelera el inventario; fzf mejora los menús.${RESET}"
     echo ""
     read -r -p $'  \e[1;33m¿Deseas instalar las dependencias faltantes ahora? (s/n): \e[0m' respuesta || respuesta=""
-    case "${respuesta,,}" in
-        s|si|y|yes) instalar_dependencias "${faltantes[@]}" || true ;;
-        *)
-            aviso "Instalación cancelada por el usuario."
-            registrar_log "$LOG_WARN" "Instalación de dependencias cancelada: $(unir "${faltantes[@]}")"
+    if [[ "${respuesta,,}" =~ ^(s|si|y|yes)$ ]]; then
+        instalar_dependencias "${faltantes[@]}" "${opc_faltantes[@]}" || true
+    else
+        registrar_log "$LOG_WARN" "Instalación de dependencias cancelada: $(unir "${faltantes[@]}" "${opc_faltantes[@]}")"
+        if [ ${#faltantes[@]} -gt 0 ]; then
+            aviso "Sin las dependencias obligatorias no se puede continuar."
             return 1
-            ;;
-    esac
+        fi
+    fi
 
     for t in "${faltantes[@]}"; do
         command -v "$t" >/dev/null 2>&1 || restantes+=("$t")
@@ -261,7 +385,16 @@ check_tools() {
         registrar_log "$LOG_ERR" "Dependencias no disponibles tras el intento: $(unir "${restantes[@]}")"
         return 1
     fi
-    ok "Dependencias disponibles."
+    local sin_opc=()
+    for t in "${opc_faltantes[@]}"; do
+        command -v "$t" >/dev/null 2>&1 || sin_opc+=("$t")
+    done
+    if [ ${#sin_opc[@]} -gt 0 ]; then
+        aviso "Se continúa sin: $(unir "${sin_opc[@]}")."
+        registrar_log "$LOG_WARN" "Dependencias opcionales ausentes: $(unir "${sin_opc[@]}")"
+    else
+        ok "Dependencias disponibles."
+    fi
     return 0
 }
 
@@ -284,8 +417,8 @@ fzf_con_logo() {
 # ---------- DESCUBRIR Y ELEGIR REDES ----------
 descubrir_redes() {
     REDES_DISPONIBLES=()
-    local iface cidr entrada vistos_default=""
-    declare -A visto=()
+    local iface cidr entrada vistos_default="" e
+    declare -A visto=() visto_cidr=()
 
     vistos_default=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}') || true
 
@@ -300,7 +433,7 @@ descubrir_redes() {
 
     # La interfaz por defecto va primero; luego el resto.
     if [ -n "$vistos_default" ] && [ ${#REDES_DISPONIBLES[@]} -gt 1 ]; then
-        local ordenada=() e i
+        local ordenada=()
         for e in "${REDES_DISPONIBLES[@]}"; do
             [ "${e%%|*}" = "$vistos_default" ] && ordenada+=("$e")
         done
@@ -309,6 +442,16 @@ descubrir_redes() {
         done
         REDES_DISPONIBLES=("${ordenada[@]}")
     fi
+
+    # Deduplicar por CIDR (una misma subred puede aparecer en dos interfaces).
+    local -a final=()
+    for e in "${REDES_DISPONIBLES[@]}"; do
+        cidr="${e#*|}"
+        [[ -n "${visto_cidr[$cidr]:-}" ]] && continue
+        visto_cidr[$cidr]=1
+        final+=("$e")
+    done
+    REDES_DISPONIBLES=("${final[@]}")
 
     if [ ${#REDES_DISPONIBLES[@]} -eq 0 ]; then
         echo -e "${ROJO_BRILLANTE}❌ No se detectaron redes IPv4 activas.${RESET}"
@@ -319,80 +462,156 @@ descubrir_redes() {
 }
 
 seleccionar_red() {
-    local opciones=() entrada iface cidr i=2 elegida num manual salir_op iface_manual
+    local opciones=() entrada iface cidr i=3 elegida num manual host_op salir_op iface_manual
+    local -a fisicas=()
+    local respuesta="" total_hosts=0 h e
+    MODO_DIRECTO=false
+
+    for entrada in "${REDES_DISPONIBLES[@]}"; do
+        es_iface_virtual "${entrada%%|*}" || fisicas+=("$entrada")
+    done
+    [ ${#fisicas[@]} -gt 0 ] || fisicas=("${REDES_DISPONIBLES[@]}")
+
     actualizar_extra
     mostrar_logo
     echo -e "${AZUL}Seleccione la red a auditar:${RESET}"
 
-    opciones+=("1. Todas las redes detectadas (${#REDES_DISPONIBLES[@]})")
+    opciones+=("1. Redes físicas detectadas (${#fisicas[@]})")
+    opciones+=("2. Todas las redes, incluidas virtuales (${#REDES_DISPONIBLES[@]})")
     for entrada in "${REDES_DISPONIBLES[@]}"; do
         iface="${entrada%%|*}"
         cidr="${entrada#*|}"
-        opciones+=("$i. $iface  —  $cidr")
+        if es_iface_virtual "$iface"; then
+            opciones+=("$i. $iface  —  $cidr  [virtual]")
+        else
+            opciones+=("$i. $iface  —  $cidr")
+        fi
         i=$((i + 1))
     done
     manual=$i
     opciones+=("$i. Introducir red manualmente (CIDR)")
-    salir_op=$((i + 1))
+    host_op=$((i + 1))
+    opciones+=("$host_op. Auditar un host/IP concreto (sin inventario)")
+    salir_op=$((i + 2))
     opciones+=("$salir_op. Salir del auditor")
 
     elegida=$(printf '%s\n' "${opciones[@]}" \
         | fzf_con_logo "Red" "REDES LOCALES DISPONIBLES" \
-            "Seleccione una red, 'Todas' o introduzca un CIDR" \
-            --height=32%) || true
+            "Elige red, 'Todas', CIDR manual o un host concreto" \
+            --height=50%) || true
     [[ -z "$elegida" ]] && salir
 
     num="${elegida%%.*}"
     REDES_ELEGIDAS=()
     case "$num" in
-        1) REDES_ELEGIDAS=("${REDES_DISPONIBLES[@]}") ;;
+        1) REDES_ELEGIDAS=("${fisicas[@]}") ;;
+        2) REDES_ELEGIDAS=("${REDES_DISPONIBLES[@]}") ;;
         "$manual")
             read -r -p "  CIDR (ej. 192.168.10.0/24): " cidr || cidr=""
-            [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] || {
-                aviso "CIDR no válido. Formato esperado: 192.168.1.0/24"
+            if ! validar_cidr "$cidr"; then
+                aviso "CIDR no válido. Formato esperado: 192.168.10.0/24 (octetos 0-255, prefijo 0-32)."
                 return 1
-            }
-            iface_manual=$(ip route get "${cidr%/*}" 2>/dev/null | awk '/dev/ {print $5; exit}') || true
-            [ -z "$iface_manual" ] && iface_manual=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}') || true
-            [ -z "$iface_manual" ] && iface_manual="eth0"
+            fi
+            iface_manual=$(iface_para_cidr "$cidr")
+            ok "Interfaz asociada: $iface_manual"
             REDES_ELEGIDAS=("$iface_manual|$cidr")
+            ;;
+        "$host_op")
+            read -r -p "  IP del host (ej. 192.168.1.50): " TARGET_IP || TARGET_IP=""
+            if ! validar_cidr "$TARGET_IP/32"; then
+                aviso "IP no válida. Formato esperado: 192.168.1.50"
+                TARGET_IP=""
+                return 1
+            fi
+            MODO_DIRECTO=true
+            TARGET_RED="—"
+            for e in "${REDES_DISPONIBLES[@]}"; do
+                if cidr_contiene "${e#*|}" "$TARGET_IP/32"; then
+                    TARGET_RED="$e"
+                    REDES_ELEGIDAS=("$e")
+                    break
+                fi
+            done
+            ok "Objetivo directo: $TARGET_IP"
             ;;
         "$salir_op") salir ;;
         *)
-            entrada="${REDES_DISPONIBLES[$((num - 2))]:-}"
+            [[ "$num" =~ ^[0-9]+$ ]] || return 1
+            entrada="${REDES_DISPONIBLES[$((num - 3))]:-}"
             [ -n "$entrada" ] || return 1
             REDES_ELEGIDAS=("$entrada")
             ;;
     esac
 
+    # Aviso y confirmación si el inventario va a cubrir demasiadas direcciones.
+    if [ "$MODO_DIRECTO" != true ]; then
+        for entrada in "${REDES_ELEGIDAS[@]}"; do
+            h=$(cidr_hosts "${entrada#*|}")
+            total_hosts=$((total_hosts + h))
+        done
+    fi
+    if [ "$MODO_DIRECTO" != true ] && [ "$total_hosts" -gt 4096 ]; then
+        echo ""
+        aviso "El inventario cubrirá ~$total_hosts direcciones y puede tardar mucho."
+        echo -e "${CIAN}  Sugerencia: elige una red concreta o un CIDR más pequeño.${RESET}"
+        read -r -p "  ¿Continuar de todos modos? (s/n): " respuesta || respuesta=""
+        case "${respuesta,,}" in
+            s|si|y|yes) ;;
+            *) return 1 ;;
+        esac
+    fi
+
     actualizar_extra
-    registrar_log "$LOG_INFO" "Red(es) seleccionada(s): $(unir "${REDES_ELEGIDAS[@]}")"
+    if [ "$MODO_DIRECTO" = true ]; then
+        registrar_log "$LOG_INFO" "Auditoría directa de host: $TARGET_IP"
+    else
+        registrar_log "$LOG_INFO" "Red(es) seleccionada(s): $(unir "${REDES_ELEGIDAS[@]}")"
+    fi
     return 0
 }
 
 # ---------- INVENTARIO DE TODAS LAS REDES ELEGIDAS ----------
 registrar_host() {
-    local ip="$1" mac="$2" vendor="$3" red="$4" nombre="$5"
+    local ip="$1" mac="${2:-}" vendor="${3:-}" red="$4" nombre="${5:-}"
     [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
     [[ -n "${HOSTS_VISTOS[$ip]:-}" ]] && return 0
     HOSTS_VISTOS[$ip]=1
+    # El formato interno usa '|' como separador: se neutraliza en los campos.
+    mac="${mac//|//}"
+    vendor="${vendor//|//}"
+    red="${red//|//}"
+    nombre="${nombre//|//}"
     printf '%s|%s|%s|%s|%s\n' "$ip" "${mac:-—}" "${vendor:-Desconocido}" "$red" "${nombre:-—}" >> "$HOSTS_FILE"
 }
 
 reconocimiento_inicial() {
     declare -gA HOSTS_VISTOS=()
     local entrada iface cidr salida ip mac vendor nombre linea total antes redes_ok=0
+    local hosts_red tmo
+
+    # Inventario limpio en cada pasada: evita mezclar hosts de redes anteriores.
+    : > "$HOSTS_FILE"
 
     seccion "INVENTARIO DE RED"
     for entrada in "${REDES_ELEGIDAS[@]}"; do
         iface="${entrada%%|*}"
         cidr="${entrada#*|}"
         antes=$(wc -l < "$HOSTS_FILE" | tr -d ' ')
+        hosts_red=$(cidr_hosts "$cidr")
         echo -e "${AZUL}➜${RESET} Reconociendo ${BLANCO}$cidr${RESET} (${iface}) ..."
 
-        salida=$(arp-scan --interface="$iface" "$cidr" 2>/dev/null) || salida=""
+        salida=""
+        # ARP solo tiene sentido en redes L2 con más de una dirección.
+        if [ "$hosts_red" -gt 1 ] && command -v arp-scan >/dev/null 2>&1; then
+            tmo=$(( hosts_red > 4096 ? 600 : 120 ))
+            if command -v timeout >/dev/null 2>&1; then
+                salida=$(timeout "$tmo" arp-scan --interface="$iface" --retry=1 "$cidr" 2>/dev/null) || salida=""
+            else
+                salida=$(arp-scan --interface="$iface" --retry=1 "$cidr" 2>/dev/null) || salida=""
+            fi
+        fi
         if ! grep -q '^[0-9]' <<< "$salida"; then
-            salida=$(nmap -Pn -sn "$cidr" 2>/dev/null) || salida=""
+            salida=$(nmap_ejecutar -Pn -sn "$cidr" 2>/dev/null) || salida=""
         fi
 
         # Formato arp-scan: IP  TAB  MAC  TAB  Fabricante
@@ -400,10 +619,12 @@ reconocimiento_inicial() {
             registrar_host "$ip" "$mac" "$vendor" "$cidr" ""
         done <<< "$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' <<< "$salida")"
 
-        # Formato nmap -sn (fallback): report + MAC Address
+        # Formato nmap -sn (fallback): report + MAC Address (si existe).
         ip=""; mac=""; vendor=""; nombre=""
         while IFS= read -r linea; do
             if [[ "$linea" == "Nmap scan report for"* ]]; then
+                # Host anterior sin MAC (red enrutada, VPN, /32): registrarlo igual.
+                [ -n "$ip" ] && registrar_host "$ip" "" "" "$cidr" "$nombre"
                 nombre=$(sed -n 's/^Nmap scan report for \([^ ]*\) (\([0-9.]*\)).*/\1/p' <<< "$linea")
                 ip=$(sed -n 's/.*(\([0-9.]*\)).*/\1/p' <<< "$linea")
                 [ -z "$ip" ] && ip=$(awk '{print $NF}' <<< "$linea")
@@ -415,6 +636,8 @@ reconocimiento_inicial() {
                 ip=""; mac=""; vendor=""; nombre=""
             fi
         done <<< "$(grep -E 'Nmap scan report for|MAC Address:' <<< "$salida")"
+        # Último host de la salida si no tenía línea MAC.
+        [ -n "$ip" ] && registrar_host "$ip" "" "" "$cidr" "$nombre"
 
         if [ "$(wc -l < "$HOSTS_FILE" | tr -d ' ')" -gt "$antes" ]; then
             redes_ok=$((redes_ok + 1))
@@ -452,8 +675,10 @@ resumen_inventario() {
     for vendor in "${!POR_VENDOR[@]}"; do
         cant=${POR_VENDOR[$vendor]}
         [ "$cant" -lt 2 ] && continue
+        printf '%s\t%s\n' "$cant" "$vendor"
+    done | sort -rn | head -8 | while IFS=$'\t' read -r cant vendor; do
         printf '    %-42s %s\n' "$vendor" "$cant"
-    done | sort -k2,2nr | head -8 || true
+    done || true
     pausa
 }
 
@@ -462,9 +687,9 @@ seleccionar_host() {
     local seleccion ip mac vendor red nombre
     seleccion=$(awk -F'|' '{printf "%s | %s | %s | %s | %s\n", $1, $2, $3, $4, $5}' "$HOSTS_FILE" \
         | fzf_con_logo "Host" "INVENTARIO DE DISPOSITIVOS" \
-            "ESC: salir · Busca por IP, MAC o fabricante" \
-            --height=45%) || true
-    [[ -z "$seleccion" ]] && salir
+            "ESC: volver a redes · Busca por IP, MAC o fabricante" \
+            --height=50%) || true
+    [[ -z "$seleccion" ]] && return 1
 
     IFS='|' read -r ip mac vendor red nombre <<< "${seleccion// | /|}"
     TARGET_IP="$ip"
@@ -484,10 +709,12 @@ seleccionar_modo_scan() {
         "5. Barrido de toda la red (Top 100 + resumen de exposición)"
         "6. Volver al inventario de hosts"
     )
+    local ayuda="Solo lectura · 1-4: un host · 5: toda la red"
+    [ "$MODO_DIRECTO" = true ] && ayuda="Solo lectura · objetivo: $TARGET_IP"
     elegida=$(printf '%s\n' "${opciones[@]}" \
         | fzf_con_logo "Perfil" "PERFILES DE AUDITORÍA INTERNA" \
-            "Solo lectura · 1-4: un host · 5: toda la red" \
-            --height=34%) || true
+            "$ayuda" \
+            --height=40%) || true
     [[ -z "$elegida" ]] && return 1
 
     case "${elegida%%.*}" in
@@ -501,15 +728,22 @@ seleccionar_modo_scan() {
 
 # ---------- BARRIDO DE RED ----------
 barrido_red() {
-    local cidr="${TARGET_RED#*|}" salida="$RESULTS_DIR/barrido_red.txt" host_line host ports
-    [ "${TARGET_RED#*|}" = "$TARGET_RED" ] || cidr="${TARGET_RED#*|}"
+    local cidr="${TARGET_RED#*|}" salida="$RESULTS_DIR/barrido_red.txt" criticos linea_critica n=0
+
+    if [[ "$cidr" != */* ]] || ! validar_cidr "$cidr"; then
+        aviso "El barrido necesita un CIDR de red; el objetivo actual no lo tiene."
+        return 1
+    fi
 
     seccion "BARRIDO DE EXPOSICIÓN EN $cidr"
     echo -e "${AMARILLO}  Esto puede tardar varios minutos. Nmap muestra el progreso en vivo.${RESET}"
     echo ""
 
-    nmap -Pn -sS --top-ports 100 --open --stats-every 10s --host-timeout 90s \
-        "$cidr" 2>/dev/null | tee "$salida" || true
+    local err_previo="${NMAP_MOSTRAR_ERR:-false}"
+    NMAP_MOSTRAR_ERR=true
+    nmap_ejecutar -Pn -sS -T4 --top-ports 100 --open --stats-every 10s --host-timeout 90s \
+        "$cidr" | tee "$salida" || true
+    NMAP_MOSTRAR_ERR="$err_previo"
 
     REPORTE_ACTUAL="$salida"
 
@@ -520,18 +754,23 @@ barrido_red() {
         /^[0-9]+\/tcp/ && $2=="open" { printf "  %-16s %-12s %s\n", host, $1, $3 }
     ' "$salida" | sort -u | head -40 || true
 
-    local criticos
+    # Se conserva el host junto al puerto: en un barrido de red es lo útil.
     criticos=$(awk '
+        /^Nmap scan report for/ { host=$NF; gsub(/[()]/,"",host) }
         /^[0-9]+\/tcp/ && $2=="open" {
             split($1,p,"/")
-            if (p[1]=="21" || p[1]=="22" || p[1]=="23" || p[1]=="445" || p[1]=="3389" ||
-                p[1]=="3306" || p[1]=="5432" || p[1]=="6379" || p[1]=="27017" ||
-                p[1]=="5900" || p[1]=="8080" || p[1]=="9200") print $1, $3
-        }' "$salida" | sort -u)
+            if (p[1] ~ /^(21|22|23|445|3389|3306|5432|6379|27017|5900|8080|9200)$/)
+                printf "%s  %-10s %s\n", host, $1, $3
+        }' "$salida" | sort -u) || criticos=""
     echo ""
     if [ -n "$criticos" ]; then
         pintar "$ROJO_BRILLANTE" "  ⚠️  Servicios a revisar por el auditor (pueden ser legítimos):"
-        printf '    %s\n' $criticos | head -20 || true
+        while IFS= read -r linea_critica; do
+            [ -n "$linea_critica" ] || continue
+            printf '    %s\n' "$linea_critica"
+            n=$((n + 1))
+            [ "$n" -ge 20 ] && break
+        done <<< "$criticos"
         echo -e "${CIAN}  Recomendación: confirmar necesidad, restringir por firewall/ACL y exigir cifrado.${RESET}"
     else
         ok "No aparecieron servicios sensibles en el Top 100."
@@ -546,23 +785,25 @@ ejecutar_scan() {
     REPORTE_ACTUAL="${out}.txt"
 
     if [ "$MODO" -eq 5 ]; then
+        REPORTE_ACTUAL=""
         barrido_red
-        return 0
+        return $?
     fi
 
     echo ""
     echo -e "${AMARILLO}┌────────────────────────────────────────────────────────┐${RESET}"
     echo -e "${AMARILLO}│${RESET}  ${VERDE_BRILLANTE}🚀 AUDITORÍA EN CURSO${RESET}                                  ${AMARILLO}│${RESET}"
-    echo -e "${AMARILLO}│${RESET}  ${AZUL}Objetivo:${RESET} ${BLANCO}$TARGET_IP${RESET}  ${CIAN}Red:${RESET} ${BLANCO}$TARGET_RED${RESET}        ${AMARILLO}│${RESET}"
+    echo -e "${AMARILLO}│${RESET}  ${AZUL}Objetivo:${RESET} ${BLANCO}$TARGET_IP${RESET}  ${CIAN}Red:${RESET} ${BLANCO}${TARGET_RED#*|}${RESET}        ${AMARILLO}│${RESET}"
     echo -e "${AMARILLO}└────────────────────────────────────────────────────────┘${RESET}"
     echo ""
     registrar_log "$LOG_INFO" "Iniciando perfil $MODO sobre $TARGET_IP"
 
     case "$MODO" in
         1)
-            local datos fila ip mac vendor red nombre nmap_raw tipo_predicho vendor_lower netbios_name lineas_puertos
+            local datos ip mac vendor red nombre nmap_raw tipo_predicho vendor_lower netbios_name lineas_puertos
             datos=$(grep -F "$TARGET_IP|" "$HOSTS_FILE" | head -n 1) || datos=""
             IFS='|' read -r ip mac vendor red nombre <<< "$datos"
+            mac="${mac:-—}"; vendor="${vendor:-—}"; nombre="${nombre:-—}"
             echo -e "${AZUL}[i] Identificación del dispositivo...${RESET}"
             echo -e "${VERDE_BRILLANTE}MAC (ARP):${RESET} $mac    ${VERDE_BRILLANTE}Fabricante:${RESET} $vendor    ${VERDE_BRILLANTE}Nombre:${RESET} $nombre"
             echo "--------------------------------------------------"
@@ -570,14 +811,14 @@ ejecutar_scan() {
             {
                 echo "=================================================="
                 echo "INVENTARIO DE DISPOSITIVO: $TARGET_IP"
-                echo "Red: $TARGET_RED"
+                echo "Red: ${TARGET_RED#*|}"
                 echo "MAC (ARP): $mac"
                 echo "Fabricante (ARP): $vendor"
                 echo "Nombre detectado: $nombre"
                 echo "=================================================="
             } > "${out}.txt"
 
-            nmap_raw=$(nmap -Pn -sS -sV -p 80,135,139,445,443,5353,5357,62078 \
+            nmap_raw=$(nmap_ejecutar -Pn -sS -sV -T4 -p 80,135,139,445,443,5353,5357,62078 \
                 --script="nbstat,smb-os-discovery" "$TARGET_IP" 2>/dev/null) || true
             echo "$nmap_raw" >> "${out}.txt"
 
@@ -609,7 +850,10 @@ ejecutar_scan() {
             echo -e "${AMARILLO}🔍 RESULTADO DEL INVENTARIO:${RESET}"
             echo "--------------------------------------------------"
             echo -e "${VERDE_BRILLANTE}[+] TIPO DE DISPOSITIVO:${RESET} ${BLANCO}$tipo_predicho${RESET}"
-            netbios_name=$(echo "$nmap_raw" | awk '/NetBIOS computer name/ {print $5}' | tr -d ',\r') || true
+            netbios_name=$(echo "$nmap_raw" \
+                | awk '/NetBIOS computer name/ {print $5; exit}' \
+                | tr -d ',\r' \
+                | sed 's/\\0x[0-9A-Fa-f][0-9A-Fa-f]//g') || true
             if [[ -n "$netbios_name" && "$netbios_name" != "—" ]]; then
                 echo -e "${VERDE_BRILLANTE}[+] NOMBRE DEL EQUIPO:${RESET} ${BLANCO}$netbios_name${RESET}"
                 echo "Nombre de red detectado: $netbios_name" >> "${out}.txt"
@@ -629,9 +873,12 @@ ejecutar_scan() {
             fi
             echo "$nmap_raw" | grep -E "Host script results:|\|_nbstat:" -A 2 || true
             ;;
-        2) nmap -Pn -sS -sV --top-ports 100 --stats-every 5s --host-timeout 5m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
-        3) nmap -Pn -sS -sV -O --top-ports 100 --script "safe" --stats-every 5s --host-timeout 5m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
-        4) nmap -Pn -sS -sV -O --top-ports 100 --script "safe,ssl-enum-ciphers" --stats-every 5s --host-timeout 10m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
+        2) : > "${out}.txt"
+           nmap_ejecutar -Pn -sS -sV -T4 --top-ports 100 --stats-every 5s --host-timeout 5m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
+        3) : > "${out}.txt"
+           nmap_ejecutar -Pn -sS -sV -O -T4 --top-ports 100 --script "safe" --stats-every 5s --host-timeout 5m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
+        4) : > "${out}.txt"
+           nmap_ejecutar -Pn -sS -sV -O -T4 --top-ports 100 --script "safe,ssl-enum-ciphers" --stats-every 5s --host-timeout 10m "$TARGET_IP" | tee -a "${out}.txt" || true ;;
     esac
 
     registrar_log "$LOG_INFO" "Revisión finalizada para $TARGET_IP (perfil $MODO)"
@@ -640,28 +887,50 @@ ejecutar_scan() {
 
 # ---------- REPORTE ----------
 guardar_reporte() {
-    local fecha reporte
-    fecha=$(date +"%Y%m%d_%H%M")
-    reporte="$DESKTOP_PATH/Reporte_Red_${TARGET_IP}_${fecha}.txt"
+    local fecha reporte objetivo etiqueta red_txt destino
+    fecha=$(date +"%Y%m%d_%H%M%S")
+    if [ "$MODO" -eq 5 ]; then
+        objetivo="${TARGET_RED#*|}"
+        etiqueta="red_${objetivo//\//_}"
+    else
+        objetivo="$TARGET_IP"
+        etiqueta="host_${objetivo//\//_}"
+    fi
+    red_txt="${TARGET_RED#*|}"
+
+    destino="$DESKTOP_PATH"
+    if [ ! -d "$destino" ]; then
+        if mkdir -p "$destino" 2>/dev/null; then
+            chown "$REAL_USER:$GRUPO_REAL" "$destino" 2>/dev/null || true
+        fi
+    fi
+    # Si el Escritorio no existe ni es escribible, no perder el informe.
+    [ -w "$destino" ] || destino="${HOME:-/root}"
+    reporte="$destino/Reporte_${etiqueta}_${fecha}.txt"
 
     if [[ -f "$REPORTE_ACTUAL" ]]; then
-        {
+        if ! {
             echo "=================================================="
             echo " AUDITORÍA INTERNA DE RED - LOCALSCAN4ME v$V"
             echo "=================================================="
-            echo "Objetivo:   $TARGET_IP"
-            echo "Red:        $TARGET_RED"
-            echo "Perfil:     $MODO"
+            echo "Objetivo:   $objetivo"
+            echo "Red:        $red_txt"
+            echo "Perfil:     $(nombre_modo "$MODO")"
             echo "Fecha:      $(date)"
             echo "Redes:      $(unir "${REDES_ELEGIDAS[@]}")"
             echo "--------------------------------------------------"
             cat "$REPORTE_ACTUAL"
-        } > "$reporte"
+        } > "$reporte" 2>/dev/null; then
+            aviso "No se pudo escribir el reporte en $destino"
+            registrar_log "$LOG_ERR" "Fallo al escribir reporte: $reporte"
+            return 1
+        fi
         chown "$REAL_USER:$GRUPO_REAL" "$reporte" 2>/dev/null || true
         echo -e "${VERDE_BRILLANTE}[+] Reporte guardado en:${RESET} $reporte"
         registrar_log "$LOG_INFO" "Reporte exportado: $reporte"
     else
         aviso "No hay resultados de esa revisión para exportar."
+        return 1
     fi
 }
 
@@ -693,19 +962,43 @@ main() {
         if ! seleccionar_red; then
             continue
         fi
+
+        # Modo directo: auditar un host sin inventariar la red.
+        if [ "$MODO_DIRECTO" = true ]; then
+            while true; do
+                if ! seleccionar_modo_scan; then
+                    break
+                fi
+                ejecutar_scan || true
+                preguntar_guardar || true
+                echo ""
+                echo -e "${AMARILLO}Presione [ENTER] para volver a los perfiles...${RESET}"
+                read -r || true
+            done
+            MODO_DIRECTO=false
+            continue
+        fi
+
         if ! reconocimiento_inicial; then
             continue
         fi
         while true; do
-            seleccionar_host
-            if ! seleccionar_modo_scan; then
+            # ESC en el inventario vuelve a la selección de red.
+            if ! seleccionar_host; then
                 break
             fi
-            ejecutar_scan
-            preguntar_guardar
-            echo ""
-            echo -e "${AMARILLO}Presione [ENTER] para volver a los perfiles...${RESET}"
-            read -r || true
+            # Tras cada auditoría se vuelve al menú de perfiles del mismo host.
+            while true; do
+                # Opción 6 o ESC vuelven a la lista de hosts (no a la de redes).
+                if ! seleccionar_modo_scan; then
+                    break
+                fi
+                ejecutar_scan || true
+                preguntar_guardar || true
+                echo ""
+                echo -e "${AMARILLO}Presione [ENTER] para volver a los perfiles...${RESET}"
+                read -r || true
+            done
         done
     done
 }

@@ -2639,18 +2639,26 @@ mostrar_info_red() {
     echo -e " ${sep}"
     echo -e " ${CIAN}${NEGRITA}ESTADO DE LAS INTERFACES${RESET}  ${AZUL}(RX/TX acumulado desde el arranque)${RESET}"
     echo ""
-    local encontrados=0 base iface lista
+    local encontrados=0 base iface lista total_ifaces tecla
     lista=$(for base in /sys/class/net/*; do
         [ -e "$base" ] || continue
         iface=$(basename "$base")
         [ "$iface" = "lo" ] && continue
         printf '%s %s\n' "$(prioridad_interfaz "$iface")" "$iface"
     done | sort -k1,1n -k2,2)
+    total_ifaces=$(printf '%s\n' "$lista" | awk 'NF >= 2 { n++ } END { print n + 0 }')
     while read -r _ iface; do
         [ -n "$iface" ] || continue
         mostrar_interfaz_red "$iface"
         echo ""
         encontrados=$((encontrados + 1))
+        # Con varias interfaces, parar tras la primera para no desplazar la
+        # información principal (IP pública, DNS, Internet) fuera de pantalla.
+        if [ "$encontrados" -eq 1 ] && [ "$total_ifaces" -gt 1 ]; then
+            echo -e "      ${AMARILLO_BRILLANTE}➤ Pulse cualquier tecla para continuar (${total_ifaces} interfaces en total)...${RESET}"
+            read -r -n 1 -s tecla </dev/tty 2>/dev/null || true
+            echo ""
+        fi
     done <<< "$lista"
     if [ "$encontrados" -eq 0 ]; then
         echo -e "  ${AZUL}Sin interfaces de red detectadas${RESET}"
