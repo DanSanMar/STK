@@ -33,9 +33,8 @@ if [ -r "$SCRIPT_DIR/stk_header.sh" ]; then
 fi
 
 # --- CAPA DE UI COMPARTIDA DE STK ---
-# Se carga antes de las definiciones propias: pintar(), mostrar_logo() y
-# fzf_estilo() locales sobrescriben las de la librería, conservando el
-# aspecto del gestor de tareas.
+# Se carga antes de las definiciones propias: fzf_estilo() local delega en
+# stk_fzf modulo para conservar el marco STK con dashboard y preview.
 if [ -r "$SCRIPT_DIR/stk_ui_lib.sh" ]; then
     # shellcheck source=stk_ui_lib.sh
     source "$SCRIPT_DIR/stk_ui_lib.sh"
@@ -63,7 +62,7 @@ stk_preview_cron() {
     local sel="$1"
     case "${sel%%.*}" in
         1) echo "Programar nuevas tareas automáticas." ;;
-        2) echo "Activar o desactivar tareas individuales." ;;
+        2) echo "Eliminar tareas individuales o todas." ;;
         3) echo "Mostrar la configuración actual del programador." ;;
         4) echo "Ver logs de ejecución y resúmenes." ;;
         5) echo "Activar o desactivar notificaciones de escritorio." ;;
@@ -74,8 +73,9 @@ stk_preview_cron() {
 PREVIEW_CRON="$(declare -f stk_preview_cron); stk_preview_cron \"{}\""
 
 # Todos los selectores usan el recuadro STK con dashboard y vista previa.
+# $2 (opcional) añade una línea de contexto bajo el dashboard.
 fzf_estilo() {
-    stk_fzf modulo "$1" "" "$PREVIEW_CRON"
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_CRON"
 }
 
 # Definir colores propios
@@ -94,7 +94,6 @@ BLANCO='\e[97m'
 # Paleta FZF compartida con el resto de STK.
 FZF_COLORES="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,prompt:#5fb2ff,marker:#92ff92"
 
-# Definir función pintar propia
 # --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
 # Misma lógica de limpieza, auditoría, servicios, actualización y lock
 # que usa stk2.sh. La bitácora es el archivo común del proyecto.
@@ -583,12 +582,6 @@ programar_nueva_tarea() {
     # ------------------------------------------------------------------------
     # PASO 1: SELECCIÓN DE TAREAS
     # ------------------------------------------------------------------------
-    stk_limpiar
-    mostrar_logo
-    echo ""
-    pintar "$CIAN" "--- PASO 1: SELECCIONAR LA TAREA A PROGRAMAR ---"
-    echo ""
-
     local opciones_p1="1. Modo Completo (Todas las tareas)
 2. Actualización 
 3. Limpieza 
@@ -601,7 +594,7 @@ programar_nueva_tarea() {
     local opc_p1=""
     if command -v fzf &>/dev/null; then
         local sel
-        sel=$(echo -e "$opciones_p1" | fzf_estilo "Paso 1/2: Elija la tarea" "PASO 1: SELECCIÓN DE TAREA")
+        sel=$(echo -e "$opciones_p1" | fzf_estilo "Paso 1/2: Elija la tarea" "PASO 1 · SELECCIÓN DE TAREA")
         [ -z "$sel" ] && return
         opc_p1=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
     else
@@ -670,16 +663,12 @@ programar_nueva_tarea() {
     # ------------------------------------------------------------------------
     # PASO 2: SELECCIÓN DE FRECUENCIA / PERÍODO
     # ------------------------------------------------------------------------
-    stk_limpiar
-    mostrar_logo
-    echo ""
-    pintar "$CIAN" "--- PASO 2: SELECCIONAR EL PERÍODO / FRECUENCIA ---"
-    echo ""
-    pintar "$VERDE_BRILLANTE" "Tareas seleccionadas para programar:"
-    for tarea in "${TAREAS_SELECCIONADAS[@]}"; do
-        echo -e "   ${VERDE}•${RESET} ${tarea#*:}"
+    local resumen_tareas=""
+    local t
+    for t in "${TAREAS_SELECCIONADAS[@]}"; do
+        resumen_tareas+="${t#*:}, "
     done
-    echo ""
+    resumen_tareas="${resumen_tareas%, }"
 
     local opciones_p2="1. Arranque (Boot+300)
 2. Arranque (Boot+600)
@@ -691,7 +680,7 @@ programar_nueva_tarea() {
     local opc_p2=""
     if command -v fzf &>/dev/null; then
         local sel2
-        sel2=$(echo -e "$opciones_p2" | fzf_estilo "Paso 2/2: Elija período" "PASO 2: CONFIGURAR FRECUENCIA")
+        sel2=$(echo -e "$opciones_p2" | fzf_estilo "Paso 2/2: Elija período" "PASO 2 · FRECUENCIA · ${resumen_tareas}")
         [ -z "$sel2" ] && return
         opc_p2=$(echo "$sel2" | awk -F'.' '{print $1}' | tr -d ' ')
     else
@@ -947,13 +936,10 @@ eliminar_tarea_especifica() {
 
 gestionar_tareas_individuales() {
     while true; do
-        stk_limpiar
-        mostrar_logo
-        echo ""
-        pintar "$CIAN" "--- ELIMINACIÓN DE TAREAS ---"
-        echo ""
-
         if [ ! -f "$CRON_CONFIG_FILE" ]; then
+            stk_limpiar
+            mostrar_logo
+            echo ""
             pintar "$ROJO" "❌ No hay configuración activa."
             read -p "Presione Enter..."
             return
@@ -968,9 +954,6 @@ gestionar_tareas_individuales() {
             read -p "Presione Enter..."
             return
         fi
-
-        echo -e "${AMARILLO}Seleccione una tarea para administrar:${RESET}"
-        echo ""
 
         local lista_opciones=""
         local i=1
@@ -1184,23 +1167,10 @@ configurar_notificaciones() {
     fi
 
     while true; do
-        stk_limpiar
-        mostrar_logo
-        echo ""
-        pintar "$CIAN" "--- NOTIFICACIONES DE TAREAS AUTOMÁTICAS ---"
-        echo ""
-
         local estado_actual
         estado_actual=$(notificaciones_estado)
-        if [ "$estado_actual" == "true" ]; then
-            echo -e "Estado actual: ${VERDE_BRILLANTE}🔔 ACTIVADAS${RESET}"
-        else
-            echo -e "Estado actual: ${ROJO}🔕 DESACTIVADAS${RESET}"
-        fi
-        echo ""
-        echo -e "${AMARILLO}Las notificaciones avisan en el escritorio del usuario al terminar cada ejecución.${RESET}"
-        echo -e "${AMARILLO}Desactivarlas no afecta a las tareas: solo silencia los avisos.${RESET}"
-        echo ""
+        local estado_txt="DESACTIVADAS"
+        [ "$estado_actual" == "true" ] && estado_txt="ACTIVADAS"
 
         local opciones="1. Activar notificaciones
 2. Desactivar notificaciones
@@ -1209,7 +1179,7 @@ configurar_notificaciones() {
         local opc=""
         if command -v fzf &>/dev/null; then
             local sel
-            sel=$(echo -e "$opciones" | fzf_estilo "Selecciona una opción" "NOTIFICACIONES CRON")
+            sel=$(echo -e "$opciones" | fzf_estilo "Selecciona una opción" "NOTIFICACIONES · $estado_txt")
             [ -z "$sel" ] && return
             opc=$(echo "$sel" | awk -F'.' '{print $1}' | tr -d ' ')
         else
@@ -1324,49 +1294,13 @@ EOF
 #                   MENÚ PRINCIPAL
 # ============================================================================
 logs_resumen() {
-    stk_limpiar
-    mostrar_logo
-    echo ""
-    
     ver_logs_cron
-
-    stk_limpiar
-    mostrar_logo
-    echo ""
-
     ver_resumen_cron
 }
 gestionar_tareas_auto() {
     inicializar_estructura
     
     while true; do
-        stk_limpiar
-        mostrar_logo
-        echo ""
-        pintar "$MAGENTA" "═══════════════════════════════════════════════"
-        pintar "$BLANCO"  "   📅 GESTOR DE TAREAS AUTOMATIZADAS (CRON)"
-        pintar "$MAGENTA" "═══════════════════════════════════════════════"
-        echo ""
-
-        if verificar_cron_stk; then
-            local config_actual=$(obtener_frecuencia_descripcion)
-            local tareas_activas=$(obtener_tareas_configuradas)
-            echo -e "${VERDE_BRILLANTE}✅ TAREA ACTIVA${RESET}"
-            echo -e "   ${AMARILLO}Frecuencia:${RESET} ${AZUL}$config_actual${RESET}"
-            echo -e "   ${AMARILLO}Tareas:${RESET} ${AZUL}$tareas_activas${RESET}"
-            echo -e "   ${AMARILLO}Última ejecución:${RESET} ${AZUL}$(obtener_ultima_ejecucion)${RESET}"
-            if [ "$(notificaciones_estado)" == "true" ]; then
-                echo -e "   ${AMARILLO}Notificaciones:${RESET}   ${VERDE}🔔 Activadas${RESET}"
-            else
-                echo -e "   ${AMARILLO}Notificaciones:${RESET}   ${ROJO}🔕 Desactivadas${RESET}"
-            fi
-        else
-            echo -e "${ROJO}❌ No hay tareas programadas${RESET}"
-        fi
-        echo ""
-        echo -e "${CIAN}═══════════════════════════════════════════════${RESET}"
-        echo ""
-
         local opciones_fzf="1. Programar Tareas
 2. Desactivar Tareas
 3. Configuración actual
@@ -1375,7 +1309,7 @@ gestionar_tareas_auto() {
 6. Volver"
 
         local seleccion
-        seleccion=$(echo "$opciones_fzf" | fzf_estilo "Selecciona una opción" "Menú de Tareas Automatizadas")
+        seleccion=$(echo "$opciones_fzf" | fzf_estilo "Selecciona una opción")
 
         [ -z "$seleccion" ] && break
 

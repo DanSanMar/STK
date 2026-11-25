@@ -198,6 +198,7 @@ stk_fzf() {
                     [ -n "$dash" ] && header="$logo"$'\n'"$dash"
                 fi
             fi
+            [ -n "$dato" ] && header="$header"$'\n'"  $dato"
 
             fzf_args=(
                 --ansi
