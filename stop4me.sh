@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL MÓDULO ---
-V="1.7"
 DESCRIPCION="Instalación, Gestión y Configuración de Cortafuegos UFW para Linux"
 AUTOR="DanSanMar"
 
@@ -13,13 +12,17 @@ if [ -r "$STK_COMPAT_HEADER" ]; then
 fi
 
 # --- CAPA DE UI COMPARTIDA DE STK ---
-# Se carga antes de las definiciones propias: pintar() y logo_texto() locales
-# sobrescriben las de la librería, conservando el aspecto de STOP4ME.
+# Se carga antes de las definiciones propias: fzf_estilo() y el dashboard
+# delegan en stk_fzf modulo para conservar el marco STK.
 STK_UI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_ui_lib.sh"
 if [ -r "$STK_UI_LIB" ]; then
     # shellcheck source=stk_ui_lib.sh
     source "$STK_UI_LIB"
 fi
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · STOP4ME"
+STK_MODULO="STOP4ME"
 
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
@@ -46,8 +49,6 @@ LOG_INFO="INFO"
 LOG_WARN="WARN"
 LOG_ERR="ERROR"
 
-# --- RUTA ABSOLUTA DEL PROPIO SCRIPT (para vistas previas y recarga de FZF) ---
-SELF_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 registrar_log() {
     local NIVEL="${1:-INFO}"
@@ -68,7 +69,7 @@ if [ ! -f "$LOG_FILE" ]; then
     umask 027
     touch "$LOG_FILE"
     chmod 640 "$LOG_FILE"
-    registrar_log "$LOG_INFO" "Bitácora inicializada desde STOP4ME v$V"
+    registrar_log "$LOG_INFO" "Bitácora inicializada desde $ver"
 fi
 
 # --- DETECCIÓN DEL GESTOR DE PAQUETES ---
@@ -102,134 +103,63 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
     [ "$Package" = "unknown" ] && Package="dnf"
 fi
 
-# --- LOGO DINÁMICO BASADO EN SEGUNDOS ---
-actualizar_colores_logo() {
-    local SEGUNDOS
-    SEGUNDOS=$(date +"%S" 2>/dev/null)
-    [[ "$SEGUNDOS" =~ ^[0-9]+$ ]] || SEGUNDOS="0"
-
-    local ULTIMO_DIGITO="${SEGUNDOS: -1}"
-    case "$ULTIMO_DIGITO" in
-        1) COLOR_LOGO="$AZUL_BRILLANTE" ;;
-        2) COLOR_LOGO="$VERDE_BRILLANTE" ;;
-        3) COLOR_LOGO="$AMARILLO_BRILLANTE" ;;
-        4) COLOR_LOGO="$CIAN_BRILLANTE" ;;
-        5) COLOR_LOGO="$ROJO_BRILLANTE" ;;
-        6) COLOR_LOGO="$AZUL_CLARO" ;;
-        7) COLOR_LOGO="$VERDE" ;;
-        8) COLOR_LOGO="$AMARILLO" ;;
-        9) COLOR_LOGO="$CIAN" ;;
-        0) COLOR_LOGO="$ROJO" ;;
-        *) COLOR_LOGO="$BLANCO" ;;
-    esac
-
-    local DIGITO_VER=$(( (10#$SEGUNDOS + 5) % 10 ))
-    case "$DIGITO_VER" in
-        1) COLOR_VER="$ROJO_BRILLANTE" ;;
-        2) COLOR_VER="$CIAN" ;;
-        3) COLOR_VER="$VERDE" ;;
-        4) COLOR_VER="$AMARILLO" ;;
-        5) COLOR_VER="$AZUL_BRILLANTE" ;;
-        6) COLOR_VER="$VERDE_BRILLANTE" ;;
-        7) COLOR_VER="$AMARILLO_BRILLANTE" ;;
-        8) COLOR_VER="$CIAN_BRILLANTE" ;;
-        9) COLOR_VER="$AZUL_CLARO" ;;
-        0) COLOR_VER="$BLANCO" ;;
-        *) COLOR_VER="$CIAN" ;;
-    esac
-    
-    local DIGITO_DASH=$(( (10#$SEGUNDOS + 2) % 10 ))
-    case "$DIGITO_DASH" in
-        1) COLOR_DASH="$VERDE_BRILLANTE" ;;
-        2) COLOR_DASH="$AMARILLO_BRILLANTE" ;;
-        3) COLOR_DASH="$CIAN_BRILLANTE" ;;
-        4) COLOR_DASH="$ROJO_BRILLANTE" ;;
-        5) COLOR_DASH="$AZUL_CLARO" ;;
-        6) COLOR_DASH="$VERDE" ;;
-        7) COLOR_DASH="$AMARILLO" ;;
-        8) COLOR_DASH="$CIAN" ;;
-        9) COLOR_DASH="$ROJO" ;;
-        0) COLOR_DASH="$BLANCO" ;;
-        *) COLOR_DASH="$GRIS_CLARO" ;;
-    esac
-}
-
-logo_texto() {
-    actualizar_colores_logo
-    local hora
-    hora=$(date '+%H:%M:%S')
-
-    # --- RECOPILACIÓN DE DATOS DE RED Y FIREWALL ---
-    local iface ip_addr
-    # Extraer la interfaz de red principal y su IP
-    iface=$(ip route 2>/dev/null | awk '/default/ {print $5}' | head -n1)
+# --- DASHBOARD Y PREVIEW DE MÓDULO (patrón cron4me) ---
+stk_dash_stop4me() {
+    local iface="N/A" ip_addr="N/A"
+    iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
     if [ -n "$iface" ]; then
-        ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+        ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2; exit}' | cut -d/ -f1)
     else
         iface="Ninguna"
         ip_addr="Desconectado"
     fi
 
-    local ufw_status="${ROJO}NO INSTALADO ❌${RESET}"
-    local ufw_policies="N/A"
-    local ufw_rules="0"
-    local ufw_log="N/A"
-
+    local ufw_status="NO INSTALADO" ufw_policies="N/A" ufw_rules="0" ufw_log="N/A"
     if command -v ufw &>/dev/null; then
         local st_ufw
         st_ufw=$(ufw status verbose 2>/dev/null)
-        
         if echo "$st_ufw" | grep -iq "Status: active"; then
-            ufw_status="${VERDE_BRILLANTE}ACTIVO 🛡️${RESET}"
-            
-            # Extraer políticas por defecto (Entrada / Salida)
-            local in_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (incoming)\|allow (incoming)\|reject (incoming)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
-            local out_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (outgoing)\|allow (outgoing)\|reject (outgoing)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
-            ufw_policies="IN: ${in_pol:-DENY} | OUT: ${out_pol:-ALLOW}"
-            
-            # Contar número de reglas activas y nivel de log
+            ufw_status="ACTIVO"
+            local in_pol out_pol
+            in_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (incoming)\|allow (incoming)\|reject (incoming)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
+            out_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (outgoing)\|allow (outgoing)\|reject (outgoing)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
+            ufw_policies="IN:${in_pol:-DENY} OUT:${out_pol:-ALLOW}"
             ufw_rules=$(ufw status numbered 2>/dev/null | grep -cE '^\[ *[0-9]+\]')
-            ufw_log=$(echo "$st_ufw" | grep -i "Logging:" | awk '{print $2}' | tr 'a-z' 'A-Z')
+            ufw_log=$(echo "$st_ufw" | grep -i "Logging:" | awk '{print $2; exit}' | tr 'a-z' 'A-Z')
         else
-            ufw_status="${ROJO_BRILLANTE}INACTIVO ⚠️${RESET}"
-            ufw_policies="N/A (Apagado)"
+            ufw_status="INACTIVO"
+            ufw_policies="N/A"
         fi
     fi
 
-    # --- RENDERIZADO DEL LOGO ---
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STOP4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}TU GESTOR DE UFW${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Estado UFW:${RESET} ${ufw_status}   ${AMARILLO}Reglas Activas:${RESET} ${AZUL}${ufw_rules}${RESET}"
-    echo -e " ${AMARILLO}➤ Políticas :${RESET} ${MAGENTA}${ufw_policies}${RESET}   ${AMARILLO}Log:${RESET} ${AZUL}${ufw_log:-"N/A"}${RESET}"
-    echo -e " ${AMARILLO}➤ Red Activa:${RESET} ${AZUL}${iface:-"N/A"}${RESET} ${AZUL_OSCURO}(${ip_addr:-"N/A"})${RESET}"
-    echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-}
-mostrar_logo_stop4me() {
-    logo_texto
+    echo "  ┃ STOP4ME · UFW:$ufw_status · reglas:$ufw_rules · $ufw_policies · log:${ufw_log:-N/A} · $iface($ip_addr)"
 }
 
-# --- ESTILOS DE SELECCIÓN (Estilo FZF vivo idéntico a proc4me) ---
+stk_preview_stop4me() {
+    local sel="$1"
+    case "${sel%%.*}" in
+        1) echo "Activar, desactivar o recargar UFW." ;;
+        2) echo "Gestionar reglas por puerto, servicio o IP." ;;
+        3) echo "Analizar tráfico, escaneos y auditoría de eventos." ;;
+        4) echo "Restablecer UFW a la configuración de fábrica." ;;
+        5) echo "Volver al menú anterior." ;;
+        *) echo "Seleccione una opción del gestor de cortafuegos." ;;
+    esac
+}
+PREVIEW_STOP4ME="$(declare -f stk_preview_stop4me); stk_preview_stop4me \"\$1\""
+
+fzf_estilo() {
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_STOP4ME"
+}
+
+mostrar_logo_stop4me() {
+    mostrar_logo
+}
+
+# Wrapper de compatibilidad: los menús usan el marco STK con dashboard/preview.
 stop4me_fzf_menu() {
     local prompt_text="$1"
-    local titulo="$2"
-    local altura="${3:-~90%}"
-    local logo logo_cmd
-
-    logo=$(logo_texto)
-    printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
-
-    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
-        --ansi \
-        --height="$altura" \
-        --layout=reverse \
-        --no-sort \
-        --header-first \
-        --border=rounded \
-        --border-label=" $titulo " \
-        --prompt="➤ $prompt_text: " \
-        --header="$logo" \
-        --bind "every(5):bg-transform-header:$logo_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
+    fzf_estilo "$prompt_text"
 }
 
 salir_stop4me() {
@@ -866,11 +796,9 @@ stop4me_main_menu() {
     fi
 
     while true; do
-        stk_limpiar
-
         local opciones="1. ⚡ ESTADO      | Activar / Desactivar / Recargar UFW\n2. 🔌 GESTIÓN     | Reglas por Puerto o Servicio o IP\n3. 🛡️ CONTROL     | Tráfico de Red y Auditoria de Eventos\n4. ⚠️ RESTART     | Vuelve a la Configuración de Fábrica\n5. ↩  Volver"
         local seleccion
-        seleccion=$(echo -e "$opciones" | stop4me_fzf_menu "Selección" "S T O P 4 M E  -  U F W  M A N A G E R" "~80%")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Selección")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ] || [[ "${seleccion:0:1}" == "5" ]]; then
             salir_stop4me
@@ -886,15 +814,8 @@ stop4me_main_menu() {
     done
 }
 
-# --- PUNTO DE ENTRADA CON SOPORTE DE REFRESCO VIVO PARA FZF ---
+# --- PUNTO DE ENTRADA ---
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    case "$1" in
-        --logo-header)
-            logo_texto
-            exit 0
-            ;;
-    esac
-
     stop4me_main_menu
 fi
 
