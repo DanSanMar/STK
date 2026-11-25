@@ -43,21 +43,22 @@ fi
 ver="v ${STK_VERSION:-7.0.0} · CRON"
 STK_MODULO="CRON"
 
-# Dashboard corto del módulo: ayuda/hints, no volcado de información.
+# Mini dashboard del módulo: info específica, compacta y coloreada.
 stk_dash_cron() {
-    echo -e "  ${AMARILLO}┃${RESET} ${CIAN}↑↓${RESET} navegar  ${CIAN}Enter${RESET} seleccionar  ${CIAN}Esc${RESET} volver  ${AMARILLO}│${RESET} ${CIAN}Shift+↑/↓${RESET} preview"
-}
-
-# Vista previa del desplegable: estado breve + descripción de la opción.
-stk_preview_cron() {
-    local sel="$1" activado="N/D" tareas="0" notif="N/D"
+    local activado="N/D" tareas="0" notif="N/D" ultima="N/D"
     if [ -f "$CRON_CONFIG_FILE" ] && command -v jq &>/dev/null; then
         activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE" 2>/dev/null)
         tareas=$(jq -r '.tareas | length' "$CRON_CONFIG_FILE" 2>/dev/null)
         notif=$(jq -r '.configuracion.notificaciones // false' "$CRON_CONFIG_FILE" 2>/dev/null)
+        ultima=$(jq -r '.configuracion.ultima_ejecucion // "N/D"' "$CRON_CONFIG_FILE" 2>/dev/null)
     fi
-    printf '\033[1;36mCRON\033[0m\n'
-    printf 'Estado: %s · Tareas: %s · Notificaciones: %s\n\n' "$activado" "$tareas" "$notif"
+    echo -e "  ${AMARILLO}Tareas:${RESET} ${AZUL}${tareas}${RESET}  ${AMARILLO}Activo:${RESET} ${AZUL}${activado}${RESET}  ${AMARILLO}Notif:${RESET} ${AZUL}${notif}${RESET}  ${AMARILLO}Última:${RESET} ${AZUL}${ultima}${RESET}"
+    echo -e "  \e[2m↑↓ navegar · Enter seleccionar · Esc volver · Shift+↑/↓ preview\e[0m"
+}
+
+# Vista previa del desplegable: describe la opción seleccionada.
+stk_preview_cron() {
+    local sel="$1"
     case "${sel%%.*}" in
         1) echo "Programar nuevas tareas automáticas." ;;
         2) echo "Eliminar tareas individuales o todas." ;;

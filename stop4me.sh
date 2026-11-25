@@ -104,13 +104,12 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
 fi
 
 # --- DASHBOARD Y PREVIEW DE MÓDULO (patrón cron4me) ---
-# Dashboard corto del módulo: ayuda/hints, no volcado de información.
+# Mini dashboard del módulo: info específica, compacta y coloreada.
 stk_dash_stop4me() {
-    echo -e "  ${AMARILLO}┃${RESET} ${CIAN}↑↓${RESET} navegar  ${CIAN}Enter${RESET} seleccionar  ${CIAN}Esc${RESET} volver  ${AMARILLO}│${RESET} ${CIAN}Shift+↑/↓${RESET} preview"
-}
+    local ufw_status="NO INSTALADO" ufw_rules="0" ufw_policies="N/A" iface="N/A"
+    iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+    [ -n "$iface" ] || iface="N/A"
 
-stk_preview_stop4me() {
-    local sel="$1" ufw_status="NO INSTALADO" ufw_rules="0" ufw_policies="N/A"
     if command -v ufw &>/dev/null; then
         local st_ufw
         st_ufw=$(ufw status verbose 2>/dev/null)
@@ -125,8 +124,13 @@ stk_preview_stop4me() {
             ufw_status="INACTIVO"
         fi
     fi
-    printf '\033[1;36mSTOP4ME\033[0m\n'
-    printf 'UFW: %s · Reglas: %s · %s\n\n' "$ufw_status" "$ufw_rules" "$ufw_policies"
+
+    echo -e "  ${AMARILLO}UFW:${RESET} ${AZUL}${ufw_status}${RESET}  ${AMARILLO}Reglas:${RESET} ${AZUL}${ufw_rules}${RESET}  ${AMARILLO}Políticas:${RESET} ${AZUL}${ufw_policies}${RESET}  ${AMARILLO}Red:${RESET} ${AZUL}${iface}${RESET}"
+    echo -e "  \e[2m↑↓ navegar · Enter seleccionar · Esc volver · Shift+↑/↓ preview\e[0m"
+}
+
+stk_preview_stop4me() {
+    local sel="$1"
     case "${sel%%.*}" in
         1) echo "Activar, desactivar o recargar UFW." ;;
         2) echo "Gestionar reglas por puerto, servicio o IP." ;;
