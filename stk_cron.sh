@@ -70,7 +70,7 @@ stk_preview_cron() {
         *) echo "Seleccione una opción del gestor de tareas." ;;
     esac
 }
-PREVIEW_CRON="$(declare -f stk_preview_cron); stk_preview_cron \"{}\""
+PREVIEW_CRON="$(declare -f stk_preview_cron); stk_preview_cron \"\$1\""
 
 # Todos los selectores usan el recuadro STK con dashboard y vista previa.
 # $2 (opcional) añade una línea de contexto bajo el dashboard.
