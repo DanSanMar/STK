@@ -4,7 +4,7 @@
 # ==============================================================================
 # Pasamos a cron4me
 # ==============================================================================
-ver="v 5.4"
+# La versión se toma de la librería compartida (STK_VERSION), más abajo.
 # --- DETECCIÓN ROBUSTA DE DIRECTORIO Y BÚSQUEDA ---
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -41,6 +41,8 @@ if [ -r "$SCRIPT_DIR/stk_ui_lib.sh" ]; then
     source "$SCRIPT_DIR/stk_ui_lib.sh"
 fi
 
+ver="v ${STK_VERSION:-7.0.0} · CRON"
+
 # Definir colores propios
 RESET='\e[0m'
 VERDE_BRILLANTE='\e[92m'
@@ -53,6 +55,9 @@ ROJO='\e[31m'
 ROJO_BRILLANTE='\e[91m'
 AZUL_BRILLANTE='\e[94m'
 BLANCO='\e[97m'
+
+# Paleta FZF compartida con el resto de STK.
+FZF_COLORES="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,prompt:#5fb2ff,marker:#92ff92"
 
 # Definir función pintar propia
 # --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
@@ -82,22 +87,8 @@ mostrar_logo() {
     echo -e "${AZUL}  ██      ██████  ██    ██ ██ ██ ██ ███████ ██ ███ ██ █████  ${RESET}"
     echo -e "${AZUL}  ██      ██   ██ ██    ██ ██  ████      ██ ██     ██ ██     ${RESET}"
     echo -e "${AZUL_BRILLANTE}   ██████ ██   ██  ██████  ██   ███      ██ ██     ██ ███████${RESET}"
-    echo -e "${VERDE_BRILLANTE}---               CRON TASK MANAGER $ver               ---${RESET}"
+    stk_version_texto "CRON"
     echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-}
-
-# Definir fzf_estilo
-fzf_estilo() {
-    local prompt_text="$1"
-    local header_text="$2"
-    stk_fzf_ejecutar "$prompt_text" "$header_text" "" \
-        --ansi \
-        --height=18 \
-        --reverse \
-        --border=rounded \
-        --prompt="➤ $prompt_text: " \
-        --header="$header_text" \
-        --color="border:#00ffff,pointer:#92ff92,header:#5fb2ff"
 }
 
 # --- CONFIGURACIÓN ---
