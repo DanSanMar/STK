@@ -35,6 +35,20 @@ ver="v ${STK_VERSION:-7.0.0} · HARD4ME"
 STK_MODULO="HARD4ME"
 stk_init "HARD4ME" "$V" "DISK HEALTH MONITOR"
 
+stk_dash_hard4me() {
+    echo -e "  ${AMARILLO}Discos:${RESET} ${AZUL}${#DISCOS[@]:-0}${RESET}  ${AMARILLO}Módulo:${RESET} ${AZUL}HARD4ME${RESET}"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
+}
+
+stk_preview_hard4me() {
+    echo "Análisis de discos, salud SMART/NVMe y capacidad."
+}
+PREVIEW_HARD4ME="$(declare -f stk_preview_hard4me); stk_preview_hard4me \"\$1\""
+
+fzf_estilo() {
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_HARD4ME"
+}
+
 # --- LOGS E INFORMES ---
 LOG_FILE="/var/log/stk_mantenimiento.log"
 LOG_INFO="INFO"
@@ -941,20 +955,20 @@ explorar_discos() {
     header_cmd=$(stk_header_cmd "$SELF_PATH")
     header=$(stk_header)   # cabecera inicial: bg-transform-header la refresca después
 
-    printf '%b' "$lista" | stk_fzf_ejecutar "Disco" "$header" "ANÁLISIS DE DISCOS" \
+    printf '%b' "$lista" | stk_fzf_ejecutar "Disco" "$header" "System Tool Kit" \
         --ansi \
         --height=~90% \
         --layout=reverse \
         --no-sort \
         --header-first \
         --border=rounded \
-        --border-label=" ANÁLISIS DE DISCOS " \
+        --border-label=" System Tool Kit " \
         --prompt="➤ Disco: " \
         --header="$header" \
         --preview="$preview_cmd" \
-        --preview-window="right:62%:wrap" \
+        --preview-window="right:45%:wrap" \
         --bind="every(5):bg-transform-header:$header_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,marker:#92ff92"
+        --color="$FZF_COLORES"
 }
 
 # --- Espacio por directorios, bajo demanda ---
