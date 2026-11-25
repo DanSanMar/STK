@@ -410,6 +410,20 @@ check_tools() {
     return 0
 }
 
+stk_dash_localscan4me() {
+    echo -e "  ${AMARILLO}Red:${RESET} ${AZUL}${RED_ACTUAL:-N/D}${RESET}  ${AMARILLO}Modo:${RESET} ${AZUL}auditoría interna${RESET}"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
+}
+
+stk_preview_localscan4me() {
+    echo "Seleccione una opción de escaneo o inventario de red."
+}
+PREVIEW_LOCALSCAN4ME="$(declare -f stk_preview_localscan4me); stk_preview_localscan4me \"\$1\""
+
+fzf_estilo() {
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_LOCALSCAN4ME"
+}
+
 # Menú FZF con el logo de STK como header (y refresco en caliente).
 fzf_con_logo() {
     local prompt="$1" titulo="$2" texto="$3"; shift 3
@@ -417,15 +431,15 @@ fzf_con_logo() {
     local -a extra=()
     MENU_TEXTO="$texto"
     header=$(header_refresco)
-    [ "${STK_FZF_FLAG_BORDER_LABEL:-false}" = true ] && extra+=(--border-label=" $titulo ")
+    [ "${STK_FZF_FLAG_BORDER_LABEL:-false}" = true ] && extra+=(--border-label=" System Tool Kit ")
     STK_HEADER_REFRESH_CMD=(header_refresco)
     # Sin fzf o sin TTY el menú es textual y no muestra cabecera: se imprime
     # aquí una sola vez (por stderr, fuera del pipe de las opciones).
     if [ "${STK_CAP_TTY:-false}" != true ] || [ "${STK_FZF_DISPONIBLE:-false}" != true ]; then
         printf '%s\n' "$header" >&2
     fi
-    stk_fzf_ejecutar "$prompt" "$header" "$titulo" \
-        --ansi --reverse --no-sort --border=rounded \
+    stk_fzf_ejecutar "$prompt" "$header" "System Tool Kit" \
+        --ansi --layout=reverse --no-sort --border=rounded \
         --prompt="➤ $prompt: " \
         --header="$header" \
         --color="$FZF_COLORES" "${extra[@]}" "$@"
