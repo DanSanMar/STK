@@ -223,7 +223,7 @@ stk_fzf() {
             if [ -n "$preview" ]; then
                 fzf_args+=(
                     --preview="bash -c $(printf '%q' "$preview") _ {}"
-                    --preview-window="right:55%:wrap"
+                    --preview-window="right:40%:wrap"
                 )
             fi
 
@@ -247,7 +247,7 @@ stk_fzf() {
             if [ -n "$preview" ]; then
                 fzf_args+=(
                     --preview="bash -c $(printf '%q' "$preview") _ {}"
-                    --preview-window="right:55%:wrap"
+                    --preview-window="right:40%:wrap"
                 )
             fi
             # Cabecera estática: evita que un refresh anterior borre el texto.

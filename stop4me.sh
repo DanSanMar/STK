@@ -126,7 +126,7 @@ stk_dash_stop4me() {
     fi
 
     echo -e "  ${AMARILLO}UFW:${RESET} ${AZUL}${ufw_status}${RESET}  ${AMARILLO}Reglas:${RESET} ${AZUL}${ufw_rules}${RESET}  ${AMARILLO}Políticas:${RESET} ${AZUL}${ufw_policies}${RESET}  ${AMARILLO}Red:${RESET} ${AZUL}${iface}${RESET}"
-    echo -e "  \e[2m↑↓ navegar · Enter seleccionar · Esc volver · Shift+↑/↓ preview\e[0m"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
 }
 
 stk_preview_stop4me() {

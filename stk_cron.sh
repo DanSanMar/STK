@@ -53,7 +53,7 @@ stk_dash_cron() {
         ultima=$(jq -r '.configuracion.ultima_ejecucion // "N/D"' "$CRON_CONFIG_FILE" 2>/dev/null)
     fi
     echo -e "  ${AMARILLO}Tareas:${RESET} ${AZUL}${tareas}${RESET}  ${AMARILLO}Activo:${RESET} ${AZUL}${activado}${RESET}  ${AMARILLO}Notif:${RESET} ${AZUL}${notif}${RESET}  ${AMARILLO}Última:${RESET} ${AZUL}${ultima}${RESET}"
-    echo -e "  \e[2m↑↓ navegar · Enter seleccionar · Esc volver · Shift+↑/↓ preview\e[0m"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
 }
 
 # Vista previa del desplegable: describe la opción seleccionada.
