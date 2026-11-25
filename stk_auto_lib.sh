@@ -435,17 +435,41 @@ stk_actualizar() {
 
 # ==============================================================================
 #  LIMPIEZA UNIFICADA
-#  Modo "auto"   : SOLO cachés y logs. Sin desinstalar paquetes, sin papeleras.
-#  Modo "completa": además, autoremove / huérfanos y papelera, con confirmación.
+#  Modo "auto"     : SOLO cachés y logs. Sin desinstalar paquetes, sin papeleras.
+#  Modo "completa" : además, autoremove / huérfanos y papelera, con confirmación.
+#  Modo "manual"   : ejecuta solo los pasos indicados en $2 (csv):
+#                    journal,cache,thumbnails,orphans,trash
 #  Rellena: SUPER_LIMPIEZA_LIBERADO
 # ==============================================================================
 stk_limpieza() {
     stk_detectar_gestor
     local MODO="${1:-auto}"
+    local PASOS_MANUAL="${2:-}"
     local -a TMO=()
     stk_timeout TMO "$AUTO_TIMEOUT_LIMPIEZA"
 
     local SPINNER_PID_LIMPIEZA=""
+    local DO_JOURNAL=false DO_CACHE=false DO_THUMBS=false DO_ORPHANS=false DO_TRASH=false
+
+    case "$MODO" in
+        auto)
+            DO_JOURNAL=true; DO_CACHE=true; DO_THUMBS=true
+            ;;
+        completa)
+            DO_JOURNAL=true; DO_CACHE=true; DO_THUMBS=true; DO_ORPHANS=true; DO_TRASH=true
+            ;;
+        manual)
+            [[ ",$PASOS_MANUAL," == *,journal,* ]] && DO_JOURNAL=true
+            [[ ",$PASOS_MANUAL," == *,cache,* ]] && DO_CACHE=true
+            [[ ",$PASOS_MANUAL," == *,thumbnails,* ]] && DO_THUMBS=true
+            [[ ",$PASOS_MANUAL," == *,orphans,* ]] && DO_ORPHANS=true
+            [[ ",$PASOS_MANUAL," == *,trash,* ]] && DO_TRASH=true
+            ;;
+        *)
+            DO_JOURNAL=true; DO_CACHE=true; DO_THUMBS=true; DO_ORPHANS=true; DO_TRASH=true
+            MODO="completa"
+            ;;
+    esac
 
     if [ "$MODO" = "auto" ]; then
         echo ""
@@ -455,10 +479,26 @@ stk_limpieza() {
         echo "   • Miniaturas de imágenes sin uso en más de 7 días"
         echo "   • NO se desinstalan paquetes, NO se tocan papeleras ni archivos personales"
         echo ""
+    elif [ "$MODO" = "manual" ]; then
+        echo ""
+        echo "🧹 Limpieza manual (pasos seleccionados):"
+        $DO_JOURNAL && echo "   • Logs del journal (>${AUTO_LIMPIEZA_LOG_DIAS} días)"
+        $DO_CACHE && echo "   • Caché del gestor de paquetes"
+        $DO_THUMBS && echo "   • Miniaturas antiguas (>7 días sin uso)"
+        $DO_ORPHANS && echo "   • Paquetes huérfanos/dependencias sobrantes"
+        $DO_TRASH && echo "   • Papelera de usuarios (con confirmación)"
+        if ! $DO_JOURNAL && ! $DO_CACHE && ! $DO_THUMBS && ! $DO_ORPHANS && ! $DO_TRASH; then
+            echo "   • (ningún paso seleccionado)"
+            echo ""
+            SUPER_LIMPIEZA_LIBERADO=0
+            return 0
+        fi
+        echo ""
     else
         echo ""
-        echo "🧹 Limpieza completa:"
-        echo "   • Lo anterior + paquetes obsoletos/huérfanos y vaciado de papeleras"
+        echo "🧹 Limpieza completa (automática):"
+        echo "   • Logs del journal, caché de paquetes y miniaturas"
+        echo "   • Paquetes obsoletos/huérfanos y vaciado de papeleras"
         echo ""
     fi
 
@@ -472,85 +512,107 @@ stk_limpieza() {
     ANTES_HOME=$(df --output=avail /home 2>/dev/null | tail -n 1)
 
     # 1. Logs del journal
-    if command -v journalctl >/dev/null 2>&1; then
-        "${TMO[@]}" journalctl --vacuum-time="${AUTO_LIMPIEZA_LOG_DIAS}d" >/dev/null 2>&1
-        registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: journalctl --vacuum-time=${AUTO_LIMPIEZA_LOG_DIAS}d"
+    if $DO_JOURNAL; then
+        if command -v journalctl >/dev/null 2>&1; then
+            "${TMO[@]}" journalctl --vacuum-time="${AUTO_LIMPIEZA_LOG_DIAS}d" >/dev/null 2>&1
+            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: journalctl --vacuum-time=${AUTO_LIMPIEZA_LOG_DIAS}d"
+        fi
     fi
 
     # 2. Caché del gestor (nunca desinstala paquetes en modo auto)
-    case "${Package:-unknown}" in
-        apt)
-            "${TMO[@]}" apt-get autoclean -y >/dev/null 2>&1
-            "${TMO[@]}" apt-get clean >/dev/null 2>&1
-            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché APT (autoclean + clean)"
-            ;;
-        dnf)
-            "${TMO[@]}" dnf clean all >/dev/null 2>&1
-            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché DNF"
-            ;;
-        pacman)
-            "${TMO[@]}" pacman -Sc --noconfirm >/dev/null 2>&1
-            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché PACMAN (-Sc)"
-            ;;
-        zypper)
-            "${TMO[@]}" zypper clean --all >/dev/null 2>&1
-            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché ZYPPER"
-            ;;
-        apk)
-            "${TMO[@]}" apk cache clean >/dev/null 2>&1
-            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché APK"
-            ;;
-        *)
-            [ -n "$SPINNER_PID_LIMPIEZA" ] && { kill "$SPINNER_PID_LIMPIEZA" 2>/dev/null; wait "$SPINNER_PID_LIMPIEZA" 2>/dev/null; }
-            [ -t 1 ] && printf "\r\e[K"
-            echo "❌ Limpieza automática no soportada para ${Package:-desconocido}"
-            registrar_log "$LOG_WARN" "LIMPIEZA: gestor no soportado (${Package:-desconocido})"
-            return 1
-            ;;
-    esac
-    [ "${IMMUTABLE:-false}" = true ] && "${TMO[@]}" rpm-ostree cleanup -m >/dev/null 2>&1
+    if $DO_CACHE; then
+        case "${Package:-unknown}" in
+            apt)
+                "${TMO[@]}" apt-get autoclean -y >/dev/null 2>&1
+                "${TMO[@]}" apt-get clean >/dev/null 2>&1
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché APT (autoclean + clean)"
+                ;;
+            dnf)
+                "${TMO[@]}" dnf clean all >/dev/null 2>&1
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché DNF"
+                ;;
+            pacman)
+                "${TMO[@]}" pacman -Sc --noconfirm >/dev/null 2>&1
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché PACMAN (-Sc)"
+                ;;
+            zypper)
+                "${TMO[@]}" zypper clean --all >/dev/null 2>&1
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché ZYPPER"
+                ;;
+            apk)
+                "${TMO[@]}" apk cache clean >/dev/null 2>&1
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: caché APK"
+                ;;
+            *)
+                [ -n "$SPINNER_PID_LIMPIEZA" ] && { kill "$SPINNER_PID_LIMPIEZA" 2>/dev/null; wait "$SPINNER_PID_LIMPIEZA" 2>/dev/null; }
+                [ -t 1 ] && printf "\r\e[K"
+                echo "❌ Limpieza de caché no soportada para ${Package:-desconocido}"
+                registrar_log "$LOG_WARN" "LIMPIEZA[$MODO]: gestor no soportado para caché (${Package:-desconocido})"
+                return 1
+                ;;
+        esac
+        [ "${IMMUTABLE:-false}" = true ] && "${TMO[@]}" rpm-ostree cleanup -m >/dev/null 2>&1
+    fi
 
     # 3. Miniaturas (solo caché, nunca archivos del usuario)
-    find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
-    registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: miniaturas con más de 7 días sin uso"
+    if $DO_THUMBS; then
+        find /home/*/.cache/thumbnails /root/.cache/thumbnails -type f -atime +7 -delete 2>/dev/null
+        registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: miniaturas con más de 7 días sin uso"
+    fi
 
-    # 4. Solo en la limpieza COMPLETA: desinstalación y papeleras, con confirmación.
-    if [ "$MODO" != "auto" ]; then
+    # 4. Paquetes huérfanos/dependencias (solo si se selecciona)
+    if $DO_ORPHANS; then
         local huerfanos=()
         case "${Package:-unknown}" in
             apt)
                 "${TMO[@]}" apt-get autoremove -y >/dev/null 2>&1
-                registrar_log "$LOG_INFO" "LIMPIEZA[completa]: apt-get autoremove (sin --purge)"
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: apt-get autoremove (sin --purge)"
                 ;;
             dnf)
                 "${TMO[@]}" dnf autoremove -y >/dev/null 2>&1
-                registrar_log "$LOG_INFO" "LIMPIEZA[completa]: dnf autoremove"
+                registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: dnf autoremove"
                 ;;
             pacman)
                 mapfile -t huerfanos < <(pacman -Qtdq 2>/dev/null)
                 if [ ${#huerfanos[@]} -gt 0 ]; then
                     "${TMO[@]}" pacman -R "${huerfanos[@]}" --noconfirm >/dev/null 2>&1
-                    registrar_log "$LOG_INFO" "LIMPIEZA[completa]: huérfanos (${#huerfanos[@]}): ${huerfanos[*]}"
+                    registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: huérfanos (${#huerfanos[@]}): ${huerfanos[*]}"
                 fi
                 ;;
         esac
+    fi
 
+    # 5. Papelera de usuarios (solo si se selecciona)
+    if $DO_TRASH; then
         local n_trash
         n_trash=$(find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info /root/.local/share/Trash/files /root/.local/share/Trash/info -mindepth 1 2>/dev/null | wc -l)
         if [ "$n_trash" -gt 0 ] && [ -t 0 ]; then
+            if [ -n "$SPINNER_PID_LIMPIEZA" ]; then
+                kill "$SPINNER_PID_LIMPIEZA" 2>/dev/null; wait "$SPINNER_PID_LIMPIEZA" 2>/dev/null
+                SPINNER_PID_LIMPIEZA=""
+                printf "\r\e[K"
+            fi
             echo "🗑️  Hay ${n_trash} elemento(s) en las papeleras de los usuarios."
+            echo "   Contenido a eliminar (primeros 20):"
+            find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info /root/.local/share/Trash/files /root/.local/share/Trash/info -mindepth 1 2>/dev/null | head -n 20 | while IFS= read -r item; do
+                echo "     - $item"
+            done
+            if [ "$n_trash" -gt 20 ]; then
+                echo "     ... y $((n_trash - 20)) elemento(s) más."
+            fi
+            echo ""
             local respuesta="n"
             read -r -p "¿Vaciar TODAS las papeleras? Esto es irreversible (s/N): " respuesta
             case "$respuesta" in
                 s|S|si|SI|Si)
                     find /home/*/.local/share/Trash/files /home/*/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
                     find /root/.local/share/Trash/files /root/.local/share/Trash/info -mindepth 1 -delete 2>/dev/null
-                    registrar_log "$LOG_WARN" "LIMPIEZA[completa]: papeleras vaciadas (${n_trash} elementos)"
+                    registrar_log "$LOG_WARN" "LIMPIEZA[$MODO]: papeleras vaciadas (${n_trash} elementos)"
                     ;;
-                *) registrar_log "$LOG_INFO" "LIMPIEZA[completa]: papeleras conservadas" ;;
+                *) registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: papeleras conservadas" ;;
             esac
         elif [ "$n_trash" -gt 0 ]; then
-            registrar_log "$LOG_INFO" "LIMPIEZA[completa]: ${n_trash} elemento(s) en papeleras; sin TTY no se vacían"
+            registrar_log "$LOG_INFO" "LIMPIEZA[$MODO]: ${n_trash} elemento(s) en papeleras; sin TTY no se vacían"
         fi
     fi
 

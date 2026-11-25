@@ -4,7 +4,7 @@
 <img width="500" height="300" alt="STK Banner" src="https://github.com/DanSanMar/STK/blob/main/img/Pasted%20Image.png" />
 
 <!-- ETIQUETAS ESENCIALES -->
-![Version](https://img.shields.io/badge/versión-6.6.9-blue?style=flat-square&logo=github)
+![Version](https://img.shields.io/badge/versión-7.0.0-blue?style=flat-square&logo=github)
 ![Estado](https://img.shields.io/badge/estado-En%20Desarrollo-yellow?style=flat-square&logo=github)
 ![Linux](https://img.shields.io/badge/plataforma-Linux-success?style=flat-square&logo=linux)
 ![Bash](https://img.shields.io/badge/bash-4.0+-brightgreen?style=flat-square&logo=gnu-bash)
@@ -13,7 +13,7 @@
 ![GitHub stars](https://img.shields.io/github/stars/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 ![GitHub last commit](https://img.shields.io/github/last-commit/DanSanMar/System-Tool-Kit?style=flat-square&logo=github)
 
-# 🛠️ STK - System Tool Kit (v6.6.9)
+# 🛠️ STK - System Tool Kit (v7.0.0)
 
 </div>
 
@@ -188,7 +188,13 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ## 📝 Registro de Cambios
 
-### 📝 v6.6.9 (Actual)
+### 📝 v7.0.0 (Actual)
+* **Actualizaciones más robustas:** Separación clara entre modo normal (interactivo, el usuario decide) y modo auto (no interactivo y robusto). APT con timeouts de red/bloqueo, `NEEDRESTART_MODE=a` en auto, reparación automática con `dpkg --configure -a` en auto y opcional en modo normal. Timeout de actualización elevado a 60 min y timeout añadido a `rpm-ostree`.
+* **Mantenimiento renovado:** Menú con previews de `fzf`, opciones directas `Limpieza auto` y `Limpieza manual`, y visor dedicado `Logs de actualizaciones` diferenciado de la bitácora general.
+* **Superlimpieza flexible:** `stk_limpieza` soporta `auto | completa | manual` con selección de pasos (`journal,cache,thumbnails,orphans,trash`). La papelera muestra vista previa de elementos antes de confirmar el borrado.
+* **Modo auto más claro:** El resumen final indica la ruta de bitácora y recuerda que los logs de actualizaciones también pueden verse en `Mantenimiento → Logs de actualizaciones`.
+
+### 📝 v6.6.9
 * **Compatibilidad:** Nueva capa de degradación elegante en `stk_header.sh` para sobrevivir a entornos distintos (Debian con ncurses/fzf antiguos, Ghostty/Kitty/tmux, sudo con `env_reset`, sin TTY, cron, locales C).
 * **Errores resueltos:** `invalid listen port: …fzf_….sock` (fzf < 0.66 no entiende sockets UNIX en `--listen`) y `'xterm-ghostty': unknown terminal type` (terminfo ausente + `clear`/`tput`).
 * **Menús:** `stk_fzf_ejecutar` centraliza todas las selecciones: retira opciones no soportadas, aísla `FZF_DEFAULT_OPTS`, ofrece menú textual sin TTY/sin fzf y reintenta con opciones mínimas solo ante error real de fzf.

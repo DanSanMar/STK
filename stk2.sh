@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="6.6.9"
+V="7.0.0"
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -132,7 +132,8 @@ ver_logs() {
     mostrar_logo
     
     if [ -f "$LOG_FILE" ]; then
-        pintar "$CIAN" "--- Últimas 20 entradas de la bitácora STK ---"
+        pintar "$CIAN" "--- BITÁCORA GENERAL (últimas 20 entradas) ---"
+        pintar "$AZUL" "Incluye todos los eventos registrados por STK."
         echo -e "${AMARILLO}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
         tail -n 20 "$LOG_FILE" | awk '
             /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
@@ -163,7 +164,8 @@ ver_logs_actualizaciones() {
     mostrar_logo
 
     if [ -f "$LOG_FILE" ]; then
-        pintar "$CIAN" "--- Últimas 20 entradas de actualizaciones ---"
+        pintar "$CIAN" "--- LOGS DE ACTUALIZACIONES (últimas 20 coincidencias) ---"
+        pintar "$AZUL" "Vista filtrada: solo entradas relacionadas con actualizaciones de paquetes/sistema."
         echo -e "${AMARILLO}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
         local coincidencias
         # Filtramos por "actualizaci" para capturar Actualización, actualización y ACTUALIZACIÓN
@@ -182,6 +184,47 @@ ver_logs_actualizaciones() {
     fi
     echo ""
     read -p "Presione Enter para volver..."
+}
+
+stk_limpieza_manual_menu() {
+    local pasos_sel
+    pasos_sel=$(printf '%s\n' \
+        "journal|🗞️  Logs del journal (>${AUTO_LIMPIEZA_LOG_DIAS} días)" \
+        "cache|📦  Caché del gestor de paquetes" \
+        "thumbnails|🖼️  Miniaturas antiguas (>7 días)" \
+        "orphans|🧩  Paquetes huérfanos/dependencias" \
+        "trash|🗑️  Papelera de usuarios (con confirmación)" | \
+        stk_fzf_ejecutar "Seleccione pasos" "Marca con TAB los pasos a ejecutar." "LIMPIEZA MANUAL" \
+        --ansi \
+        --multi \
+        --delimiter='|' \
+        --with-nth=2 \
+        --height=~60% \
+        --layout=reverse \
+        --no-sort \
+        --border=rounded \
+        --border-label=" LIMPIEZA MANUAL " \
+        --prompt="➤ TAB marca/desmarca · ENTER confirma: " \
+        --header="Marca con TAB los pasos a ejecutar." \
+        --bind 'start:select-all' \
+        --color="$FZF_COLORES")
+
+    if [ $? -ne 0 ] || [ -z "$pasos_sel" ]; then
+        pintar "$AMARILLO" "Limpieza manual cancelada."
+        sleep 1
+        return 0
+    fi
+
+    local pasos_csv="" linea_p
+    while IFS= read -r linea_p; do
+        [ -n "$linea_p" ] && pasos_csv+="${pasos_csv:+,}${linea_p%%|*}"
+    done <<< "$pasos_sel"
+
+    stk_limpiar
+    mostrar_logo
+    stk_limpieza manual "$pasos_csv"
+    echo ""
+    read -p "Presione Enter para volver al menú..."
 }
 
 # --- COMPROBACIÓN DE SUDO ---
@@ -1256,14 +1299,81 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             5) # --- SUBMENÚ MANTENIMIENTO ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Ver logs de actualizaciones\n4. Rotación archivos de log\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
+                    local preview_mant='
+                        sel="$1"
+                        case "${sel%%.*}" in
+                            1)
+                                printf "\033[1;36m🧹 LIMPIEZA AUTO\033[0m\n\n"
+                                printf "Ejecuta todos los pasos de limpieza directamente.\n\n"
+                                printf "\033[33mIncluye:\033[0m\n"
+                                printf "  • Logs del journal antiguos\n"
+                                printf "  • Caché de gestores de paquetes\n"
+                                printf "  • Miniaturas antiguas\n"
+                                printf "  • Paquetes huérfanos/dependencias\n"
+                                printf "  • Papelera de usuarios (pide confirmación)\n\n"
+                                printf "\033[32mUso:\033[0m Rápido, sin elegir pasos.\n"
+                                ;;
+                            2)
+                                printf "\033[1;36m✋ LIMPIEZA MANUAL\033[0m\n\n"
+                                printf "Tú eliges qué pasos ejecutar.\n\n"
+                                printf "\033[33mPasos disponibles:\033[0m\n"
+                                printf "  • Journal\n  • Caché de paquetes\n  • Miniaturas\n"
+                                printf "  • Huérfanos/dependencias\n  • Papelera\n\n"
+                                printf "\033[32mUso:\033[0m Control fino cuando no quieres limpiar todo.\n"
+                                ;;
+                            3)
+                                printf "\033[1;36m📜 BITÁCORA DE STK\033[0m\n\n"
+                                printf "Historial completo de eventos de STK.\n\n"
+                                printf "\033[33mMuestra:\033[0m\n"
+                                printf "  • Acciones del sistema y mantenimiento\n"
+                                printf "  • Advertencias y errores\n"
+                                printf "  • Cambios de usuarios, servicios y permisos\n\n"
+                                printf "\033[32mUso:\033[0m Vista general para auditar lo que hizo STK.\n"
+                                ;;
+                            4)
+                                printf "\033[1;36m📦 LOGS DE ACTUALIZACIONES\033[0m\n\n"
+                                printf "Vista filtrada solo de actualizaciones.\n\n"
+                                printf "\033[33mMuestra:\033[0m\n"
+                                printf "  • Actualizaciones de paquetes y sistema\n"
+                                printf "  • Errores/incidencias de gestores de paquetes\n"
+                                printf "  • Resultados de apt/dnf/pacman/zypper/rpm-ostree\n\n"
+                                printf "\033[32mUso:\033[0m Más rápido para revisar problemas de updates.\n"
+                                ;;
+                            5)
+                                printf "\033[1;36m🔄 ROTAR LOGS\033[0m\n\n"
+                                printf "Mantenimiento del archivo de bitácora.\n\n"
+                                printf "\033[33mHace:\033[0m\n"
+                                printf "  • Comprueba el tamaño de /var/log/stk_mantenimiento.log\n"
+                                printf "  • Si supera el límite, rota y conserva historial en .1\n"
+                                printf "  • Reafirma permisos seguros del log\n\n"
+                                printf "\033[32mUso:\033[0m Evita que la bitácora crezca sin control.\n"
+                                ;;
+                            6)
+                                printf "\033[1;36m↩ VOLVER\033[0m\n\n"
+                                printf "Regresa al menú principal.\n"
+                                ;;
+                        esac'
+                    accion=$(echo -e "1. 🧹 Limpieza auto\n2. ✋ Limpieza manual\n3. 📜 Bitácora de STK\n4. 📦 Logs de actualizaciones\n5. 🔄 Rotar logs\n6. ↩ Volver" | \
+                        stk_fzf_ejecutar "Seleccione" "MANTENIMIENTO" "MANTENIMIENTO" \
+                        --ansi \
+                        --height=~60% \
+                        --layout=reverse \
+                        --no-sort \
+                        --border=rounded \
+                        --border-label=" MANTENIMIENTO " \
+                        --prompt="➤ Seleccione: " \
+                        --header="MANTENIMIENTO" \
+                        --color="$FZF_COLORES" \
+                        --preview="bash -c $(printf '%q' "$preview_mant") _ {}" \
+                        --preview-window="right:55%:wrap")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
-                        1) stk_limpieza completa ;;
-                        2) ver_logs ;;
-                        3) ver_logs_actualizaciones ;;
-                        4) rotar_logs ;;
-                    esac                   
+                        1) stk_limpiar; mostrar_logo; stk_limpieza completa; echo ""; read -p "Presione Enter para volver al menú..." ;;
+                        2) stk_limpieza_manual_menu ;;
+                        3) ver_logs ;;
+                        4) ver_logs_actualizaciones ;;
+                        5) rotar_logs ;;
+                    esac
                 done
                 ;;
 
@@ -1630,6 +1740,7 @@ modo_auto() {
     registrar_log "$LOG_INFO" "=== FIN DE MODO AUTO ==="
 
     echo -e "\n${AMARILLO}➤ Bitácora:${RESET} ${BLANCO}${LOG_FILE}${RESET}"
+    echo -e "${AMARILLO}➤ Logs de actualizaciones:${RESET} ${BLANCO}También en Menú Mantenimiento → Logs de actualizaciones${RESET}"
     stk_lock_liberar
     trap - SIGINT
     echo ""
