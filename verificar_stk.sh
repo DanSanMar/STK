@@ -94,6 +94,39 @@ directo=$(grep -nHE '^[[:space:]]*[^#]*\|[[:space:]]*fzf([[:space:]]|$)|^[[:spac
 seteo=$(grep -nHE '^set -[eu]' "${TODOS[@]}")
 [ -z "$seteo" ] && ok "sin set -e/set -u" || mal "set -e/set -u detectado: $seteo"
 
+# 8. Scripts externos que consumen la capa de UI compartida
+EXTERNOS=("$DIR/dash4me.sh" "$DIR/stop4me.sh" "$DIR/stk_cron.sh")
+MINIMOS=(11 20 30)
+for i in 0 1 2; do
+    f="${EXTERNOS[$i]}"
+    nombre=$(basename "$f")
+    if [ ! -r "$f" ]; then
+        mal "No se encuentra $nombre"
+        continue
+    fi
+    if bash -n "$f" 2>/dev/null; then
+        ok "bash -n $nombre"
+    else
+        mal "bash -n $nombre"
+    fi
+    total=$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$f")
+    if [ "$total" -ge "${MINIMOS[$i]}" ]; then
+        ok "$nombre conserva sus funciones ($total)"
+    else
+        mal "$nombre tiene $total funciones (mínimo ${MINIMOS[$i]})"
+    fi
+    dup=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$f" | sort | uniq -d)
+    [ -z "$dup" ] && ok "$nombre sin funciones duplicadas" || mal "$nombre duplica: $dup"
+done
+
+lib_funcs=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$UI_LIB" | sort)
+for f in "${EXTERNOS[@]}"; do
+    colisiones=$(comm -12 <(echo "$lib_funcs") \
+                          <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$f" | sort))
+    [ -z "$colisiones" ] && ok "$(basename "$f") sin colisiones con la UI" \
+                         || aviso "$(basename "$f") redefine: $(echo "$colisiones" | tr '\n' ' ')"
+done
+
 # Informativo: whitespace heredado de stk2.sh
 finales=$(cat "${TODOS[@]}" | grep -c '[[:blank:]]$')
 aviso "líneas con espacio final (heredadas): $finales"
