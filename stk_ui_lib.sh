@@ -6,6 +6,55 @@
 # Versión única del ecosistema STK. Cada módulo añade su sufijo al mostrarla.
 STK_VERSION="7.0.0"
 
+# Valores por defecto para módulos que no definen la paleta completa.
+NEGRITA="${NEGRITA:-\e[1m}"
+ROJO="${ROJO:-\e[31m}"
+ROJO_BRILLANTE="${ROJO_BRILLANTE:-\e[91m}"
+VERDE="${VERDE:-\e[32m}"
+VERDE_BRILLANTE="${VERDE_BRILLANTE:-\e[92m}"
+AMARILLO="${AMARILLO:-\e[33m}"
+AMARILLO_BRILLANTE="${AMARILLO_BRILLANTE:-\e[93m}"
+AZUL="${AZUL:-\e[34m}"
+AZUL_OSCURO="${AZUL_OSCURO:-\e[0;34m}"
+AZUL_BRILLANTE="${AZUL_BRILLANTE:-\e[94m}"
+AZUL_CLARO="${AZUL_CLARO:-\e[38;5;117m}"
+CIAN="${CIAN:-\e[36m}"
+CIAN_BRILLANTE="${CIAN_BRILLANTE:-\e[96m}"
+BLANCO="${BLANCO:-\e[97m}"
+AUTOR="${AUTOR:-DanSanMar}"
+HOST_STK="${HOST_STK:-$(hostname 2>/dev/null || echo N/D)}"
+SO_STK="${SO_STK:-$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-N/D}")}"
+KERNEL_STK="${KERNEL_STK:-$(uname -r 2>/dev/null || echo N/D)}"
+IMMUTABLE="${IMMUTABLE:-false}"
+FZF_COLORES="${FZF_COLORES:-border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,prompt:#5fb2ff,marker:#92ff92}"
+
+PALETA_LOGO=(
+    "$ROJO"
+    "$AZUL_BRILLANTE"
+    "$VERDE_BRILLANTE"
+    "$AMARILLO_BRILLANTE"
+    "$CIAN_BRILLANTE"
+    "$ROJO_BRILLANTE"
+    "$AZUL_CLARO"
+    "$VERDE"
+    "$AMARILLO"
+    "$CIAN"
+)
+LOGO_INTERVALO=3      # Segundos entre cada cambio de color del logo
+
+actualizar_colores_logo() {
+    # El color avanza una posición cada LOGO_INTERVALO segundos (epoch / intervalo).
+    local epoch total=${#PALETA_LOGO[@]}
+    epoch=$(date +%s 2>/dev/null)
+    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
+
+    local base=$(( (epoch / LOGO_INTERVALO) % total ))
+
+    COLOR_LOGO="${PALETA_LOGO[$base]}"
+    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % total ))]}"
+    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % total ))]}"
+}
+
 stk_version_texto() {
     local modulo="${1:-}"
     if [ -n "$modulo" ]; then
@@ -52,7 +101,7 @@ logo_barra() {
     local hora
     hora=$(date '+%H:%M:%S')
 
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}ALL4ME${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${V}${RESET} ${AZUL_OSCURO}| ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}STK${RESET} ${AZUL_OSCURO}- ${COLOR_DASH}ALL4ME${RESET} ${AZUL_OSCURO}- ${COLOR_VER}v${STK_VERSION}${RESET} ${AZUL_OSCURO}| ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
 }
 logo_texto() {
     local modo="${1:-completo}"
@@ -63,13 +112,13 @@ logo_texto() {
     # En pantallas bajas se recorta la cabecera para no ocultar el menú.
     case "$modo" in
         compacto)
-            dashboard_cacheado
-            return
+            declare -F dashboard_cacheado >/dev/null 2>&1 && dashboard_cacheado
+            return 0
             ;;
         medio)
             echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${SO_STK}${RESET}"
-            dashboard_cacheado
-            return
+            declare -F dashboard_cacheado >/dev/null 2>&1 && dashboard_cacheado
+            return 0
             ;;
     esac
 
@@ -77,7 +126,8 @@ logo_texto() {
     if [ "$IMMUTABLE" = true ]; then
         echo -e " ${AMARILLO}Entorno:${RESET} ${AZUL}Inmutable · rpm-ostree${RESET}"
     fi
-    dashboard_cacheado
+    declare -F dashboard_cacheado >/dev/null 2>&1 && dashboard_cacheado
+    return 0
 }
 mostrar_logo() {
     echo ""

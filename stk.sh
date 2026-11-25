@@ -584,19 +584,6 @@ comprobar_salida_internet() {
     return 1
 }
 
-actualizar_colores_logo() {
-    # El color avanza una posición cada LOGO_INTERVALO segundos (epoch / intervalo).
-    local epoch total=${#PALETA_LOGO[@]}
-    epoch=$(date +%s 2>/dev/null)
-    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
-
-    local base=$(( (epoch / LOGO_INTERVALO) % total ))
-
-    COLOR_LOGO="${PALETA_LOGO[$base]}"
-    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % total ))]}"
-    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % total ))]}"
-}
-
 formato_bytes() {
     local b="${1:-0}"
     [[ "$b" =~ ^[0-9]+$ ]] || b=0
@@ -3161,19 +3148,6 @@ if [ ${#missing_tools[@]} -gt 0 ]; then
 fi
 
 # --- LOGO Y DASHBOARD DE ESTADO (estilo PROC4ME) ---
-PALETA_LOGO=(
-    "$ROJO"
-    "$AZUL_BRILLANTE"
-    "$VERDE_BRILLANTE"
-    "$AMARILLO_BRILLANTE"
-    "$CIAN_BRILLANTE"
-    "$ROJO_BRILLANTE"
-    "$AZUL_CLARO"
-    "$VERDE"
-    "$AMARILLO"
-    "$CIAN"
-)
-LOGO_INTERVALO=3      # Segundos entre cada cambio de color del logo
 DASH_REFRESCO=15      # Caché de métricas dinámicas (carga, RAM, disco, temperatura)
 DASH_SEG_REFRESCO=180 # Caché del bloque de seguridad (servicios, firewall, SSH, red)
 LOGO_DASH_CACHE="$STK_TMP_DIR/dashboard_${UID:-0}"

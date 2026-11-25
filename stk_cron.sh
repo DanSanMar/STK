@@ -42,6 +42,12 @@ if [ -r "$SCRIPT_DIR/stk_ui_lib.sh" ]; then
 fi
 
 ver="v ${STK_VERSION:-7.0.0} · CRON"
+STK_MODULO="CRON"
+
+# Todos los selectores usan el marco estándar de STK con el título del módulo.
+fzf_estilo() {
+    stk_fzf marco "$1" "${STK_MODULO:-CRON}"
+}
 
 # Definir colores propios
 RESET='\e[0m'
@@ -80,16 +86,6 @@ else
     exit 1
 fi
 
-# mostrar_logo
-mostrar_logo() {
-    echo -e "${CIAN}   ██████ ██████   ██████  ███   ██ ██   ██ ███   ███ ███████${RESET}"
-    echo -e "${AZUL_BRILLANTE}  ██      ██   ██ ██    ██ ████  ██ ██   ██ ████ ████ ██     ${RESET}"
-    echo -e "${AZUL}  ██      ██████  ██    ██ ██ ██ ██ ███████ ██ ███ ██ █████  ${RESET}"
-    echo -e "${AZUL}  ██      ██   ██ ██    ██ ██  ████      ██ ██     ██ ██     ${RESET}"
-    echo -e "${AZUL_BRILLANTE}   ██████ ██   ██  ██████  ██   ███      ██ ██     ██ ███████${RESET}"
-    stk_version_texto "CRON"
-    echo -e "${CIAN}  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-}
 
 # --- CONFIGURACIÓN ---
 CRON_CONFIG_DIR="/etc/stk/cron"
