@@ -44,9 +44,38 @@ fi
 ver="v ${STK_VERSION:-7.0.0} · CRON"
 STK_MODULO="CRON"
 
-# Todos los selectores usan el marco estándar de STK con el título del módulo.
+# Dashboard adaptado a CRON: se incrusta en la cabecera del recuadro STK.
+stk_dash_cron() {
+    if [ ! -f "$CRON_CONFIG_FILE" ] || ! command -v jq &>/dev/null; then
+        echo "  ┃ CRON · gestor sin configurar"
+        return 0
+    fi
+    local activado tareas notif ultima
+    activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE" 2>/dev/null)
+    tareas=$(jq -r '.tareas | length' "$CRON_CONFIG_FILE" 2>/dev/null)
+    notif=$(jq -r '.configuracion.notificaciones // false' "$CRON_CONFIG_FILE" 2>/dev/null)
+    ultima=$(jq -r '.configuracion.ultima_ejecucion // "N/D"' "$CRON_CONFIG_FILE" 2>/dev/null)
+    echo "  ┃ CRON · $tareas tareas · activo=$activado · notificaciones=$notif · última=$ultima"
+}
+
+# Vista previa del desplegable: describe la opción seleccionada.
+stk_preview_cron() {
+    local sel="$1"
+    case "${sel%%.*}" in
+        1) echo "Programar nuevas tareas automáticas." ;;
+        2) echo "Activar o desactivar tareas individuales." ;;
+        3) echo "Mostrar la configuración actual del programador." ;;
+        4) echo "Ver logs de ejecución y resúmenes." ;;
+        5) echo "Activar o desactivar notificaciones de escritorio." ;;
+        6) echo "Volver al menú principal de STK." ;;
+        *) echo "Seleccione una opción del gestor de tareas." ;;
+    esac
+}
+PREVIEW_CRON="$(declare -f stk_preview_cron); stk_preview_cron \"{}\""
+
+# Todos los selectores usan el recuadro STK con dashboard y vista previa.
 fzf_estilo() {
-    stk_fzf marco "$1" "${STK_MODULO:-CRON}"
+    stk_fzf modulo "$1" "" "$PREVIEW_CRON"
 }
 
 # Definir colores propios

@@ -96,7 +96,7 @@ seteo=$(grep -nHE '^set -[eu]' "${TODOS[@]}")
 
 # 8. Scripts externos que consumen la capa de UI compartida
 EXTERNOS=("$DIR/dash4me.sh" "$DIR/stop4me.sh" "$DIR/stk_cron.sh")
-MINIMOS=(11 20 29)
+MINIMOS=(11 20 31)
 for i in 0 1 2; do
     f="${EXTERNOS[$i]}"
     nombre=$(basename "$f")
