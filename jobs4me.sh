@@ -111,30 +111,31 @@ detectar_sistema() {
     command -v atq &>/dev/null && HAS_ATQ=true
 }
 
-# --- LOGO ANIMADO (estilo PROC4ME / STK) ---
-PALETA_LOGO=(
-    "$ROJO" "$AZUL_BRILLANTE" "$VERDE_BRILLANTE" "$AMARILLO_BRILLANTE"
-    "$CIAN_BRILLANTE" "$ROJO_BRILLANTE" "$AZUL_CLARO" "$VERDE" "$AMARILLO" "$CIAN"
-)
+# --- DASHBOARD Y PREVIEW DE MÓDULO (patrón STK) ---
+stk_dash_jobs4me() {
+    echo -e "  ${AMARILLO}Servicios:${RESET} ${AZUL}${#SVC_UNITS[@]:-0}${RESET}  ${AMARILLO}Fallidos:${RESET} ${AZUL}${#FAILED_UNITS[@]:-0}${RESET}  ${AMARILLO}Timers:${RESET} ${AZUL}${#TIMERS[@]:-0}${RESET}  ${AMARILLO}Cron:${RESET} ${AZUL}${CONT_CRONTAB:-0}${RESET}"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
+}
 
-actualizar_colores_logo() {
-    local epoch total=${#PALETA_LOGO[@]}
-    epoch=$(date +%s 2>/dev/null)
-    [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
-    local base=$(( (epoch / 3) % total ))
-    COLOR_LOGO="${PALETA_LOGO[$base]}"
-    COLOR_DASH="${PALETA_LOGO[$(( (base + 3) % total ))]}"
-    COLOR_VER="${PALETA_LOGO[$(( (base + 6) % total ))]}"
+stk_preview_jobs4me() {
+    local sel="$1"
+    case "${sel%%.*}" in
+        *) echo "Análisis de servicios, timers y tareas programadas." ;;
+    esac
+}
+PREVIEW_JOBS4ME="$(declare -f stk_preview_jobs4me); stk_preview_jobs4me \"\$1\""
+
+fzf_estilo() {
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_JOBS4ME"
 }
 
 logo_texto() {
     actualizar_colores_logo
     local hora
     hora=$(date '+%H:%M:%S')
-    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO}JOBS4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH}SERVICES & JOBS ANALYZER${RESET} ${AZUL_OSCURO}| ${COLOR_VER}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
+    echo -e " ${AZUL_BRILLANTE}--- ⚡ ${NEGRITA}${COLOR_LOGO:-$AZUL_BRILLANTE}JOBS4ME${RESET} ${AZUL_OSCURO}| ${COLOR_DASH:-$CIAN}SERVICES & JOBS ANALYZER${RESET} ${AZUL_OSCURO}| ${COLOR_VER:-$CIAN}v${V}${RESET} ${BLANCO}:${hora}: ${AZUL_BRILLANTE}⚡---${RESET}"
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e " ${AMARILLO}➤ Sistema:${RESET} ${AZUL}${OS_ID}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK}${RESET}"
-    echo -e " ${AMARILLO}➤ Host:${RESET} ${AZUL}${HOST_STK}${RESET}  ${AMARILLO}Usuario:${RESET} ${AZUL}${USER:-root}${RESET}  ${AMARILLO}By:${RESET} ${AZUL}${AUTOR}${RESET}"
+    echo -e " ${AMARILLO}Host:${RESET} ${AZUL}${HOST_STK:-N/D}${RESET}  ${AMARILLO}SO:${RESET} ${AZUL}${OS_ID:-N/D}${RESET}  ${AMARILLO}Kernel:${RESET} ${AZUL}${KERNEL_STK:-N/D}${RESET}"
     echo -e " ${CIAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
@@ -145,23 +146,7 @@ mostrar_logo_jobs4me() {
 
 jobs4me_fzf_menu() {
     local prompt_text="$1"
-    local titulo="$2"
-    local altura="${3:-~90%}"
-    local logo logo_cmd
-    logo=$(logo_texto)
-    printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
-    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
-        --ansi \
-        --height="$altura" \
-        --layout=reverse \
-        --no-sort \
-        --header-first \
-        --border=rounded \
-        --border-label=" $titulo " \
-        --prompt="➤ $prompt_text: " \
-        --header="$logo" \
-        --bind "every(5):bg-transform-header:$logo_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,marker:#92ff92"
+    fzf_estilo "$prompt_text"
 }
 
 salir_jobs4me() {
@@ -596,23 +581,25 @@ explorar_servicios() {
         lista+="$u  $(icono_estado "$u")  $(recortar "${SVC_DESC[$u]:-}" 55)\n"
     done
 
-    local preview_cmd header_cmd
+    local preview_cmd header_cmd logo
     printf -v preview_cmd 'bash %q --detalle {1}' "$SELF_PATH"
     printf -v header_cmd 'bash %q --logo-header' "$SELF_PATH"
+    logo=$(logo_texto)
 
-    printf '%b' "$lista" | stk_fzf_ejecutar "Seleccione servicio" "ANÁLISIS DE SERVICIOS" "ANÁLISIS DE SERVICIOS" \
+    printf '%b' "$lista" | stk_fzf_ejecutar "Seleccione servicio" "$logo" "System Tool Kit" \
         --ansi \
         --height=~90% \
         --layout=reverse \
         --no-sort \
         --header-first \
         --border=rounded \
-        --border-label=" ANÁLISIS DE SERVICIOS " \
+        --border-label=" System Tool Kit " \
         --prompt="➤ Servicio: " \
+        --header="$logo" \
         --preview="$preview_cmd" \
-        --preview-window="right:62%:wrap" \
+        --preview-window="right:50%:wrap" \
         --bind="every(5):bg-transform-header:$header_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff,marker:#92ff92"
+        --color="$FZF_COLORES"
 }
 
 generar_informe() {
