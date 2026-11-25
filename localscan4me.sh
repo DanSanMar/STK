@@ -9,7 +9,6 @@
 # Se ejecuta solo (bash localscan4me.sh) o desde STK.
 # ==============================================================================
 
-V="1.1"
 DESCRIPCION="Dashboard de redes locales: inventario, puertos expuestos y revisión TLS"
 AUTOR="DanSanMar"
 
@@ -32,6 +31,16 @@ else
     exit 1
 fi
 
+if [ -r "$SCRIPT_DIR/stk_ui_lib.sh" ]; then
+    set +u
+    # shellcheck source=stk_ui_lib.sh
+    source "$SCRIPT_DIR/stk_ui_lib.sh"
+    set -u
+fi
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · LOCALSCAN4ME"
+STK_MODULO="LOCALSCAN4ME"
 stk_init "LOCALSCAN4ME" "$V" "LOCAL NETWORK DASHBOARD"
 
 # Uso interno: FZF pide la cabecera en caliente con bg-transform-header.

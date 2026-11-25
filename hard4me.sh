@@ -9,7 +9,6 @@
 # Pensado para ejecutarse solo (bash hard4me.sh) o integrarse en STK.
 # ==============================================================================
 
-V="1.2"
 DESCRIPCION="Dashboard de análisis y monitorización del disco duro"
 AUTOR="DanSanMar"
 
@@ -27,6 +26,13 @@ else
     echo "❌ No se encuentra $STK_HEADER. HARD4ME no puede iniciarse." >&2
     exit 1
 fi
+
+STK_UI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_ui_lib.sh"
+[ -r "$STK_UI_LIB" ] && source "$STK_UI_LIB"
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · HARD4ME"
+STK_MODULO="HARD4ME"
 stk_init "HARD4ME" "$V" "DISK HEALTH MONITOR"
 
 # --- LOGS E INFORMES ---

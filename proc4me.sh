@@ -7,7 +7,6 @@
 # Pensado para ejecutarse solo (sudo ./proc4me.sh) o integrarse después en STK.
 # ==============================================================================
 
-V="1.2"
 DESCRIPCION="Investigador de procesos, puertos, persistencia y amenazas silenciosas en Linux"
 AUTOR="DanSanMar"
 
@@ -17,6 +16,13 @@ if [ -r "$STK_COMPAT_HEADER" ]; then
     # shellcheck source=stk_header.sh
     source "$STK_COMPAT_HEADER"
 fi
+
+STK_UI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_ui_lib.sh"
+[ -r "$STK_UI_LIB" ] && source "$STK_UI_LIB"
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · PROC4ME"
+STK_MODULO="PROC4ME"
 
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'

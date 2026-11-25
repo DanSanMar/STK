@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="2.5.0"
 DESCRIPCION="Herramienta de instalación de programas por categorías y fuentes híbridas"
 AUTOR="DanSanMar"
 
@@ -9,6 +8,11 @@ AUTOR="DanSanMar"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 source "$SCRIPT_DIR/stk_header.sh"
+[ -r "$SCRIPT_DIR/stk_ui_lib.sh" ] && source "$SCRIPT_DIR/stk_ui_lib.sh"
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · INSTALL4ME"
+STK_MODULO="INSTALL4ME"
 
 # Uso interno: FZF puede pedir la cabecera en caliente con bg-transform-header
 if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${1:-}" = "--stk-header" ]; then

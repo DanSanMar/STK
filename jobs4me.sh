@@ -8,7 +8,6 @@
 # Pensado para ejecutarse solo (bash jobs4me.sh) o integrarse en STK.
 # ==============================================================================
 
-V="1.1"
 DESCRIPCION="Dashboard de análisis de servicios, procesos y tareas programadas"
 AUTOR="DanSanMar"
 
@@ -18,6 +17,13 @@ if [ -r "$STK_COMPAT_HEADER" ]; then
     # shellcheck source=stk_header.sh
     source "$STK_COMPAT_HEADER"
 fi
+
+STK_UI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_ui_lib.sh"
+[ -r "$STK_UI_LIB" ] && source "$STK_UI_LIB"
+
+V="${STK_VERSION:-7.0.0}"
+ver="v ${STK_VERSION:-7.0.0} · JOBS4ME"
+STK_MODULO="JOBS4ME"
 
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
