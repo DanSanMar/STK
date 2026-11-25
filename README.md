@@ -190,7 +190,7 @@ Si ya has clonado STK, ejecuta `sudo ./stk2.sh` y elige `s` cuando falten herram
 
 ### 📝 v7.0.0 (Actual)
 * **Actualizaciones más robustas:** Separación clara entre modo normal (interactivo, el usuario decide) y modo auto (no interactivo y robusto). APT con timeouts de red/bloqueo, `NEEDRESTART_MODE=a` en auto, reparación automática con `dpkg --configure -a` en auto y opcional en modo normal. Timeout de actualización elevado a 60 min y timeout añadido a `rpm-ostree`.
-* **Mantenimiento renovado:** Menú con previews de `fzf`, opciones directas `Limpieza auto` y `Limpieza manual`, y visor dedicado `Logs de actualizaciones` diferenciado de la bitácora general.
+* **Menús con previews:** Submenús de Monitorización, Seguridad, Software, Administración y Mantenimiento con previews `fzf` (altura ampliada y pista `Shift+↑/↓`), opción `Actualización del Sistema (Asistida)`, `Limpieza auto/manual` directa y visor dedicado `Logs de actualizaciones`.
 * **Superlimpieza flexible:** `stk_limpieza` soporta `auto | completa | manual` con selección de pasos (`journal,cache,thumbnails,orphans,trash`). La papelera muestra vista previa de elementos antes de confirmar el borrado.
 * **Modo auto más claro:** El resumen final indica la ruta de bitácora y recuerda que los logs de actualizaciones también pueden verse en `Mantenimiento → Logs de actualizaciones`.
 

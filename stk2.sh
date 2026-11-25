@@ -1224,7 +1224,60 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             1) # --- SUBMENÚ MONITORIZACIÓN ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Rendimiento del Sistema\n2. Redes y puertos abiertos (LOCALSCAN4ME)\n3. Análisis de Servicios\n4. Análisis de Disco (HARD4ME)\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MONITORIZACIÓN")
+                    local preview_mon='
+                        sel="$1"
+                        case "${sel%%.*}" in
+                            1)
+                                printf "\033[1;36m📈 RENDIMIENTO DEL SISTEMA\033[0m\n\n"
+                                printf "Monitor en vivo (DASH4ME).\n\n"
+                                printf "\033[33mMuestra:\033[0m\n"
+                                printf "  • CPU, RAM, disco y red\n"
+                                printf "  • Temperaturas y GPU (si disponible)\n"
+                                printf "  • Arranque y estado general\n\n"
+                                printf "\033[32mUso:\033[0m Ver el estado del equipo en tiempo real.\n"
+                                ;;
+                            2)
+                                printf "\033[1;36m🌐 REDES Y PUERTOS\033[0m\n\n"
+                                printf "Submenú de red local.\n\n"
+                                printf "\033[33mIncluye:\033[0m\n"
+                                printf "  • Información de red (IP, gateway, DNS, interfaces)\n"
+                                printf "  • Escaneo de red local y puertos (LOCALSCAN4ME)\n\n"
+                                printf "\033[32mUso:\033[0m Diagnóstico rápido de conectividad y exposición.\n"
+                                ;;
+                            3)
+                                printf "\033[1;36m⚙️ ANÁLISIS DE SERVICIOS\033[0m\n\n"
+                                printf "Dashboard de servicios y tareas (JOBS4ME).\n\n"
+                                printf "\033[33mMuestra:\033[0m\n"
+                                printf "  • Servicios systemd y su estado\n"
+                                printf "  • Tareas programadas / cron\n\n"
+                                printf "\033[32mUso:\033[0m Detectar fallos o cargas anómalas.\n"
+                                ;;
+                            4)
+                                printf "\033[1;36m💽 ANÁLISIS DE DISCO\033[0m\n\n"
+                                printf "Dashboard de discos (HARD4ME).\n\n"
+                                printf "\033[33mMuestra:\033[0m\n"
+                                printf "  • Salud SMART/NVMe y temperatura\n"
+                                printf "  • Uso, inodos, rendimiento y capas\n\n"
+                                printf "\033[32mUso:\033[0m Anticipar problemas de almacenamiento.\n"
+                                ;;
+                            5)
+                                printf "\033[1;36m↩ VOLVER\033[0m\n\n"
+                                printf "Regresa al menú principal.\n"
+                                ;;
+                        esac'
+                    accion=$(echo -e "1. 📈 Rendimiento del Sistema\n2. 🌐 Redes y puertos abiertos\n3. ⚙️ Análisis de Servicios\n4. 💽 Análisis de Disco\n5. ↩ Volver" | \
+                        stk_fzf_ejecutar "Seleccione" "MONITORIZACIÓN" "MONITORIZACIÓN" \
+                        --ansi \
+                        --height=80% \
+                        --layout=reverse \
+                        --no-sort \
+                        --border=rounded \
+                        --border-label=" MONITORIZACIÓN " \
+                        --prompt="➤ Seleccione: " \
+                        --header="MONITORIZACIÓN  ·  Shift+↑/↓ desplaza preview" \
+                        --color="$FZF_COLORES" \
+                        --preview="bash -c $(printf '%q' "$preview_mon") _ {}" \
+                        --preview-window="right:55%:wrap")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_dash4me ;;
@@ -1232,7 +1285,41 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                             # --- SUBMENÚ FUSIONADO DE REDES ---
                             while true; do
                                 stk_limpiar
-                                red_accion=$(echo -e "1. Información de red\n2. Escaneo de redes y puertos abiertos (LOCALSCAN4ME)\n3. ↩ Volver" | stk_fzf_menu "Seleccione" "REDES Y PUERTOS ABIERTOS")
+                                local preview_red='
+                                    sel="$1"
+                                    case "${sel%%.*}" in
+                                        1)
+                                            printf "\033[1;36m🌐 INFORMACIÓN DE RED\033[0m\n\n"
+                                            printf "Resumen de conectividad del equipo.\n\n"
+                                            printf "\033[33mMuestra:\033[0m\n"
+                                            printf "  • Interfaz activa, IP local/pública\n"
+                                            printf "  • Puerta de enlace, DNS, estado Internet\n"
+                                            printf "  • Detalle por interfaz (RX/TX, Wi-Fi)\n"
+                                            ;;
+                                        2)
+                                            printf "\033[1;36m🔎 LOCALSCAN4ME\033[0m\n\n"
+                                            printf "Escaneo de red local y puertos.\n\n"
+                                            printf "\033[33mMuestra:\033[0m\n"
+                                            printf "  • Dispositivos en la red local\n"
+                                            printf "  • Puertos abiertos/servicios detectados\n"
+                                            ;;
+                                        3)
+                                            printf "\033[1;36m↩ VOLVER\033[0m\n\nRegresa a Monitorización.\n"
+                                            ;;
+                                    esac'
+                                red_accion=$(echo -e "1. 🌐 Información de red\n2. 🔎 Escaneo de red y puertos (LOCALSCAN4ME)\n3. ↩ Volver" | \
+                                    stk_fzf_ejecutar "Seleccione" "REDES Y PUERTOS" "REDES Y PUERTOS" \
+                                    --ansi \
+                                    --height=80% \
+                                    --layout=reverse \
+                                    --no-sort \
+                                    --border=rounded \
+                                    --border-label=" REDES Y PUERTOS " \
+                                    --prompt="➤ Seleccione: " \
+                                    --header="REDES Y PUERTOS  ·  Shift+↑/↓ desplaza preview" \
+                                    --color="$FZF_COLORES" \
+                                    --preview="bash -c $(printf '%q' "$preview_red") _ {}" \
+                                    --preview-window="right:55%:wrap")
                                 if [[ $? -ne 0 || "$red_accion" == *"Volver"* ]]; then break; fi
                                 case ${red_accion%%.*} in
                                     1) mostrar_info_red ;;
@@ -1249,7 +1336,52 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             2) # --- SUBMENÚ SEGURIDAD ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Analisis de Procesos\n2. Auditoría de Seguridad\n3. Gestor de Firewall UFW\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SEGURIDAD")
+                    local preview_sec='
+                        sel="$1"
+                        case "${sel%%.*}" in
+                            1)
+                                printf "\033[1;36m🔍 ANÁLISIS DE PROCESOS\033[0m\n\n"
+                                printf "Investigador de procesos y amenazas (PROC4ME).\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Revisar procesos en ejecución\n"
+                                printf "  • Detectar comportamientos sospechosos\n"
+                                printf "  • Inspeccionar consumo y origen\n"
+                                ;;
+                            2)
+                                printf "\033[1;36m🛡️ AUDITORÍA DE SEGURIDAD\033[0m\n\n"
+                                printf "Revisión de seguridad del sistema.\n\n"
+                                printf "\033[33mComprueba:\033[0m\n"
+                                printf "  • Usuarios, contraseñas y privilegios\n"
+                                printf "  • Puertos, firewall y SSH\n"
+                                printf "  • SUID, MAC, parámetros del kernel\n\n"
+                                printf "\033[32mResultado:\033[0m Puntuación y sugerencias de acción.\n"
+                                ;;
+                            3)
+                                printf "\033[1;36m🔥 GESTOR DE FIREWALL UFW\033[0m\n\n"
+                                printf "Control del cortafuegos (STOP4ME).\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Ver estado y reglas UFW\n"
+                                printf "  • Gestionar puertos y perfiles\n"
+                                printf "  • Detectar tráfico sospechoso\n"
+                                ;;
+                            4)
+                                printf "\033[1;36m↩ VOLVER\033[0m\n\n"
+                                printf "Regresa al menú principal.\n"
+                                ;;
+                        esac'
+                    accion=$(echo -e "1. 🔍 Análisis de Procesos\n2. 🛡️ Auditoría de Seguridad\n3. 🔥 Gestor de Firewall UFW\n4. ↩ Volver" | \
+                        stk_fzf_ejecutar "Seleccione" "SEGURIDAD" "SEGURIDAD" \
+                        --ansi \
+                        --height=80% \
+                        --layout=reverse \
+                        --no-sort \
+                        --border=rounded \
+                        --border-label=" SEGURIDAD " \
+                        --prompt="➤ Seleccione: " \
+                        --header="SEGURIDAD  ·  Shift+↑/↓ desplaza preview" \
+                        --color="$FZF_COLORES" \
+                        --preview="bash -c $(printf '%q' "$preview_sec") _ {}" \
+                        --preview-window="right:55%:wrap")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) ejecutar_proc4me ;;
@@ -1262,7 +1394,55 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             3) # --- SUBMENÚ SOFTWARE ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Actualización del Sistema\n2. Instalador por categorías (INSTALL4ME)\n3. Instalar / Desinstalar programa\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "SOFTWARE")
+                    local preview_soft='
+                        sel="$1"
+                        case "${sel%%.*}" in
+                            1)
+                                printf "\033[1;36m🔄 ACTUALIZACIÓN DEL SISTEMA (ASISTIDA)\033[0m\n\n"
+                                printf "Actualización interactiva: tú decides.\n\n"
+                                printf "\033[33mIncluye:\033[0m\n"
+                                printf "  • Repositorios y paquetes del sistema\n"
+                                printf "  • Flatpak y Snap si están instalados\n"
+                                printf "  • Preguntas/prompts de configuración visibles\n\n"
+                                printf "\033[33mProtecciones:\033[0m\n"
+                                printf "  • Timeouts de red/bloqueo APT\n"
+                                printf "  • Si falla APT, ofrece reparar con dpkg\n\n"
+                                printf "\033[32mUso:\033[0m Cuando quieres control total sobre la actualización.\n"
+                                ;;
+                            2)
+                                printf "\033[1;36m📦 INSTALL4ME\033[0m\n\n"
+                                printf "Instalador por categorías.\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Instalar software desde repos, Flatpak, GitHub, AUR\n"
+                                printf "  • Navegar por categorías de aplicaciones\n\n"
+                                printf "\033[32mUso:\033[0m Descubrir e instalar programas guiado por menús.\n"
+                                ;;
+                            3)
+                                printf "\033[1;36m➕ INSTALAR / DESINSTALAR\033[0m\n\n"
+                                printf "Gestión rápida de un paquete por nombre.\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Instalar un programa indicando su nombre\n"
+                                printf "  • Desinstalar un programa existente\n\n"
+                                printf "\033[32mUso:\033[0m Cuando ya sabes el nombre exacto del paquete.\n"
+                                ;;
+                            4)
+                                printf "\033[1;36m↩ VOLVER\033[0m\n\n"
+                                printf "Regresa al menú principal.\n"
+                                ;;
+                        esac'
+                    accion=$(echo -e "1. 🔄 Actualización del Sistema (Asistida)\n2. 📦 Instalador por categorías (INSTALL4ME)\n3. ➕ Instalar / Desinstalar programa\n4. ↩ Volver" | \
+                        stk_fzf_ejecutar "Seleccione" "SOFTWARE" "SOFTWARE" \
+                        --ansi \
+                        --height=80% \
+                        --layout=reverse \
+                        --no-sort \
+                        --border=rounded \
+                        --border-label=" SOFTWARE " \
+                        --prompt="➤ Seleccione: " \
+                        --header="SOFTWARE  ·  Shift+↑/↓ desplaza preview" \
+                        --color="$FZF_COLORES" \
+                        --preview="bash -c $(printf '%q' "$preview_soft") _ {}" \
+                        --preview-window="right:55%:wrap")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) Actualizar_sistema ;;
@@ -1285,13 +1465,58 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             4) # --- SUBMENÚ ADMINISTRACIÓN ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Gestión de Usuarios\n2. Gestión de Servicios\n3. Gestión de Backups\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "ADMINISTRACIÓN")
+                    local preview_admin='
+                        sel="$1"
+                        case "${sel%%.*}" in
+                            1)
+                                printf "\033[1;36m👤 GESTIÓN DE USUARIOS\033[0m\n\n"
+                                printf "Administración de cuentas del sistema.\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Listar usuarios humanos\n"
+                                printf "  • Crear usuarios y asignar permisos\n"
+                                printf "  • Modificar roles (estándar/admin)\n"
+                                printf "  • Eliminar usuarios\n"
+                                ;;
+                            2)
+                                printf "\033[1;36m⚙️ GESTIÓN DE SERVICIOS\033[0m\n\n"
+                                printf "Control de servicios systemd.\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Ver servicios fallidos/activos\n"
+                                printf "  • Reiniciar, detener o ver estado\n"
+                                printf "  • Consultar logs (journalctl)\n"
+                                printf "  • Habilitar/deshabilitar en arranque\n"
+                                ;;
+                            3)
+                                printf "\033[1;36m💾 GESTIÓN DE BACKUPS\033[0m\n\n"
+                                printf "Copias de seguridad locales y perfiles.\n\n"
+                                printf "\033[33mPermite:\033[0m\n"
+                                printf "  • Crear backups comprimidos (.tar.gz)\n"
+                                printf "  • Restaurar, inspeccionar o eliminar backups\n"
+                                printf "  • Sincronización con COPY4ME/rsync\n"
+                                ;;
+                            4)
+                                printf "\033[1;36m↩ VOLVER\033[0m\n\n"
+                                printf "Regresa al menú principal.\n"
+                                ;;
+                        esac'
+                    accion=$(echo -e "1. 👤 Gestión de Usuarios\n2. ⚙️ Gestión de Servicios\n3. 💾 Gestión de Backups\n4. ↩ Volver" | \
+                        stk_fzf_ejecutar "Seleccione" "ADMINISTRACIÓN" "ADMINISTRACIÓN" \
+                        --ansi \
+                        --height=80% \
+                        --layout=reverse \
+                        --no-sort \
+                        --border=rounded \
+                        --border-label=" ADMINISTRACIÓN " \
+                        --prompt="➤ Seleccione: " \
+                        --header="ADMINISTRACIÓN  ·  Shift+↑/↓ desplaza preview" \
+                        --color="$FZF_COLORES" \
+                        --preview="bash -c $(printf '%q' "$preview_admin") _ {}" \
+                        --preview-window="right:55%:wrap")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) gestionar_usuarios ;;
                         2) gestionar_servicios ;;
-                        3) hacer_backup;;  
-                                        
+                        3) hacer_backup ;;
                     esac
                 done
                 ;;
@@ -1356,13 +1581,13 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
                     accion=$(echo -e "1. 🧹 Limpieza auto\n2. ✋ Limpieza manual\n3. 📜 Bitácora de STK\n4. 📦 Logs de actualizaciones\n5. 🔄 Rotar logs\n6. ↩ Volver" | \
                         stk_fzf_ejecutar "Seleccione" "MANTENIMIENTO" "MANTENIMIENTO" \
                         --ansi \
-                        --height=~60% \
+                        --height=80% \
                         --layout=reverse \
                         --no-sort \
                         --border=rounded \
                         --border-label=" MANTENIMIENTO " \
                         --prompt="➤ Seleccione: " \
-                        --header="MANTENIMIENTO" \
+                        --header="MANTENIMIENTO  ·  Shift+↑/↓ desplaza preview" \
                         --color="$FZF_COLORES" \
                         --preview="bash -c $(printf '%q' "$preview_mant") _ {}" \
                         --preview-window="right:55%:wrap")
