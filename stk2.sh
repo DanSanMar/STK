@@ -158,6 +158,31 @@ ver_logs() {
     echo ""
     read -p "Presione Enter para volver..."
 }
+ver_logs_actualizaciones() {
+    stk_limpiar
+    mostrar_logo
+
+    if [ -f "$LOG_FILE" ]; then
+        pintar "$CIAN" "--- Últimas 20 entradas de actualizaciones ---"
+        echo -e "${AMARILLO}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+        local coincidencias
+        # Filtramos por "actualizaci" para capturar Actualización, actualización y ACTUALIZACIÓN
+        coincidencias=$(grep -i 'actualizaci' "$LOG_FILE" | tail -n 20)
+        if [ -n "$coincidencias" ]; then
+            echo "$coincidencias" | awk '
+                /\[INFO\]/ {print "\033[32m" $0 "\033[0m"}
+                /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
+                /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
+            '
+        else
+            pintar "$AMARILLO" "No hay registros de actualizaciones en la bitácora."
+        fi
+    else
+        pintar "$ROJO" "Aún no hay registros."
+    fi
+    echo ""
+    read -p "Presione Enter para volver..."
+}
 
 # --- COMPROBACIÓN DE SUDO ---
 if [ "$EUID" -ne 0 ]; then
@@ -1231,12 +1256,13 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
             5) # --- SUBMENÚ MANTENIMIENTO ---
                 while true; do
                     stk_limpiar
-                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Rotación archivos de log\n4. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
+                    accion=$(echo -e "1. Superlimpieza del Sistema\n2. Ver Bitácora (Logs)\n3. Ver logs de actualizaciones\n4. Rotación archivos de log\n5. ↩ Volver" | stk_fzf_menu "Seleccione" "MANTENIMIENTO")
                     if [[ $? -ne 0 || "$accion" == *"Volver"* ]]; then break; fi
                     case ${accion%%.*} in
                         1) stk_limpieza completa ;;
                         2) ver_logs ;;
-                        3) rotar_logs ;;
+                        3) ver_logs_actualizaciones ;;
+                        4) rotar_logs ;;
                     esac                   
                 done
                 ;;
@@ -1259,7 +1285,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
 # --- CONFIGURACIÓN DEL MODO AUTOMÁTICO ---
 AUTO_MIN_ESPACIO_MB=1024          # Espacio libre mínimo en / para actualizar
-AUTO_TIMEOUT_ACTUALIZACION=1800   # 30 min para el bloque de actualización
+AUTO_TIMEOUT_ACTUALIZACION=3600   # 60 min para el bloque de actualización
 AUTO_TIMEOUT_LIMPIEZA=600         # 10 min por comando de limpieza
 AUTO_LIMPIEZA_LOG_DIAS=7          # Retención de logs del journal (limpieza segura)
 AUTO_LIMITE_SUID=60               # Umbral de binarios SUID considerados anormales en auditoria
@@ -1901,24 +1927,44 @@ Actualizar_sistema() {
         case "$Package" in
             apt)
                 pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
-                DEBIAN_FRONTEND=noninteractive apt-get update -y && \
-                DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y && \
-                apt-get autoremove -y
+                local APT_NET_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120)
+
+                apt-get update -y "${APT_NET_OPTS[@]}"
+                apt-get full-upgrade "${APT_NET_OPTS[@]}"
                 ESTADO_ACTUALIZACION=$?
+
+                if [ $ESTADO_ACTUALIZACION -ne 0 ]; then
+                    echo ""
+                    pintar $AMARILLO "⚠️ La actualización terminó con errores (código $ESTADO_ACTUALIZACION)."
+                    read -r -p "¿Deseas intentar reparar el gestor con dpkg --configure -a? (s/N): " reparar
+                    if [[ "$reparar" == "s" || "$reparar" == "S" ]]; then
+                        dpkg --configure -a
+                        ESTADO_ACTUALIZACION=$?
+                    fi
+                fi
+
+                echo ""
+                pintar $AZUL "🧹 Comprobando paquetes huérfanos..."
+                apt-get autoremove
                 ;;
             dnf)
                 pintar $VERDE "Actualizando sistema (DNF)..."
-                dnf upgrade --refresh -y && dnf autoremove -y
+                dnf upgrade --refresh
                 ESTADO_ACTUALIZACION=$?
+                if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
+                    echo ""
+                    pintar $AZUL "🧹 Comprobando paquetes huérfanos..."
+                    dnf autoremove
+                fi
                 ;;
             pacman)
                 pintar $VERDE "Sincronizando repositorios y sistema (PACMAN)..."
-                pacman -Syu --noconfirm
+                pacman -Syu
                 ESTADO_ACTUALIZACION=$?
                 ;;
             zypper)
                 pintar $VERDE "Refrescando y actualizando (ZYPPER)..."
-                zypper refresh && zypper update -y
+                zypper refresh && zypper update
                 ESTADO_ACTUALIZACION=$?
                 ;;
             *)
@@ -1934,7 +1980,7 @@ Actualizar_sistema() {
     if command -v flatpak &>/dev/null; then
         echo ""
         pintar $AZUL "📦 Actualizando paquetes Flatpak..."
-        flatpak update -y
+        flatpak update
     fi
 
     # 3. Actualización opcional para paquetes Snap (si está instalado)

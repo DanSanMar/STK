@@ -21,7 +21,7 @@
 
 # Días de retención de logs del journal en la limpieza automática.
 : "${AUTO_LIMPIEZA_LOG_DIAS:=7}"
-: "${AUTO_TIMEOUT_ACTUALIZACION:=1800}"
+: "${AUTO_TIMEOUT_ACTUALIZACION:=3600}"
 : "${AUTO_TIMEOUT_LIMPIEZA:=600}"
 : "${AUTO_MIN_ESPACIO_MB:=1024}"
 : "${AUTO_LIMITE_SUID:=60}"
@@ -313,6 +313,7 @@ stk_actualizar() {
 
     local DEBIAN_FRONTEND_SAVE="${DEBIAN_FRONTEND:-}"
     export DEBIAN_FRONTEND=noninteractive
+    export NEEDRESTART_MODE=a
 
     if [ "${IMMUTABLE:-false}" = true ]; then
         "${TMO_ACT[@]}" rpm-ostree upgrade 2>&1 | tee "$LOG_TEMP_ACT"
@@ -321,10 +322,22 @@ stk_actualizar() {
         case "${Package:-unknown}" in
             apt)
                 mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
-                "${TMO_ACT[@]}" bash -c 'apt-get update -y && apt-get full-upgrade -y \
+                "${TMO_ACT[@]}" bash -c 'apt-get update -y \
+                    -o Acquire::http::Timeout=30 \
+                    -o Acquire::https::Timeout=30 \
+                    -o DPkg::Lock::Timeout=120 \
+                    && apt-get full-upgrade -y \
                     -o Dpkg::Options::="--force-confdef" \
-                    -o Dpkg::Options::="--force-confold"' 2>&1 | tee "$LOG_TEMP_ACT"
+                    -o Dpkg::Options::="--force-confold" \
+                    -o Acquire::http::Timeout=30 \
+                    -o Acquire::https::Timeout=30 \
+                    -o DPkg::Lock::Timeout=120' 2>&1 | tee "$LOG_TEMP_ACT"
                 ESTADO_ACT=${PIPESTATUS[0]}
+                if [ "$ESTADO_ACT" -ne 0 ]; then
+                    echo "⚠️ Fallo en APT. Intentando reparar con dpkg --configure -a..." | tee -a "$LOG_TEMP_ACT"
+                    "${TMO_ACT[@]}" dpkg --configure -a 2>&1 | tee -a "$LOG_TEMP_ACT"
+                    ESTADO_ACT=${PIPESTATUS[0]}
+                fi
                 ;;
             pacman)
                 "${TMO_ACT[@]}" pacman -Syu --noconfirm --color never 2>&1 | tee "$LOG_TEMP_ACT"
@@ -394,6 +407,7 @@ stk_actualizar() {
     fi
 
     [ -n "$DEBIAN_FRONTEND_SAVE" ] && export DEBIAN_FRONTEND="$DEBIAN_FRONTEND_SAVE" || unset DEBIAN_FRONTEND
+    unset NEEDRESTART_MODE
 
     # Antes de borrar el log volátil, rescatamos errores y avisos.
     stk_extraer_incidencias "$LOG_TEMP_ACT" "$LOG_ERR"
