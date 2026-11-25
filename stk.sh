@@ -161,7 +161,7 @@ registrar_log() {
     local MENSAJE="${2}"
     local FECHA
     FECHA=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     # Formato: [FECHA] [NIVEL] [USUARIO] - MENSAJE
     echo "[$FECHA] [$NIVEL] [$USER] - $MENSAJE" >> "$LOG_FILE"
 }
@@ -229,7 +229,7 @@ rotar_logs() {
 ver_logs() {
     stk_limpiar
     mostrar_logo
-    
+
     if [ -f "$LOG_FILE" ]; then
         pintar "$CIAN" "--- BITÁCORA GENERAL (últimas 20 entradas) ---"
         pintar "$AZUL" "Incluye todos los eventos registrados por STK."
@@ -239,7 +239,7 @@ ver_logs() {
             /\[WARN\]/ {print "\033[33m" $0 "\033[0m"}
             /\[ERROR\]/ {print "\033[31m" $0 "\033[0m"}
         '
-        
+
         # === NUEVO: Mostrar también logs del CRON ===
         local CRON_LOG="/var/log/stk_cron.log"
         if [ -f "$CRON_LOG" ] && [ -s "$CRON_LOG" ]; then
@@ -308,7 +308,7 @@ get_package_name() {
                 *)   echo "cronie" ;;
             esac
             ;;
-        "host") 
+        "host")
             case "$Package" in
                 apt)    echo "bind9-dnsutils" ;;
                 pacman) echo "bind" ;;
@@ -338,11 +338,11 @@ get_package_name() {
                 echo "hostname"
             fi
             ;;
-        "js") 
+        "js")
             case "$Package" in
                 pacman) echo "js128" ;;
                 apt)    echo "nodejs" ;;
-                dnf)    echo "nodejs" ;; # Cambiado de mozjs115 a nodejs, pero mantenemos la lógica por si cambia 
+                dnf)    echo "nodejs" ;; # Cambiado de mozjs115 a nodejs, pero mantenemos la lógica por si cambia
                 *)      echo "nodejs" ;;
             esac
             ;;
@@ -1512,7 +1512,7 @@ auditoria_seguridad() {
                 pname = (proc[2] != "") ? proc[2] : "Desconocido";
                 print "  • Local: " $4 " -> Proceso: " pname
             }'
-            
+
             # Chequeo específico de SSH expuesto públicamente
             if echo "$listening_ports" | grep -E "0\.0\.0\.0:22|:::22|\*:22" &>/dev/null; then
                 sugerencias+=("🌐 SSH Expuesto: Cambia el puerto por defecto (22) o restringe accesos en /etc/ssh/sshd_config.")
@@ -1609,7 +1609,7 @@ auditoria_seguridad() {
     suid_files=$(find /usr/bin /usr/sbin /bin /sbin -perm -4000 2>/dev/null)
     local suid_count
     suid_count=$(echo "$suid_files" | grep -c -v '^$')
-    
+
     echo -e "  • Total de ejecutables SUID detectados: ${BLANCO}${suid_count}${RESET}"
     if [ "$suid_count" -gt "$AUTO_LIMITE_SUID" ]; then
         pintar $AMARILLO "  ⚠️ Umbral alto de binarios SUID detectado."
@@ -1679,12 +1679,12 @@ auditoria_seguridad() {
     # ==========================================
     local score=0
     [ "$total_checks" -gt 0 ] && score=$(( (checks_passed * 100) / total_checks ))
-    
+
     echo -e "${CIAN}====================================================${RESET}"
     pintar $BLANCO "📊 BALANCE Y PUNTUACIÓN DE SEGURIDAD:"
     echo -e "  • Pruebas superadas: ${VERDE}${checks_passed}/${total_checks}${RESET}"
     echo -e "  • Alertas encontradas: ${ROJO_BRILLANTE}${alertas_count}${RESET}"
-    
+
     if [ "$score" -ge 80 ]; then
         echo -e "  • Nivel del sistema: ${VERDE_BRILLANTE}${score}% (SEGURO)${RESET}"
     elif [ "$score" -ge 50 ]; then
@@ -1705,7 +1705,7 @@ auditoria_seguridad() {
     echo -e "${CIAN}====================================================${RESET}"
 
     registrar_log "$LOG_INFO" "Auditoría completada. Score: ${score}% ($checks_passed/$total_checks). Alertas: $alertas_count"
-    
+
     trap - SIGINT
     echo ""
     read -p "Presione Enter para volver al menú..."
@@ -1825,10 +1825,10 @@ Actualizar_sistema() {
 instalar_programa() {
     trap "stk_limpiar; return" SIGINT
     stk_limpiar
-    mostrar_logo 
+    mostrar_logo
     echo ""
     read -p "Escriba el nombre del programa que desea instalar/actualizar: " programa
-    
+
     # Validar que el usuario no dejó el nombre vacío
     if [[ -z "$programa" ]]; then
         pintar $ROJO "⚠️ No escribió ningún nombre. Intenteló otra vez."
@@ -1840,7 +1840,7 @@ instalar_programa() {
             sleep 2
             return 1
     fi
-  
+
     echo ""
     local GESTOR_MOSTRAR="$Package"
     [ "$IMMUTABLE" = true ] && GESTOR_MOSTRAR="rpm-ostree (inmutable)"
@@ -1909,10 +1909,10 @@ instalar_programa() {
 desinstalar_programa() {
     trap "stk_limpiar; return" SIGINT
     stk_limpiar
-    mostrar_logo 
+    mostrar_logo
     echo ""
     read -p "Escriba el nombre del programa que desea desinstalar: " programa
-    
+
     if [[ -z "$programa" ]]; then
         pintar $ROJO "⚠️ No escribió ningún nombre."
         sleep 2
@@ -1923,7 +1923,7 @@ desinstalar_programa() {
         sleep 2
         return 1
     fi
-  
+
     echo -e "${ROJO}➤ Preparando para eliminar:${RESET} ${AZUL}$programa${RESET}"
     echo ""
 
@@ -2017,21 +2017,21 @@ gestionar_usuarios() {
     while true; do
         stk_limpiar
         mostrar_logo
-        
+
         local opciones="1. 📋 Listar usuarios humanos\n2. ➕ Crear usuario (Con permisos)\n3. 🛡️ Modificar permisos de usuario\n4. 🗑️ Eliminar usuario\n5. ↩ Volver"
         local seleccion_users
         seleccion_users=$(echo -e "$opciones" | fzf_estilo "Acción" "G E S T I Ó N  D E  U S U A R I O S")
-        
-        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* || -z "$seleccion_users" ]]; then 
-            break 
+
+        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* || -z "$seleccion_users" ]]; then
+            break
         fi
 
         case ${seleccion_users:0:1} in
-            1) 
-                listar_usuarios 
+            1)
+                listar_usuarios
                 ;;
 
-            2) 
+            2)
                 local user
                 user=$(pedir_nombre)
                 if [ -n "$user" ]; then
@@ -2055,9 +2055,9 @@ gestionar_usuarios() {
                     if [ $status_creacion -eq 0 ]; then
                         pintar $AMARILLO "🔑 Establezca la contraseña para $user:"
                         passwd "$user"
-                        
+
                         registrar_log "$LOG_INFO" "Usuario creado: $user"
-                        
+
                         echo ""
                         pintar $CIAN "--- ASIGNACIÓN INICIAL DE PERMISOS ---"
                         modificar_permisos_usuario "$user"
@@ -2066,14 +2066,14 @@ gestionar_usuarios() {
                         registrar_log "$LOG_ERR" "Fallo al crear usuario: $user"
                     fi
                 fi
-                read -p "Presione Enter para continuar..." 
+                read -p "Presione Enter para continuar..."
                 ;;
 
             3)
                 stk_limpiar
                 mostrar_logo
                 pintar $CIAN "--- MODIFICAR PERMISOS DE USUARIOS ---"
-                
+
                 # Obtener listado de usuarios humanos (UID >= 1000)
                 local lista_users
                 lista_users=$(cut -d: -f1,3 /etc/passwd | awk -F: '$2 >= 1000 && $2 < 60000 {print $1}')
@@ -2089,7 +2089,7 @@ gestionar_usuarios() {
                 if [ -n "$user_sel" ]; then
                     local grupo_admin
                     grupo_admin=$(obtener_grupo_sudo)
-                    
+
                     echo -e "\n${AMARILLO}Usuario seleccionado:${RESET} ${BLANCO}$user_sel${RESET}"
                     if id -nG "$user_sel" | grep -qw "$grupo_admin"; then
                         echo -e "${AMARILLO}Estado actual:${RESET} ${VERDE_BRILLANTE}ADMINISTRADOR ($grupo_admin)${RESET}\n"
@@ -2102,7 +2102,7 @@ gestionar_usuarios() {
                 fi
                 ;;
 
-            4) 
+            4)
                 local user
                 user=$(pedir_nombre)
                 if [ -n "$user" ]; then
@@ -2115,25 +2115,25 @@ gestionar_usuarios() {
                     echo ""
                     echo -ne "${ROJO_BRILLANTE}⚠️ ¿Está seguro que desea eliminar el usuario $user y su carpeta /home? (s/N): ${RESET}"
                     read -r conf
-                    
+
                     if [[ "$conf" == "s" || "$conf" == "S" ]]; then
                         pintar $ROJO "➤ Eliminando usuario $user..."
-                        
+
                         # Matar procesos del usuario antes de borrarlo para evitar bloqueos
                         pkill -u "$user" 2>/dev/null
-                        
+
                         if [[ "$Package" == "apt" ]]; then
                             deluser --remove-home "$user" 2>/dev/null && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                         else
                             userdel -r "$user" 2>/dev/null && registrar_log "$LOG_WARN" "Usuario eliminado: $user"
                         fi
-                        
+
                         pintar $VERDE "✔ Usuario '$user' eliminado correctamente."
                     else
                         pintar $AZUL "Operación cancelada."
                     fi
                 fi
-                read -p "Presione Enter para continuar..." 
+                read -p "Presione Enter para continuar..."
                 ;;
         esac
     done
@@ -2158,38 +2158,38 @@ listar_usuarios() {
 }
 
 pedir_nombre() {
-    
+
     local nombre=""
     while [ -z "$nombre" ]; do
         read -p "Ingrese nombre de usuario: " nombre
-        
+
         if [ -z "$nombre" ]; then
             echo -e "${AMARILLO}⚠️ El nombre no puede estar vacío. Inténtelo de nuevo.${RESET}" >&2
             continue
         fi
-        
-        
+
+
         if [[ ! "$nombre" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
             echo -e "${ROJO}⚠️ El nombre contiene caracteres no válidos.${RESET}" >&2
             sleep 2
             nombre="" # Vaciamos para que el bucle vuelva a pedirlo
         fi
     done
-    echo "$nombre"  
+    echo "$nombre"
 }
 
 gestionar_servicios() {
     trap "stk_limpiar; return" SIGINT
     while true; do
-        
+
         stk_limpiar
         mostrar_logo
         pintar $MAGENTA "--- PANEL DE CONTROL DE SERVICIOS (Systemd) ---"
         echo -e "${BLANCO}Seleccione un estado para filtrar servicios:${RESET}"
-        
+
         # Menú de filtro usando fzf
         local filtro=$(echo -e "1. Ver servicios FALLIDOS (Error)\n2. Ver todos los servicios ACTIVOS\n3. Buscar un servicio específico\n4. ↩ Volver" | fzf_estilo "Filtrar por" "F I L T R O  D E  S E R V I C I O S")
-        
+
         case ${filtro:0:1} in
             1) listado=$(systemctl list-units --state=failed --no-legend --plain | awk '{print $1}') ;;
             2) listado=$(systemctl list-units --type=service --state=running --no-legend --plain | awk '{print $1}') ;;
@@ -2215,18 +2215,18 @@ menu_operaciones_servicio() {
     local svc=$1
     trap "stk_limpiar; return" SIGINT
     while true; do
-        
+
         stk_limpiar
         pintar $CIAN "⚙️ Gestionando: $svc"
         echo "------------------------------------------------"
         # Mostramos el estado actual muy brevemente para tener contexto
         systemctl status "$svc" --no-pager | grep -E "Active:|Main PID:|Tasks:"
         echo "------------------------------------------------"
-        
+
         local accion=$(echo -e "1. Reiniciar (Restart)\n2. Detener (Stop)\n3. Ver Logs (Journalctl -u)\n4. Ver Estado Completo (Status)\n5. Habilitar/Deshabilitar (Enable/Disable)\n6. ↩ Volver" | fzf_estilo "Acción" "O P E R A C I O N E S :  $svc")
 
         case ${accion:0:1} in
-            1) 
+            1)
                 echo -ne "${AMARILLO}🔄 Reiniciando $svc...${RESET}"
                 if systemctl restart "$svc"; then
                     registrar_log "$LOG_WARN" "Servicio REINICIADO: $svc"
@@ -2238,7 +2238,7 @@ menu_operaciones_servicio() {
                     sleep 2
                 fi
                 ;;
-            2) 
+            2)
                 echo -ne "${ROJO}🛑 Deteniendo $svc...${RESET}"
                 if systemctl stop "$svc"; then
                     registrar_log "$LOG_WARN" "Servicio DETENIDO: $svc"
@@ -2249,14 +2249,14 @@ menu_operaciones_servicio() {
                     sleep 2
                 fi
                 ;;
-            3) 
+            3)
                 pintar $AZUL "📄 Mostrando últimas 50 líneas de log (Journal)..."
                 echo "------------------------------------------------"
                 journalctl -u "$svc" -n 50 --no-pager
                 echo "------------------------------------------------"
                 read -p "Presione Enter para volver a la gestión de $svc..."
                 ;;
-            4) 
+            4)
                 pintar $AZUL "📋 Estado completo de $svc:"
                 echo "------------------------------------------------"
                 # Forzamos --no-pager para que no se bloquee y no necesite Ctrl+C
@@ -2335,7 +2335,7 @@ eliminar_perfil_json() {
 verificar_espacio() {
     local origen="$1"
     local destino="$2"
-    
+
     # CORRECCIÓN 7: Obtener el punto de montaje existente más cercano si el destino no existe aún
     local dest_dir="$destino"
     while [ ! -d "$dest_dir" ] && [ "$dest_dir" != "/" ]; do
@@ -2346,10 +2346,10 @@ verificar_espacio() {
     tam_origen=$(du -sk "$origen" 2>/dev/null | cut -f1)
     local disp_destino
     disp_destino=$(df -k "$dest_dir" 2>/dev/null | tail -n 1 | awk '{print $4}')
-    
+
     tam_origen=${tam_origen:-0}
     disp_destino=${disp_destino:-0}
-    
+
     [ "$disp_destino" -gt "$tam_origen" ]
 }
 
@@ -2530,7 +2530,7 @@ restaurar_backup() {
         if [[ "$confirmar" == "s" || "$confirmar" == "S" ]]; then
             echo -e "\n${AZUL}🔄 Extrayendo archivos...${RESET}"
             mostrar_spinner & SPINNER_PID=$!
-            
+
             tar -xzpf "$seleccion" -C "$ruta_extraccion" > /tmp/stk_restore_err 2>&1
             local EXIT_CODE=$?
 
@@ -2710,7 +2710,7 @@ copy4me_tui_main() {
                 local perfiles
                 perfiles=$(obtener_perfiles_json)
                 local opts_orig="🔍 [NUEVO] Explorar carpetas con FZF\n"
-                
+
                 if [ -n "$perfiles" ]; then
                     while read -r p; do
                         # CORRECCIÓN 3: Uso seguro de --arg en jq para nombres de perfiles con espacios
@@ -2756,7 +2756,7 @@ copy4me_tui_main() {
                     if [[ "$sel_dest" == *"🔌 [Montaje detectado]"* ]]; then
                         local usb_root
                         usb_root=$(echo "$sel_dest" | sed 's/.*🔌 \[Montaje detectado\] //')
-                        
+
                         local sub_usb_opts="1. Usar raíz de la unidad ($usb_root/copy4me_backups/$nombre_perfil)\n2. 🔍 Navegar o crear subcarpeta con FZF"
                         local sel_sub_usb
                         sel_sub_usb=$(echo -e "$sub_usb_opts" | fzf_estilo "Opciones de montaje" "DIRECTORIO EN UNIDAD")
@@ -2839,13 +2839,13 @@ hacer_backup() {
         stk_limpiar
         mostrar_logo
         pintar $CIAN "--- GESTIÓN INTEGRAL DE COPIAS DE SEGURIDAD ---"
-        
+
         local opciones="1. 📁 Respaldo Local Automático (PC - Compressed .tar.gz)\n2. 🚀 COPY4ME TUI Engine (Rsync, USB y Perfiles)\n3. 📜 Ver Backups Locales Existentes\n4. 🗑️ Eliminar Backups Locales\n5. 🔄 Restaurar Backup Comprimido\n6. ↩ Volver al Menú Principal"
         local seleccion
         seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione opción" "G E S T I Ó N  D E  B A C K U P S")
 
         if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
-        
+
         case ${seleccion:0:1} in
             1) autocopy_atomatic ;;
             2) copy4me_tui_main ;;
@@ -2893,7 +2893,7 @@ salir() {
 ejecutar_stop4me() {
   # Obtiene el directorio donde vive ESTE script (garantiza que funcione sin importar desde dónde lo ejecutes)
   local DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  
+
   # Ejecuta el archivo pasándole argumentos
   bash "$DIR/stop4me.sh"
 }
@@ -2981,7 +2981,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 4. ⚙️ | ADMINISTRACIÓN  | Usuarios, servicios y backups
 5. 🧹 | MANTENIMIENTO   | Limpieza de sistema y logs
 6. 📅 | TAREAS AUTO     | Programar tareas automáticas
-7. ❌ | SALIR           | Control+C"            
+7. ❌ | SALIR           | Control+C"
 
         # Capturamos la selección
         seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione" "System Tool Kit")
@@ -2991,7 +2991,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
         # Extraemos solo el número antes del punto para el case
         case ${seleccion%%.*} in
-            
+
             0) # --- MODO AUTO ---
                 modo_auto
                 ;;
@@ -3006,7 +3006,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             5) menu_mantenimiento ;;
 
-            6) 
+            6)
                 # Gestor de tareas automatizadas
                 if [ -f "$SCRIPT_DIR/stk_cron.sh" ]; then
                     bash "$SCRIPT_DIR/stk_cron.sh"

@@ -3,9 +3,9 @@
 # Se carga desde stk.sh. No ejecuta nada por sí sola.
 # ==============================================================================
 
-pintar() { 
-    local COLOR="$1" 
-    local MENSAJE="$2" 
+pintar() {
+    local COLOR="$1"
+    local MENSAJE="$2"
     echo -e "${COLOR}${MENSAJE}${RESET}"
 }
 # Helpers de UI: unifican mensaje + pausa opcional. El segundo argumento
