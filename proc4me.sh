@@ -125,18 +125,30 @@ estado_tcp() {
     esac
 }
 
+# --- DASHBOARD Y PREVIEW DE MÓDULO (patrón STK) ---
+stk_dash_proc4me() {
+    echo -e "  ${AMARILLO}Módulo:${RESET} ${AZUL}PROC4ME${RESET}  ${AMARILLO}Modo:${RESET} ${AZUL}investigación${RESET}"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
+}
+
+stk_preview_proc4me() {
+    echo "Investigación de procesos, puertos y persistencia."
+}
+PREVIEW_PROC4ME="$(declare -f stk_preview_proc4me); stk_preview_proc4me \"\$1\""
+
 # --- ESTILOS FZF ---
 fzf_estilo() {
     local prompt_text="$1"
     local header_text="$2"
-    stk_fzf_ejecutar "$prompt_text" "$header_text" "" \
+    stk_fzf_ejecutar "$prompt_text" "$header_text" "System Tool Kit" \
         --ansi \
         --height=15 \
         --reverse \
         --border=rounded \
+        --border-label=" System Tool Kit " \
         --prompt="➤ $prompt_text: " \
         --header="$header_text" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff"
+        --color="$FZF_COLORES"
 }
 
 # Menú FZF con el logo como cabecera viva: se refresca cada 5 segundos.
@@ -149,18 +161,18 @@ proc4me_fzf_menu() {
     logo=$(logo_texto)
     printf -v logo_cmd 'bash %q --logo-header' "$SELF_PATH"
 
-    stk_fzf_ejecutar "$prompt_text" "$logo" "$titulo" \
+    stk_fzf_ejecutar "$prompt_text" "$logo" "System Tool Kit" \
         --ansi \
         --height="$altura" \
         --layout=reverse \
         --no-sort \
         --header-first \
         --border=rounded \
-        --border-label=" $titulo " \
+        --border-label=" System Tool Kit " \
         --prompt="➤ $prompt_text: " \
         --header="$logo" \
         --bind "every(5):bg-transform-header:$logo_cmd" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
+        --color="$FZF_COLORES"
 }
 
 # ==============================================================================
@@ -616,17 +628,17 @@ fzf_lista_educativa() {
 
     printf -v preview_cmd 'bash %q --preview-educativo %q {}' "$SELF_PATH" "$categoria"
 
-    stk_fzf_ejecutar "${prompt#➤ }" "$titulo" "$titulo" \
+    stk_fzf_ejecutar "${prompt#➤ }" "$titulo" "System Tool Kit" \
         --ansi \
         --height=85% \
         --min-height=20 \
         --layout=reverse \
         --border=rounded \
-        --border-label=" $titulo " \
+        --border-label=" System Tool Kit " \
         --prompt="$prompt" \
         --preview "$preview_cmd" \
-        --preview-window="right:55%:wrap" \
-        --color="border:#ff5555,pointer:#92ff92,header:#5fb2ff,label:#5fb2ff"
+        --preview-window="right:40%:wrap" \
+        --color="$FZF_COLORES"
 }
 
 ver_lista_educativa() {
