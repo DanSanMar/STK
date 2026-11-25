@@ -1,26 +1,42 @@
 #!/bin/bash
-# Verificador estático de stk.sh. No requiere root y NO ejecuta el script:
-# solo comprueba sintaxis, paridad, bloques, estilo e integridad de stk2.sh.
-# Uso: ./verificar_stk.sh
+# Verificador estático de stk.sh y sus librerías. No requiere root y NO
+# ejecuta el script: solo comprueba sintaxis, paridad, bloques, estilo e
+# integridad de stk2.sh. Uso: ./verificar_stk.sh
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STK="$DIR/stk.sh"
 REF="$DIR/stk2.sh"
+UI_LIB="$DIR/stk_ui_lib.sh"
+MENU_LIB="$DIR/stk_menu_lib.sh"
 HASH_REF="0f58edd5f53835fb201f6b8fcbfb6c4c86b697bda3a030499beea65d70e285d7"
 
 fallos=0
-ok()   { echo "[OK]     $1"; }
-mal()  { echo "[ERROR]  $1"; fallos=$((fallos + 1)); }
-aviso(){ echo "[AVISO]  $1"; }
+ok()    { echo "[OK]     $1"; }
+mal()   { echo "[ERROR]  $1"; fallos=$((fallos + 1)); }
+aviso() { echo "[AVISO]  $1"; }
 
 if [ ! -r "$STK" ]; then
     echo "[ERROR] No se encuentra $STK"
     exit 1
 fi
 
-# 1. Sintaxis
-if bash -n "$STK" 2>/dev/null; then ok "bash -n stk.sh"; else mal "bash -n stk.sh"; fi
-if [ -r "$REF" ] && bash -n "$REF" 2>/dev/null; then ok "bash -n stk2.sh"; else mal "bash -n stk2.sh"; fi
+TODOS=("$STK")
+for lib in "$UI_LIB" "$MENU_LIB"; do
+    if [ -r "$lib" ]; then
+        TODOS+=("$lib")
+    else
+        mal "No se encuentra $(basename "$lib")"
+    fi
+done
+
+# 1. Sintaxis de todos los archivos
+for f in "${TODOS[@]}" "$REF"; do
+    if bash -n "$f" 2>/dev/null; then
+        ok "bash -n $(basename "$f")"
+    else
+        mal "bash -n $(basename "$f")"
+    fi
+done
 
 # 2. stk2.sh intacto
 if [ -r "$REF" ]; then
@@ -30,14 +46,12 @@ if [ -r "$REF" ]; then
     else
         mal "stk2.sh ha cambiado (hash $actual)"
     fi
-else
-    mal "No se encuentra stk2.sh"
 fi
 
-# 3. Funciones: ninguna original perdida y sin duplicados
+# 3. Funciones: ninguna original perdida y sin duplicados en el conjunto
 if [ -r "$REF" ]; then
     ref_funcs=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$REF" | sort)
-    stk_funcs=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$STK" | sort)
+    stk_funcs=$(cat "${TODOS[@]}" | grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' | sort)
     perdidas=$(comm -23 <(echo "$ref_funcs") <(echo "$stk_funcs"))
     if [ -z "$perdidas" ]; then
         ok "funciones originales presentes ($(echo "$ref_funcs" | wc -l)/$(echo "$ref_funcs" | wc -l))"
@@ -46,45 +60,47 @@ if [ -r "$REF" ]; then
     fi
     dup=$(echo "$stk_funcs" | uniq -d)
     [ -z "$dup" ] && ok "sin funciones duplicadas" || mal "funciones duplicadas: $dup"
-    echo "[INFO]   total de funciones en stk.sh: $(echo "$stk_funcs" | wc -l)"
+    echo "[INFO]   total de funciones: $(echo "$stk_funcs" | wc -l)"
 fi
 
-# 4. Estructura de bloques
+# 4. Estructura de bloques (solo en stk.sh)
 bloques=$(grep -cE '^# [1-5]\. ' "$STK")
 [ "$bloques" -eq 5 ] && ok "5 bloques principales" || mal "bloques principales: $bloques (esperados 5)"
 grep -q '^# 5\.4 Arranque' "$STK" && ok "sección 5.4 Arranque" || mal "falta la sección 5.4 Arranque"
 
-# 5. Huecos excesivos y comentarios huérfanos
-huecos=$(awk 'NF==0 {if(!abierto){ini=NR; abierto=1}; next} abierto {if(NR-ini>=3) print ini "-" NR-1; abierto=0}' "$STK")
+# 5. Huecos excesivos y comentarios huérfanos en todos los archivos
+huecos=$(awk 'FNR==1{b=0} NF==0 {if(!abierto){ini=FNR; abierto=1}; next} abierto {if(FNR-ini>=3) print FILENAME ":" ini "-" FNR-1; abierto=0}' "${TODOS[@]}")
 [ -z "$huecos" ] && ok "sin tramos de 3+ líneas vacías" || mal "huecos excesivos: $huecos"
 
 huerfanos=$(awk '
+    FNR==1 {comentario_anterior=0; vacios=0}
     /^[[:space:]]*#/ {
-        if (vacios >= 2 && comentario_anterior) print NR-1
+        if (vacios >= 2 && comentario_anterior) print FILENAME ":" FNR-1
         comentario_anterior=1; vacios=0; next
     }
     NF==0 {vacios++; next}
     {comentario_anterior=0; vacios=0}
-' "$STK")
+' "${TODOS[@]}")
 [ -z "$huerfanos" ] && ok "sin comentarios huérfanos" || mal "comentarios huérfanos en: $huerfanos"
 
-# 6. Estilo de menús y selector
-sin_arrow=$(grep -nE '[0-9]+\. +Volver' "$STK")
+# 6. Estilo de menús y selector en todos los archivos
+sin_arrow=$(grep -nHE '[0-9]+\. +Volver' "${TODOS[@]}")
 [ -z "$sin_arrow" ] && ok "todas las opciones 'Volver' usan ↩" || mal "opciones 'Volver' sin arrow: $sin_arrow"
 
-directo=$(grep -nE '^[[:space:]]*[^#]*\|[[:space:]]*fzf([[:space:]]|$)|^[[:space:]]*fzf[[:space:]]' "$STK" | grep -v 'stk_fzf')
+directo=$(grep -nHE '^[[:space:]]*[^#]*\|[[:space:]]*fzf([[:space:]]|$)|^[[:space:]]*fzf[[:space:]]' "${TODOS[@]}" | grep -v 'stk_fzf')
 [ -z "$directo" ] && ok "ninguna llamada directa a fzf" || mal "llamadas directas a fzf: $directo"
 
 # 7. Estilo defensivo
-if grep -qE '^set -[eu]' "$STK"; then mal "set -e/set -u detectado"; else ok "sin set -e/set -u"; fi
+seteo=$(grep -nHE '^set -[eu]' "${TODOS[@]}")
+[ -z "$seteo" ] && ok "sin set -e/set -u" || mal "set -e/set -u detectado: $seteo"
 
 # Informativo: whitespace heredado de stk2.sh
-finales=$(grep -c '[[:blank:]]$' "$STK")
+finales=$(cat "${TODOS[@]}" | grep -c '[[:blank:]]$')
 aviso "líneas con espacio final (heredadas): $finales"
 
 echo ""
 if [ "$fallos" -eq 0 ]; then
-    echo "RESULTADO: OK — stk.sh cumple el contrato de estilo."
+    echo "RESULTADO: OK — stk.sh y sus librerías cumplen el contrato de estilo."
     exit 0
 fi
 echo "RESULTADO: $fallos fallo(s)."
