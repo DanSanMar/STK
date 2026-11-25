@@ -43,23 +43,21 @@ fi
 ver="v ${STK_VERSION:-7.0.0} · CRON"
 STK_MODULO="CRON"
 
-# Dashboard adaptado a CRON: se incrusta en la cabecera del recuadro STK.
+# Dashboard corto del módulo: ayuda/hints, no volcado de información.
 stk_dash_cron() {
-    if [ ! -f "$CRON_CONFIG_FILE" ] || ! command -v jq &>/dev/null; then
-        echo "  ┃ CRON · gestor sin configurar"
-        return 0
-    fi
-    local activado tareas notif ultima
-    activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE" 2>/dev/null)
-    tareas=$(jq -r '.tareas | length' "$CRON_CONFIG_FILE" 2>/dev/null)
-    notif=$(jq -r '.configuracion.notificaciones // false' "$CRON_CONFIG_FILE" 2>/dev/null)
-    ultima=$(jq -r '.configuracion.ultima_ejecucion // "N/D"' "$CRON_CONFIG_FILE" 2>/dev/null)
-    echo "  ┃ CRON · $tareas tareas · activo=$activado · notificaciones=$notif · última=$ultima"
+    echo -e "  ${AMARILLO}┃${RESET} ${CIAN}↑↓${RESET} navegar  ${CIAN}Enter${RESET} seleccionar  ${CIAN}Esc${RESET} volver  ${AMARILLO}│${RESET} ${CIAN}Shift+↑/↓${RESET} preview"
 }
 
-# Vista previa del desplegable: describe la opción seleccionada.
+# Vista previa del desplegable: estado breve + descripción de la opción.
 stk_preview_cron() {
-    local sel="$1"
+    local sel="$1" activado="N/D" tareas="0" notif="N/D"
+    if [ -f "$CRON_CONFIG_FILE" ] && command -v jq &>/dev/null; then
+        activado=$(jq -r '.configuracion.activado // false' "$CRON_CONFIG_FILE" 2>/dev/null)
+        tareas=$(jq -r '.tareas | length' "$CRON_CONFIG_FILE" 2>/dev/null)
+        notif=$(jq -r '.configuracion.notificaciones // false' "$CRON_CONFIG_FILE" 2>/dev/null)
+    fi
+    printf '\033[1;36mCRON\033[0m\n'
+    printf 'Estado: %s · Tareas: %s · Notificaciones: %s\n\n' "$activado" "$tareas" "$notif"
     case "${sel%%.*}" in
         1) echo "Programar nuevas tareas automáticas." ;;
         2) echo "Eliminar tareas individuales o todas." ;;

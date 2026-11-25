@@ -104,17 +104,13 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
 fi
 
 # --- DASHBOARD Y PREVIEW DE MÓDULO (patrón cron4me) ---
+# Dashboard corto del módulo: ayuda/hints, no volcado de información.
 stk_dash_stop4me() {
-    local iface="N/A" ip_addr="N/A"
-    iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
-    if [ -n "$iface" ]; then
-        ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2; exit}' | cut -d/ -f1)
-    else
-        iface="Ninguna"
-        ip_addr="Desconectado"
-    fi
+    echo -e "  ${AMARILLO}┃${RESET} ${CIAN}↑↓${RESET} navegar  ${CIAN}Enter${RESET} seleccionar  ${CIAN}Esc${RESET} volver  ${AMARILLO}│${RESET} ${CIAN}Shift+↑/↓${RESET} preview"
+}
 
-    local ufw_status="NO INSTALADO" ufw_policies="N/A" ufw_rules="0" ufw_log="N/A"
+stk_preview_stop4me() {
+    local sel="$1" ufw_status="NO INSTALADO" ufw_rules="0" ufw_policies="N/A"
     if command -v ufw &>/dev/null; then
         local st_ufw
         st_ufw=$(ufw status verbose 2>/dev/null)
@@ -125,18 +121,12 @@ stk_dash_stop4me() {
             out_pol=$(echo "$st_ufw" | grep -i "Default:" | grep -o "deny (outgoing)\|allow (outgoing)\|reject (outgoing)" | cut -d' ' -f1 | tr 'a-z' 'A-Z')
             ufw_policies="IN:${in_pol:-DENY} OUT:${out_pol:-ALLOW}"
             ufw_rules=$(ufw status numbered 2>/dev/null | grep -cE '^\[ *[0-9]+\]')
-            ufw_log=$(echo "$st_ufw" | grep -i "Logging:" | awk '{print $2; exit}' | tr 'a-z' 'A-Z')
         else
             ufw_status="INACTIVO"
-            ufw_policies="N/A"
         fi
     fi
-
-    echo "  ┃ STOP4ME · UFW:$ufw_status · reglas:$ufw_rules · $ufw_policies · log:${ufw_log:-N/A} · $iface($ip_addr)"
-}
-
-stk_preview_stop4me() {
-    local sel="$1"
+    printf '\033[1;36mSTOP4ME\033[0m\n'
+    printf 'UFW: %s · Reglas: %s · %s\n\n' "$ufw_status" "$ufw_rules" "$ufw_policies"
     case "${sel%%.*}" in
         1) echo "Activar, desactivar o recargar UFW." ;;
         2) echo "Gestionar reglas por puerto, servicio o IP." ;;
