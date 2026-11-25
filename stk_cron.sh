@@ -55,12 +55,6 @@ AZUL_BRILLANTE='\e[94m'
 BLANCO='\e[97m'
 
 # Definir función pintar propia
-pintar() { 
-    local COLOR="$1" 
-    local MENSAJE="$2" 
-    echo -e "${COLOR}${MENSAJE}${RESET}"
-}
-
 # --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
 # Misma lógica de limpieza, auditoría, servicios, actualización y lock
 # que usa stk2.sh. La bitácora es el archivo común del proyecto.
