@@ -2864,8 +2864,9 @@ ejecutar_dash4me() {
         return 1
     fi
 
-    # Ignorar SIGINT/SIGTERM en STK mientras corre el monitor hijo.
-    trap '' SIGINT SIGTERM
+    # Absorber SIGINT/SIGTERM en STK sin usar SIG_IGN: con SIG_IGN el hijo lo
+    # hereda y no puede atrapar Ctrl+C. Con un handler, el hijo recupera SIG_DFL.
+    trap ':' SIGINT SIGTERM
     if [[ "$cmd" == /* || "$cmd" == ./* ]]; then
         bash "$cmd"
     else
