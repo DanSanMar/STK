@@ -57,12 +57,6 @@ registrar_log() {
     echo "[$FECHA] [$NIVEL] [$USER] - [STOP4ME] $MENSAJE" >> "$LOG_FILE"
 }
 
-pintar() { 
-    local COLOR="$1" 
-    local MENSAJE="$2" 
-    echo -e "${COLOR}${MENSAJE}${RESET}"
-}
-
 # --- COMPROBACIÓN DE PRIVILEGIOS DE ROOT ---
 if [ "$EUID" -ne 0 ]; then
     echo -e "${ROJO_BRILLANTE}⚠️ Error: Este script requiere privilegios de root.${RESET}"
