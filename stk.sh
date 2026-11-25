@@ -5,7 +5,7 @@
 # ==============================================================================
 
 # --- INFORMACIÓN DEL PROYECTO ---
-V="7.0.0"
+# La versión se toma de stk_ui_lib.sh (STK_VERSION), fuente única del ecosistema.
 DESCRIPCION="Herramienta integral de mantenimiento para Linux"
 AUTOR="DanSanMar"
 
@@ -55,6 +55,8 @@ fi
 if [ -r "$SCRIPT_DIR/stk_menu_lib.sh" ]; then
     source "$SCRIPT_DIR/stk_menu_lib.sh"
 fi
+
+V="${STK_VERSION:-7.0.0}"
 
 # Directorio temporal privado (700) para caché y sockets de esta ejecución.
 # stk_elegir_tmp prueba TMPDIR, XDG_RUNTIME_DIR, /run/user, /dev/shm y /tmp.

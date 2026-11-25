@@ -3,6 +3,18 @@
 # Se carga desde stk.sh. No ejecuta nada por sí sola.
 # ==============================================================================
 
+# Versión única del ecosistema STK. Cada módulo añade su sufijo al mostrarla.
+STK_VERSION="7.0.0"
+
+stk_version_texto() {
+    local modulo="${1:-}"
+    if [ -n "$modulo" ]; then
+        echo -e "${CIAN}STK${RESET} v${BLANCO}${STK_VERSION}${RESET} · ${AZUL_BRILLANTE}${modulo}${RESET}"
+    else
+        echo -e "${CIAN}STK${RESET} v${BLANCO}${STK_VERSION}${RESET}"
+    fi
+}
+
 pintar() {
     local COLOR="$1"
     local MENSAJE="$2"
