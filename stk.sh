@@ -2847,20 +2847,31 @@ hacer_backup() {
 }
 
 ejecutar_dash4me() {
+    local cmd=""
     # Busca 'dash4me' o 'dash4me.sh' en la misma carpeta que stk2
     if [ -f "$SCRIPT_DIR/dash4me" ]; then
-        bash "$SCRIPT_DIR/dash4me"
+        cmd="$SCRIPT_DIR/dash4me"
     elif [ -f "$SCRIPT_DIR/dash4me.sh" ]; then
-        bash "$SCRIPT_DIR/dash4me.sh"
+        cmd="$SCRIPT_DIR/dash4me.sh"
     # Si no está en la carpeta, intenta buscarlo en el PATH global
     elif command -v dash4me &>/dev/null; then
-        dash4me
+        cmd="dash4me"
     elif command -v dash4me.sh &>/dev/null; then
-        dash4me.sh
+        cmd="dash4me.sh"
     else
         echo -e "${ROJO}❌ Error: No se encuentra dash4me ni dash4me.sh en $SCRIPT_DIR${RESET}"
         read -p "Presione Enter para continuar..."
+        return 1
     fi
+
+    # Ignorar SIGINT/SIGTERM en STK mientras corre el monitor hijo.
+    trap '' SIGINT SIGTERM
+    if [[ "$cmd" == /* || "$cmd" == ./* ]]; then
+        bash "$cmd"
+    else
+        "$cmd"
+    fi
+    trap salir SIGINT SIGTERM
 }
 
 # ==============================================================================
