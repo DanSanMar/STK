@@ -12,6 +12,15 @@ if [ -r "$STK_COMPAT_HEADER" ]; then
     source "$STK_COMPAT_HEADER"
 fi
 
+# --- CAPA DE UI COMPARTIDA DE STK ---
+# Se carga antes de las definiciones propias: pintar() y logo_texto() locales
+# sobrescriben las de la librería, conservando el aspecto de STOP4ME.
+STK_UI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/stk_ui_lib.sh"
+if [ -r "$STK_UI_LIB" ]; then
+    # shellcheck source=stk_ui_lib.sh
+    source "$STK_UI_LIB"
+fi
+
 # --- CONFIGURACIÓN DE COLORES (Estilo STK / dash4me) ---
 RESET='\e[0m'
 NEGRITA='\e[1m'
