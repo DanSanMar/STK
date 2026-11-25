@@ -133,6 +133,23 @@ mostrar_logo() {
     echo ""
     logo_texto
 }
+# Compone la cabecera completa de un módulo: logo STK + dashboard + contexto.
+stk_modulo_header_compuesto() {
+    local modo="${1:-completo}" dato="${2:-}"
+    local logo header dash_fn dash
+    logo=$(logo_texto "$modo")
+    header="$logo"
+    if [ -n "${STK_MODULO:-}" ]; then
+        dash_fn="stk_dash_${STK_MODULO,,}"
+        if declare -F "$dash_fn" >/dev/null 2>&1; then
+            dash=$("$dash_fn" 2>/dev/null)
+            [ -n "$dash" ] && header="$logo"$'\n'"$dash"
+        fi
+    fi
+    [ -n "$dato" ] && header="$header"$'\n'"  $dato"
+    printf '%s' "$header"
+}
+
 # Selector único: "simple" (listas), "marco" (menús), "preview" (submenús)
 # y "modulo" (recuadro STK + dashboard propio + vista previa).
 # Cuarto argumento = script de preview.
@@ -189,16 +206,7 @@ stk_fzf() {
                 modo="completo"
             fi
 
-            logo=$(logo_texto "$modo")
-            header="$logo"
-            if [ -n "${STK_MODULO:-}" ]; then
-                dash_fn="stk_dash_${STK_MODULO,,}"
-                if declare -F "$dash_fn" >/dev/null 2>&1; then
-                    dash=$("$dash_fn" 2>/dev/null)
-                    [ -n "$dash" ] && header="$logo"$'\n'"$dash"
-                fi
-            fi
-            [ -n "$dato" ] && header="$header"$'\n'"  $dato"
+            header=$(stk_modulo_header_compuesto "$modo" "$dato")
 
             fzf_args=(
                 --ansi
@@ -219,10 +227,12 @@ stk_fzf() {
                 )
             fi
 
-            STK_HEADER_REFRESH_CMD=(logo_texto "$modo")
+            # El ticker refresca la cabecera completa para no perder dashboard/dato.
+            STK_HEADER_REFRESH_CMD=(stk_modulo_header_compuesto "$modo" "$dato")
             stk_fzf_ejecutar "$prompt_text" "$header" "System Tool Kit" "${fzf_args[@]}"
             ;;
         preview)
+            header_text="$dato  ·  Shift+↑/↓ desplaza preview"
             fzf_args=(
                 --ansi
                 --height=80%
@@ -231,7 +241,7 @@ stk_fzf() {
                 --border=rounded
                 --border-label=" $dato "
                 --prompt="➤ $prompt_text: "
-                --header="$dato  ·  Shift+↑/↓ desplaza preview"
+                --header="$header_text"
                 --color="$FZF_COLORES"
             )
             if [ -n "$preview" ]; then
@@ -240,7 +250,9 @@ stk_fzf() {
                     --preview-window="right:55%:wrap"
                 )
             fi
-            stk_fzf_ejecutar "$prompt_text" "$dato" "$dato" "${fzf_args[@]}"
+            # Cabecera estática: evita que un refresh anterior borre el texto.
+            STK_HEADER_REFRESH_CMD=()
+            stk_fzf_ejecutar "$prompt_text" "$header_text" "$dato" "${fzf_args[@]}"
             ;;
         simple|*)
             header_text="$dato"
@@ -253,6 +265,7 @@ stk_fzf() {
                 --header="$header_text"
                 --color="$FZF_COLORES"
             )
+            STK_HEADER_REFRESH_CMD=()
             stk_fzf_ejecutar "$prompt_text" "$header_text" "" "${fzf_args[@]}"
             ;;
     esac
