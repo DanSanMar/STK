@@ -106,16 +106,37 @@ if [ -f /run/ostree-booted ] && command -v rpm-ostree &>/dev/null; then
     [ "$Package" = "unknown" ] && Package="dnf"
 fi
 
-# Configuración de la cabecera responsive (se conserva la línea OS/Pkg/User)
-stk_init "INSTALL4ME" "$V" "SOFTWARE INSTALLER"
-
-mostrar_logo() {
+# --- DASHBOARD Y PREVIEW DE MÓDULO (patrón STK) ---
+stk_dash_install4me() {
     local pkg_mostrar="${Package:-N/A}"
     [ "$INMUTABLE" = true ] && pkg_mostrar="rpm-ostree"
-    STK_EXTRA="${VERDE_BRILLANTE}OS:${RESET} ${AZUL}${OS_ID:-N/A}${RESET} | ${AMARILLO}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET} | ${CIAN}User:${RESET} ${BLANCO}${SUDO_USER:-$USER}${RESET}"
+    echo -e "  ${AMARILLO}Pkg:${RESET} ${AZUL}${pkg_mostrar}${RESET}  ${AMARILLO}OS:${RESET} ${AZUL}${OS_ID:-N/A}${RESET}  ${AMARILLO}User:${RESET} ${AZUL}${SUDO_USER:-$USER}${RESET}"
+    echo -e "  \e[2m↑↓ mover  Enter ok  Esc volver  S+↑/↓ preview\e[0m"
+}
+
+stk_preview_install4me() {
+    local sel="$1"
+    case "${sel%%.*}" in
+        1) echo "Navegadores, ofimática y multimedia." ;;
+        2) echo "Editores, compiladores y lenguajes." ;;
+        3) echo "Monitoreo, administración y diagnóstico." ;;
+        4) echo "Herramientas de seguridad y auditoría." ;;
+        5) echo "Herramientas generales del sistema." ;;
+        6) echo "Paquetes incluidos en proyectos ALL4ME." ;;
+        7) echo "Instalar Flatpak, Snap, AppImage o AUR." ;;
+        0) echo "Salir / volver al menú anterior." ;;
+        *) echo "Seleccione una opción para ver detalles." ;;
+    esac
+}
+PREVIEW_INSTALL4ME="$(declare -f stk_preview_install4me); stk_preview_install4me \"\$1\""
+
+fzf_estilo() {
+    stk_fzf modulo "$1" "${2:-}" "$PREVIEW_INSTALL4ME"
+}
+
+mostrar_logo() {
     echo ""
-    stk_header
-    echo ""
+    logo_texto
 }
 
 # --- DEFINICIÓN DE PAQUETES ---
@@ -784,7 +805,6 @@ instalar_paquetes() {
 menu_gestores_paquetes() {
     while true; do
         stk_limpiar
-        mostrar_logo
         local opciones="1. 🧊 Flatpak + Flathub  - Sistema de paquetes sandbox universal
 2. 📦 Snapcraft           - Gestor de paquetes canónico (Ubuntu/Debian/Fedora)
 3. 🚀 AppImage Runtime    - Soporte Fuse para ejecutables portátiles
@@ -792,7 +812,7 @@ menu_gestores_paquetes() {
 0. ⬅️ Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Gestor" "GESTORES DE PAQUETES" "15")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Gestor")
         [ -z "$seleccion" ] && return
 
         local opcion_num
@@ -896,19 +916,20 @@ seleccionar_programas() {
     local seleccionados cabecera="PROGRAMAS - $nombre_cat (TAB: Marcar | Esc/0: Volver)${nota_ocultos}"
     seleccionados=$(printf '%s\n0. ⬅️ Volver|Volver al menú anterior\n' "$raw_data" \
         | sed '/^[[:space:]]*$/d' \
-        | stk_fzf_ejecutar "Seleccione programas" "$cabecera" "PROGRAMAS - $nombre_cat" \
+        | stk_fzf_ejecutar "Seleccione programas" "$cabecera" "System Tool Kit" \
         --ansi \
         --multi \
-        --height=18 \
-        --reverse \
+        --height=~90% \
+        --layout=reverse \
+        --header-first \
         --border=rounded \
         --delimiter="|" \
         --with-nth=1 \
         --prompt="➤ Seleccione programas: " \
         --header="$cabecera" \
-        --border-label=" PROGRAMAS - $nombre_cat " \
+        --border-label=" System Tool Kit " \
         --color="$FZF_COLORES" \
-        --preview-window="right:50%:wrap" \
+        --preview-window="right:40%:wrap" \
         --preview='
             echo -e "\033[1;36mDETALLES DEL PROGRAMA\033[0m\n"
             echo -e "\033[1;33m➜\033[0m {2..}"
@@ -927,7 +948,6 @@ menu_categoria() {
     local nombre_categoria="$2"
     
     stk_limpiar
-    mostrar_logo
     
     local seleccionados
     seleccionados=$(seleccionar_programas "$cat_key" "$nombre_categoria")
@@ -942,14 +962,13 @@ menu_categoria() {
 menu_escritorio() {
     while true; do
         stk_limpiar
-        mostrar_logo
         local opciones="1. 🌐 NAVEGADORES  - Navegadores web
 2. 📄 OFIMÁTICA     - Suite ofimática
 3. 🎬 MULTIMEDIA    - Imagen, vídeo, audio y mensajería
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Categoría")
 
         [ -z "$seleccion" ] && return
 
@@ -969,7 +988,6 @@ menu_escritorio() {
 menu_desarrollo() {
     while true; do
         stk_limpiar
-        mostrar_logo
         local opciones="1. 📝 EDITORES      - Editores de código y terminal
 2. 🔀 VERSIONES     - Git y GitHub CLI
 3. 🐳 CONTENEDORES  - Docker y Docker Compose
@@ -977,7 +995,7 @@ menu_desarrollo() {
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Categoría")
 
         [ -z "$seleccion" ] && return
 
@@ -998,7 +1016,6 @@ menu_desarrollo() {
 menu_sistemas() {
     while true; do
         stk_limpiar
-        mostrar_logo
         local opciones="1. 📊 MONITOREO     - Procesos y recursos en tiempo real
 2. 💾 DISCOS        - Análisis, espacio y particiones
 3. 🔎 INFORMACIÓN   - Hardware y datos del sistema
@@ -1006,7 +1023,7 @@ menu_sistemas() {
 0. ⬅️ VOLVER        - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Categoría" "CATEGORÍAS INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Categoría")
 
         [ -z "$seleccion" ] && return
 
@@ -1027,7 +1044,6 @@ menu_sistemas() {
 menu_all4me() {
     while true; do
         stk_limpiar
-        mostrar_logo
         local opciones="1. 🔍 SCAN4ME    - Herramientas de escaneo y auditoría
 2. ⚙️  ADMIN4ME   - Herramientas de administración de sistemas
 3. 🛑 STOP4ME    - Herramientas de seguridad y bloqueo
@@ -1037,7 +1053,7 @@ menu_all4me() {
 0. ⬅️ VOLVER     - Volver al menú principal"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Opción" "INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Opción")
 
         [ -z "$seleccion" ] && return
 
@@ -1060,7 +1076,6 @@ menu_all4me() {
 menu_principal() {
     while true; do
         stk_limpiar
-        mostrar_logo
         
         local opciones="1. 🖥️  ESCRITORIO      - Navegadores, ofimática, multimedia
 2. 🔧  DESARROLLO      - Editores, compiladores, lenguajes
@@ -1072,7 +1087,7 @@ menu_principal() {
 0. ❌  SALIR           - Salir del script"
 
         local seleccion
-        seleccion=$(echo -e "$opciones" | stk_fzf_menu "Seleccione Opción" "INSTALL4ME")
+        seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione Opción")
 
         [ -z "$seleccion" ] && salir
 
