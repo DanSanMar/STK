@@ -32,6 +32,15 @@ if [ -r "$SCRIPT_DIR/stk_header.sh" ]; then
     source "$SCRIPT_DIR/stk_header.sh"
 fi
 
+# --- CAPA DE UI COMPARTIDA DE STK ---
+# Se carga antes de las definiciones propias: pintar(), mostrar_logo() y
+# fzf_estilo() locales sobrescriben las de la librería, conservando el
+# aspecto del gestor de tareas.
+if [ -r "$SCRIPT_DIR/stk_ui_lib.sh" ]; then
+    # shellcheck source=stk_ui_lib.sh
+    source "$SCRIPT_DIR/stk_ui_lib.sh"
+fi
+
 # Definir colores propios
 RESET='\e[0m'
 VERDE_BRILLANTE='\e[92m'
