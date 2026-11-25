@@ -133,12 +133,13 @@ mostrar_logo() {
     echo ""
     logo_texto
 }
-# Selector único: estilos "simple" (listas), "marco" (menús) y
-# "preview" (submenús con vista previa). Cuarto argumento = script de preview.
+# Selector único: "simple" (listas), "marco" (menús), "preview" (submenús)
+# y "modulo" (recuadro STK + dashboard propio + vista previa).
+# Cuarto argumento = script de preview.
 # fzf_estilo() y stk_fzf_menu() son wrappers públicos que delegan aquí.
 stk_fzf() {
     local estilo="$1" prompt_text="$2" dato="${3:-}" preview="${4:-}"
-    local filas modo logo header_text
+    local filas modo logo header_text dash_fn dash header
     local fzf_args=()
 
     case "$estilo" in
@@ -173,6 +174,52 @@ stk_fzf() {
             # El ticker usa este comando para regenerar el logo en caliente.
             STK_HEADER_REFRESH_CMD=(logo_texto "$modo")
             stk_fzf_ejecutar "$prompt_text" "$logo" "$dato" "${fzf_args[@]}"
+            ;;
+        modulo)
+            # Estilo común para módulos: mismo marco rojo y cabecera STK, con
+            # un dashboard propio opcional (stk_dash_<modulo> en minúsculas).
+            filas=$(stty size </dev/tty 2>/dev/null | awk '{print $1}')
+            [[ "$filas" =~ ^[0-9]+$ ]] || filas="${LINES:-24}"
+
+            if [ "$filas" -lt 24 ]; then
+                modo="compacto"
+            elif [ "$filas" -lt 32 ]; then
+                modo="medio"
+            else
+                modo="completo"
+            fi
+
+            logo=$(logo_texto "$modo")
+            header="$logo"
+            if [ -n "${STK_MODULO:-}" ]; then
+                dash_fn="stk_dash_${STK_MODULO,,}"
+                if declare -F "$dash_fn" >/dev/null 2>&1; then
+                    dash=$("$dash_fn" 2>/dev/null)
+                    [ -n "$dash" ] && header="$logo"$'\n'"$dash"
+                fi
+            fi
+
+            fzf_args=(
+                --ansi
+                --height=~90%
+                --layout=reverse
+                --no-sort
+                --header-first
+                --border=rounded
+                --border-label=" System Tool Kit "
+                --prompt="➤ $prompt_text: "
+                --header="$header"
+                --color="$FZF_COLORES"
+            )
+            if [ -n "$preview" ]; then
+                fzf_args+=(
+                    --preview="bash -c $(printf '%q' "$preview") _ {}"
+                    --preview-window="right:55%:wrap"
+                )
+            fi
+
+            STK_HEADER_REFRESH_CMD=(logo_texto "$modo")
+            stk_fzf_ejecutar "$prompt_text" "$header" "System Tool Kit" "${fzf_args[@]}"
             ;;
         preview)
             fzf_args=(
