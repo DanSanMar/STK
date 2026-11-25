@@ -397,8 +397,12 @@ obtener_info_gpu() {
         return
     fi
 
+    local cols; cols=$(tput cols 2>/dev/null); [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+    local gm="$GPU_MODEL" max_gm=$((cols - 13))
+    [ "$max_gm" -gt 4 ] && [ ${#gm} -gt "$max_gm" ] && gm="${gm:0:$((max_gm-1))}…"
+
     echo -e "\e[K${AZUL_CLARO}- 🎮 DETALLES DE GPU (${GPU_TYPE})${GPU_EXTRA_INFO}:${RESET}"
-    echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${GPU_MODEL}${RESET}"
+    echo -e "\e[K   ${NEGRITA}${BLANCO}Modelo:${RESET} ${VERDE_GPU}${gm}${RESET}"
 
     if [[ "$GPU_MEM_TOTAL_MB" =~ ^[0-9]+$ ]] && [ "$GPU_MEM_TOTAL_MB" -gt 0 ]; then
         local mem_g_used=$(awk "BEGIN {printf \"%.2f\", $GPU_MEM_USED_MB/1024}")
@@ -503,14 +507,23 @@ obtener_info_seguridad() {
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}UFW:${RESET} $ufw_print | ${NEGRITA}${AZUL_BRILLANTE}SSH activas:${RESET} ${BLANCO}${ssh_sessions}${RESET} | ${NEGRITA}${AZUL_BRILLANTE}Sudos activos:${RESET} ${AMARILLO_BRILLANTE}${sudo_count}${RESET}"
     echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Shells Sospechosas:${RESET} $rev_print"
     
+    local cols; cols=$(tput cols 2>/dev/null); [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+
     if [ -n "$rev_details" ]; then
-        echo -e "\e[K   ${ROJO_BRILLANTE}   └── Detalle:${RESET} ${BLANCO}${rev_details}${RESET}"
+        local rd="$rev_details" max_rd=$((cols - 22))
+        [ "$max_rd" -gt 4 ] && [ ${#rd} -gt "$max_rd" ] && rd="${rd:0:$((max_rd-1))}…"
+        echo -e "\e[K   ${ROJO_BRILLANTE}   └── Detalle:${RESET} ${BLANCO}${rd}${RESET}"
     fi
 
     if [ "$sudo_count" -gt 0 ]; then
-        echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Ejecutando Sudo:${RESET} ${AMARILLO_BRILLANTE}${sudo_procs}${RESET}"
+        local sp="$sudo_procs" max_sp=$((cols - 22))
+        [ "$max_sp" -gt 4 ] && [ ${#sp} -gt "$max_sp" ] && sp="${sp:0:$((max_sp-1))}…"
+        echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Ejecutando Sudo:${RESET} ${AMARILLO_BRILLANTE}${sp}${RESET}"
     fi
-    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Puertos escuchando:${RESET} ${CIAN_BRILLANTE}[ $listen_info ]${RESET}"
+
+    local li="$listen_info" max_li=$((cols - 27))
+    [ "$max_li" -gt 4 ] && [ ${#li} -gt "$max_li" ] && li="${li:0:$((max_li-1))}…"
+    echo -e "\e[K   ${NEGRITA}${AZUL_BRILLANTE}Puertos escuchando:${RESET} ${CIAN_BRILLANTE}[ $li ]${RESET}"
 }
 
 renderizar_pantalla() {
