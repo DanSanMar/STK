@@ -277,7 +277,6 @@ header_refresco() {
 
 salir() {
     registrar_log "$LOG_INFO" "Sesión finalizada - localscan4me v$V"
-    stk_salir "LOCALSCAN4ME" "Saliendo de LocalScan4Me..."
     exit 0
 }
 trap salir INT TERM
