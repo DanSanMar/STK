@@ -936,7 +936,7 @@ stk_limpieza_manual_menu() {
 }
 
 mostrar_info_red() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
 
@@ -1050,6 +1050,7 @@ mostrar_info_red() {
     fi
 
     registrar_log "$LOG_INFO" "Consulta de red realizada (Interfaz: ${iface_activa:-?} | Local: ${ip_local:-?} | Pública: ${ip_publica})"
+    trap salir SIGINT SIGTERM
     read -p "Presione Enter para volver..."
 }
 
@@ -1168,7 +1169,7 @@ modo_auto() {
     fi
 
     # Capturar Ctrl+C para liberar el lock y volver de forma segura al menú
-    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; stk_limpiar; return' SIGINT
+    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; stk_limpiar; trap salir SIGINT SIGTERM; return' SIGINT
 
     stk_limpiar
     mostrar_logo
@@ -1183,7 +1184,7 @@ modo_auto() {
     if [ $? -ne 0 ]; then
         pintar "$AMARILLO" "Modo auto cancelado. No se ha ejecutado nada."
         echo ""
-        trap - SIGINT
+        trap salir SIGINT SIGTERM
         read -p "Presione Enter para volver al menú principal..."
         return 0
     fi
@@ -1197,7 +1198,7 @@ modo_auto() {
     if [ ${#PASOS_EJECUTADOS[@]} -eq 0 ]; then
         pintar "$AMARILLO" "No has seleccionado ningún paso."
         echo ""
-        trap - SIGINT
+        trap salir SIGINT SIGTERM
         read -p "Presione Enter para volver al menú principal..."
         return 0
     fi
@@ -1206,7 +1207,7 @@ modo_auto() {
     if ! stk_lock_adquirir; then
         pintar "$ROJO" "❌ Ya hay otra ejecución del modo auto en curso."
         echo ""
-        trap - SIGINT
+        trap salir SIGINT SIGTERM
         read -p "Presione Enter para volver al menú principal..."
         return 3
     fi
@@ -1448,14 +1449,14 @@ modo_auto() {
     echo -e "\n${AMARILLO}➤ Bitácora:${RESET} ${BLANCO}${LOG_FILE}${RESET}"
     echo -e "${AMARILLO}➤ Logs de actualizaciones:${RESET} ${BLANCO}También en Menú Mantenimiento → Logs de actualizaciones${RESET}"
     stk_lock_liberar
-    trap - SIGINT
+    trap salir SIGINT SIGTERM
     echo ""
     read -p "Presione Enter para volver al menú principal..."
     return $rc
 }
 
 auditoria_seguridad() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
     pintar $MAGENTA "--- AUDITORÍA Y RECOMENDACIONES DE SEGURIDAD ---"
@@ -1718,13 +1719,13 @@ auditoria_seguridad() {
 
     registrar_log "$LOG_INFO" "Auditoría completada. Score: ${score}% ($checks_passed/$total_checks). Alertas: $alertas_count"
 
-    trap - SIGINT
+    trap salir SIGINT SIGTERM
     echo ""
     read -p "Presione Enter para volver al menú..."
 }
 
 Actualizar_sistema() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
     pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
@@ -1794,7 +1795,7 @@ Actualizar_sistema() {
                 ;;
             *)
                 stk_mostrar_error "❌ Error: No se pudo identificar un gestor de paquetes compatible." "Presione Enter para volver..."
-                trap - SIGINT
+                trap salir SIGINT SIGTERM
                 return 1
                 ;;
         esac
@@ -1830,13 +1831,13 @@ Actualizar_sistema() {
     fi
 
     # Restaurar la trampa de señal por defecto antes de salir
-    trap - SIGINT
+    trap salir SIGINT SIGTERM
     echo ""
     read -p "Presione Enter para volver al menú..."
 }
 
 instalar_programa() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
     echo ""
@@ -1846,11 +1847,13 @@ instalar_programa() {
     if [[ -z "$programa" ]]; then
         pintar $ROJO "⚠️ No escribió ningún nombre. Intenteló otra vez."
         sleep 2
+        trap salir SIGINT SIGTERM
         return 1
     fi
     if [[ ! "$programa" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
             pintar $ROJO "⚠️ El nombre contiene caracteres no válidos."
             sleep 2
+            trap salir SIGINT SIGTERM
             return 1
     fi
 
@@ -1902,6 +1905,7 @@ instalar_programa() {
             *)
                 registrar_log "$LOG_ERR" "Instalación cancelada: gestor no compatible ($Package) para $programa"
                 stk_mostrar_error "❌ Error: No se pudo identificar un Package compatible." "Presione Enter para volver..."
+                trap salir SIGINT SIGTERM
                 return 1
                 ;;
         esac
@@ -1917,11 +1921,12 @@ instalar_programa() {
     fi
 
     echo ""
+    trap salir SIGINT SIGTERM
     read -p "Presione Enter para volver al menú..."
 }
 
 desinstalar_programa() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
     echo ""
@@ -1930,11 +1935,13 @@ desinstalar_programa() {
     if [[ -z "$programa" ]]; then
         pintar $ROJO "⚠️ No escribió ningún nombre."
         sleep 2
+        trap salir SIGINT SIGTERM
         return 1
     fi
     if [[ ! "$programa" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
         pintar $ROJO "⚠️ El nombre contiene caracteres no válidos."
         sleep 2
+        trap salir SIGINT SIGTERM
         return 1
     fi
 
@@ -1975,6 +1982,7 @@ desinstalar_programa() {
             *)
                 pintar $ROJO "❌ Package no compatible."
                 registrar_log "$LOG_ERR" "Desinstalación cancelada: gestor no compatible ($Package) para $programa"
+                trap salir SIGINT SIGTERM
                 return 1
                 ;;
         esac
@@ -1987,6 +1995,7 @@ desinstalar_programa() {
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
         registrar_log "$LOG_ERR" "Error al desinstalar $programa con $Package"
     fi
+    trap salir SIGINT SIGTERM
     read -p "Presione Enter para volver..."
 }
 
@@ -2029,7 +2038,7 @@ modificar_permisos_usuario() {
 }
 
 gestionar_usuarios() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     while true; do
         stk_limpiar
         mostrar_logo
@@ -2153,6 +2162,7 @@ gestionar_usuarios() {
                 ;;
         esac
     done
+    trap salir SIGINT SIGTERM
 }
 
 listar_usuarios() {
@@ -2195,7 +2205,7 @@ pedir_nombre() {
 }
 
 gestionar_servicios() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     while true; do
 
         stk_limpiar
@@ -2225,11 +2235,12 @@ gestionar_servicios() {
             menu_operaciones_servicio "$svc_seleccionado"
         fi
     done
+    trap salir SIGINT SIGTERM
 }
 
 menu_operaciones_servicio() {
     local svc=$1
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     while true; do
 
         stk_limpiar
@@ -2292,6 +2303,7 @@ menu_operaciones_servicio() {
             *) break ;;
         esac
     done
+    trap salir SIGINT SIGTERM
 }
 
 init_copy4me_config() {
@@ -2570,7 +2582,7 @@ restaurar_backup() {
 }
 
 autocopy_atomatic() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
 
     while true; do
         stk_limpiar
@@ -2665,6 +2677,7 @@ autocopy_atomatic() {
 
         read -p "Presione Enter para continuar..."
     done
+    trap salir SIGINT SIGTERM
 }
 
 ejecutar_sincronizacion_bash() {
@@ -2851,7 +2864,7 @@ copy4me_tui_main() {
 }
 
 hacer_backup() {
-    trap "stk_limpiar; return" SIGINT
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
 
     while true; do
         stk_limpiar
@@ -2873,6 +2886,7 @@ hacer_backup() {
             6) break ;;
         esac
     done
+    trap salir SIGINT SIGTERM
 }
 
 # Helper unificado para lanzar módulos STK.
