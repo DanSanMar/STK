@@ -105,9 +105,9 @@ stk_caps_init
 # Lanzamiento de módulos externos: usar SIEMPRE stk_ejecutar_modulo/wrappers.
 #   - Resolución estricta: $SCRIPT_DIR/${nombre}.sh (sin fallback PATH).
 #   - Ejecución local: bash "$dir/${nombre}.sh" "$@" (no depende de +x).
-#   - Modo normal: menús/secuenciales; no toca traps del padre.
-#   - Modo tui: monitores/alt-screen; padre absorbe SIGINT/SIGTERM con trap ':'
-#     y restaura trap salir SIGINT SIGTERM al volver. El hijo hereda SIG_DFL.
+#   - Padre absorbe SIGINT/SIGTERM (trap ':') mientras corre el hijo y restaura
+#     trap salir SIGINT SIGTERM al volver. El hijo recibe SIGINT del terminal.
+#   - Modo normal/tui: semántico (interactivo vs alt-screen), misma señalización.
 #   - No pasar nombres de módulo construidos desde input de usuario; wrappers
 #     con literales fijos.
 #
@@ -2905,9 +2905,9 @@ hacer_backup() {
 # Helper unificado para lanzar módulos STK.
 # Uso: stk_ejecutar_modulo <nombre> <modo> [args...]
 #   nombre: nombre base del módulo, sin extensión (ej: "dash4me")
-#   modo:   normal | tui
-#     normal - lanzamiento estándar
-#     tui    - absorbe SIGINT/SIGTERM en STK para que el hijo gestione Ctrl+C
+#   modo:   normal | tui (semántico; ambos absorben SIGINT/SIGTERM en el padre)
+#     normal - módulo interactivo/secuencial
+#     tui    - monitor/alt-screen; mismo manejo de señales, etiqueta explícita
 stk_ejecutar_modulo() {
     local nombre="${1:-}"
     local modo="${2:-normal}"
@@ -2931,11 +2931,9 @@ stk_ejecutar_modulo() {
         return 1
     fi
 
-    # TUI/monitor: el padre absorbe la señal; el hijo hereda SIG_DFL y puede
-    # instalar su propio trap (restaurar alt-screen/cursor, etc.).
-    if [ "$modo" = "tui" ]; then
-        trap ':' SIGINT SIGTERM
-    fi
+    # El padre absorbe SIGINT/SIGTERM mientras corre el hijo; ambos reciben
+    # la señal del terminal (mismo proceso grupo). El hijo gestiona Ctrl+C.
+    trap ':' SIGINT SIGTERM
 
     if [[ "$target" == bash:* ]]; then
         bash "${target#bash:}" "$@"
@@ -2945,10 +2943,7 @@ stk_ejecutar_modulo() {
         rc=$?
     fi
 
-    if [ "$modo" = "tui" ]; then
-        trap salir SIGINT SIGTERM
-    fi
-
+    trap salir SIGINT SIGTERM
     return "$rc"
 }
 
