@@ -182,6 +182,7 @@ mostrar_dashboard_rapido() {
 # ==============================================================================
 
 registrar_log() {
+    : "${LOG_FILE:=/var/log/stk_mantenimiento.log}"
     local NIVEL="${1:-INFO}" # Si no se pasa nivel, por defecto es INFO
     local MENSAJE="${2}"
     local FECHA
@@ -192,6 +193,7 @@ registrar_log() {
 }
 
 rotar_logs() {
+    : "${LOG_FILE:=/var/log/stk_mantenimiento.log}"
     # Mantenemos el límite en Kilobytes (500 KB)
     local MAX_SIZE=500
     local MODO_SILENCIOSO="${1:-modo_interactivo}"
@@ -939,6 +941,8 @@ stk_limpieza_manual_menu() {
     trap salir SIGINT SIGTERM
 }
 
+# Globales requeridas: comprobar_salida_internet, SALIDA_RED, SALIDA_RED_LATENCIA,
+# tipo_interfaz, prioridad_interfaz, mostrar_interfaz_red, campo_red, registrar_log.
 mostrar_info_red() {
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
@@ -1164,6 +1168,8 @@ auto_checklist() {
     printf '%s\n' "$seleccion"
 }
 
+# Globales requeridas: LOG_FILE, LOG_INFO/WARN/ERR, registrar_log, rotar_logs,
+# pintar, mostrar_logo, stk_lock_*, AUTO_PASOS/FASES y helpers de stk_auto_lib.sh.
 modo_auto() {
     if ! declare -F stk_lock_adquirir >/dev/null 2>&1; then
         pintar "$ROJO" "❌ Falta la biblioteca del modo automático (stk_auto_lib.sh)."
@@ -2311,17 +2317,19 @@ menu_operaciones_servicio() {
     trap salir SIGINT SIGTERM
 }
 
+# Globales requeridas (COPY4ME/backups): CONFIG_JSON, DESTINO_DEF, USUARIO_REAL,
+# SUDO_USER, registrar_log, pintar, stk_fzf_*, fzf helpers.
 init_copy4me_config() {
-    mkdir -p "$(dirname "$CONFIG_JSON")"
-    if [ ! -f "$CONFIG_JSON" ]; then
-        echo '{"perfiles":{},"opciones":{"verificar_hash":true,"compresion":6}}' > "$CONFIG_JSON"
-        chmod 600 "$CONFIG_JSON"
+    mkdir -p "$(dirname "${CONFIG_JSON:-/var/backups/stk_backups/config.json}")"
+    if [ ! -f "${CONFIG_JSON:-/var/backups/stk_backups/config.json}" ]; then
+        echo '{"perfiles":{},"opciones":{"verificar_hash":true,"compresion":6}}' > "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
+        chmod 600 "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
     fi
 }
 
 obtener_perfiles_json() {
     init_copy4me_config
-    jq -r '.perfiles | keys[]' "$CONFIG_JSON" 2>/dev/null
+    jq -r '.perfiles | keys[]' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}" 2>/dev/null
 }
 
 guardar_perfil_json() {
@@ -2344,9 +2352,9 @@ guardar_perfil_json() {
               "ruta_local": $orig,
               "ruta_destino": $dest,
               "ultima_sincronizacion": $date
-          }' "$CONFIG_JSON" > "$tmp_json"; then
-        mv "$tmp_json" "$CONFIG_JSON"
-        chmod 600 "$CONFIG_JSON"
+          }' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}" > "$tmp_json"; then
+        mv "$tmp_json" "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
+        chmod 600 "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
     else
         rm -f "$tmp_json"
     fi
@@ -2358,9 +2366,9 @@ eliminar_perfil_json() {
     local tmp_json
     tmp_json=$(mktemp)
 
-    if jq --arg nom "$nombre" 'del(.perfiles[$nom])' "$CONFIG_JSON" > "$tmp_json"; then
-        mv "$tmp_json" "$CONFIG_JSON"
-        chmod 600 "$CONFIG_JSON"
+    if jq --arg nom "$nombre" 'del(.perfiles[$nom])' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}" > "$tmp_json"; then
+        mv "$tmp_json" "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
+        chmod 600 "${CONFIG_JSON:-/var/backups/stk_backups/config.json}"
     else
         rm -f "$tmp_json"
     fi
@@ -2477,13 +2485,13 @@ ver_backups_existentes() {
     mostrar_logo
     pintar $CIAN "--- BACKUPS LOCALES EXISTENTES ---"
 
-    if [ ! -d "$DESTINO_DEF" ]; then
-        stk_mostrar_error "No se encontró el directorio de backups ($DESTINO_DEF)." "Presione Enter..."
+    if [ ! -d "${DESTINO_DEF:-/var/backups/stk_backups}" ]; then
+        stk_mostrar_error "No se encontró el directorio de backups (${DESTINO_DEF:-/var/backups/stk_backups})." "Presione Enter..."
         return
     fi
 
     local archivos
-    archivos=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" 2>/dev/null)
+    archivos=$(find "${DESTINO_DEF:-/var/backups/stk_backups}" -type f -name "*.tar.gz" 2>/dev/null)
     if [ -z "$archivos" ]; then
         stk_mostrar_info "No hay archivos de backup (.tar.gz) disponibles." "Presione Enter..."
         return
@@ -2509,7 +2517,7 @@ eliminar_backups() {
     pintar $CIAN "--- ELIMINAR COPIAS DE SEGURIDAD ---"
 
     local archivos
-    archivos=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" 2>/dev/null)
+    archivos=$(find "${DESTINO_DEF:-/var/backups/stk_backups}" -type f -name "*.tar.gz" 2>/dev/null)
     if [ -z "$archivos" ]; then
         stk_mostrar_info "No hay respaldos para eliminar." "Presione Enter..."
         return
@@ -2537,13 +2545,13 @@ restaurar_backup() {
     mostrar_logo
     pintar $CIAN "--- RESTAURAR COPIA DE SEGURIDAD ---"
 
-    if [ ! -d "$DESTINO_DEF" ] || [ -z "$(find "$DESTINO_DEF" -name "*.tar.gz" 2>/dev/null)" ]; then
+    if [ ! -d "${DESTINO_DEF:-/var/backups/stk_backups}" ] || [ -z "$(find "${DESTINO_DEF:-/var/backups/stk_backups}" -name "*.tar.gz" 2>/dev/null)" ]; then
         stk_mostrar_error "No hay backups disponibles para restaurar." "Presione Enter..."
         return
     fi
 
     local seleccion
-    seleccion=$(find "$DESTINO_DEF" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para RESTAURAR" "R E S T A U R A C I Ó N")
+    seleccion=$(find "${DESTINO_DEF:-/var/backups/stk_backups}" -type f -name "*.tar.gz" | fzf_estilo "Seleccione backup para RESTAURAR" "R E S T A U R A C I Ó N")
 
     if [ -n "$seleccion" ]; then
         echo -e "\n${AMARILLO}¿Dónde desea restaurar el backup?${RESET}"
@@ -2616,14 +2624,14 @@ autocopy_atomatic() {
 
         echo -ne "\n${CIAN}➤ Subcarpeta para organizar el backup (Enter para 'general'): ${RESET}"
         read -r SUBDIR
-        local RUTA_FINAL="$DESTINO_DEF/${SUBDIR:-"general"}"
+        local RUTA_FINAL="${DESTINO_DEF:-/var/backups/stk_backups}/${SUBDIR:-"general"}"
 
         if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
             pintar $ROJO "❌ Error crítico: Sin permisos de escritura en $RUTA_FINAL"
             registrar_log "$LOG_ERR" "Backup automático: sin permisos de escritura en $RUTA_FINAL"
             sleep 2; continue
         fi
-        chmod 700 "$DESTINO_DEF" 2>/dev/null
+        chmod 700 "${DESTINO_DEF:-/var/backups/stk_backups}" 2>/dev/null
 
         local FECHA
         FECHA=$(date +%Y%m%d_%H%M%S)
@@ -2751,7 +2759,7 @@ copy4me_tui_main() {
                     while read -r p; do
                         # CORRECCIÓN 3: Uso seguro de --arg en jq para nombres de perfiles con espacios
                         local path_orig
-                        path_orig=$(jq -r --arg p "$p" '.perfiles[$p].ruta_local' "$CONFIG_JSON")
+                        path_orig=$(jq -r --arg p "$p" '.perfiles[$p].ruta_local' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}")
                         opts_orig+="📁 [Perfil] $p ➔ $path_orig\n"
                     done <<< "$perfiles"
                 fi
@@ -2763,8 +2771,8 @@ copy4me_tui_main() {
                 if [[ "$sel_orig" == *"📁 [Perfil]"* ]]; then
                     # CORRECCIÓN 4: Extracción de perfil por sed soportando espacios adecuadamente
                     nombre_perfil=$(echo "$sel_orig" | sed -n 's/.*📁 \[Perfil\] \(.*\) ➔ .*/\1/p')
-                    origen=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_local' "$CONFIG_JSON")
-                    destino=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_destino' "$CONFIG_JSON")
+                    origen=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_local' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}")
+                    destino=$(jq -r --arg nom "$nombre_perfil" '.perfiles[$nom].ruta_destino' "${CONFIG_JSON:-/var/backups/stk_backups/config.json}")
                 else
                     origen=$(fzf_seleccionar_directorio "/home/$USUARIO_REAL")
                     if [ -z "$origen" ] || [ ! -d "$origen" ]; then
