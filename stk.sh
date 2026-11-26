@@ -96,6 +96,29 @@ stk_caps_init
 # Bitácora: registrar_log con LOG_INFO / LOG_WARN / LOG_ERR para toda acción
 #           que modifique el sistema.
 # ------------------------------------------------------------------------------
+# CONTRATO DE ARQUITECTURA Y MÓDULOS (stk.sh)
+# ------------------------------------------------------------------------------
+# Modelo híbrido: stk.sh es el orquestador; *4me.sh/stk_cron.sh son herramientas
+# independientes; stk_*_lib.sh es infra compartida estable (pocas, con contrato).
+# No crear micro-archivos por estética: dividir solo con frontera clara.
+#
+# Lanzamiento de módulos externos: usar SIEMPRE stk_ejecutar_modulo/wrappers.
+#   - Resolución estricta: $SCRIPT_DIR/${nombre}.sh (sin fallback PATH).
+#   - Ejecución local: bash "$dir/${nombre}.sh" "$@" (no depende de +x).
+#   - Modo normal: menús/secuenciales; no toca traps del padre.
+#   - Modo tui: monitores/alt-screen; padre absorbe SIGINT/SIGTERM con trap ':'
+#     y restaura trap salir SIGINT SIGTERM al volver. El hijo hereda SIG_DFL.
+#   - No pasar nombres de módulo construidos desde input de usuario; wrappers
+#     con literales fijos.
+#
+# Traps: el handler global de STK es `trap salir SIGINT SIGTERM`. No usar trap -
+# para restaurarlo. Las funciones con trap temporal deben restaurar el handler
+# correcto antes de salir/return.
+#
+# Retornos: funciones internas usan return 0/1; exit solo en entrada/salir/flags.
+# Errores: mensaje visible, registrar_log LOG_ERR cuando proceda, no silenciar.
+# Globales: minimizar dependencia implícita; en fronteras usar ${VAR:-default}.
+# ------------------------------------------------------------------------------
 
 _metrica_color() {
     local valor="$1" sufijo="$2" aviso="$3" critico="$4"
