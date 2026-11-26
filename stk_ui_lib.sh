@@ -285,6 +285,14 @@ stk_fzf() {
             ;;
     esac
 }
+# Devuelve 0 si la selección de fzf debe tratarse como cancelación/volver.
+# Uso: sel=$(... | fzf_estilo ...); rc=$?; if stk_fzf_cancelado "$rc" "$sel"; then ...
+stk_fzf_cancelado() {
+    local rc="${1:-0}"
+    local sel="${2:-}"
+    [[ $rc -ne 0 || -z "$sel" || "$sel" == *"Volver"* ]]
+}
+
 fzf_estilo() {
     stk_fzf simple "$1" "${2:-}"
 }

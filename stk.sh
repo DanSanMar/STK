@@ -2051,8 +2051,8 @@ gestionar_usuarios() {
         local opciones="1. 📋 Listar usuarios humanos\n2. ➕ Crear usuario (Con permisos)\n3. 🛡️ Modificar permisos de usuario\n4. 🗑️ Eliminar usuario\n5. ↩ Volver"
         local seleccion_users
         seleccion_users=$(echo -e "$opciones" | fzf_estilo "Acción" "G E S T I Ó N  D E  U S U A R I O S")
-
-        if [[ $? -ne 0 || "$seleccion_users" == *"Volver"* || -z "$seleccion_users" ]]; then
+        local rc_fzf=$?
+        if stk_fzf_cancelado "$rc_fzf" "$seleccion_users"; then
             break
         fi
 
@@ -2598,8 +2598,8 @@ autocopy_atomatic() {
         local opciones="1. 📁 Sistema (/etc)\n2. 👤 Usuario Actual (/home/$USUARIO_REAL)\n3. 🌐 Web (/var/www)\n4. 🔍 Explorar e Indicar Carpeta con FZF\n5. ↩ Volver"
         local sel
         sel=$(echo -e "$opciones" | fzf_estilo "Origen Local" "SELECCIONAR ORIGEN")
-
-        if [ $? -ne 0 ] || [ -z "$sel" ] || [[ "${sel:0:1}" == "5" ]]; then break; fi
+        local rc_fzf=$?
+        if stk_fzf_cancelado "$rc_fzf" "$sel" || [[ "${sel:0:1}" == "5" ]]; then break; fi
 
         local ORIGEN=""
         case ${sel:0:1} in
@@ -2734,8 +2734,8 @@ copy4me_tui_main() {
         local menu_opts="1. 🚀 Realizar Sincronización / Respaldo\n2. 📂 Gestionar Perfiles Guardados\n3. 🔌 Escanear y Probar Unidades Externas/USB\n4. ↩ Volver"
         local sel
         sel=$(echo -e "$menu_opts" | fzf_estilo "Seleccione Acción" "C O P Y 4 M E")
-
-        if [ $? -ne 0 ] || [ -z "$sel" ] || [[ "${sel:0:1}" == "4" ]]; then break; fi
+        local rc_fzf=$?
+        if stk_fzf_cancelado "$rc_fzf" "$sel" || [[ "${sel:0:1}" == "4" ]]; then break; fi
 
         case ${sel:0:1} in
             1)
@@ -2879,8 +2879,8 @@ hacer_backup() {
         local opciones="1. 📁 Respaldo Local Automático (PC - Compressed .tar.gz)\n2. 🚀 COPY4ME TUI Engine (Rsync, USB y Perfiles)\n3. 📜 Ver Backups Locales Existentes\n4. 🗑️ Eliminar Backups Locales\n5. 🔄 Restaurar Backup Comprimido\n6. ↩ Volver al Menú Principal"
         local seleccion
         seleccion=$(echo -e "$opciones" | fzf_estilo "Seleccione opción" "G E S T I Ó N  D E  B A C K U P S")
-
-        if [ $? -ne 0 ] || [ -z "$seleccion" ]; then break; fi
+        local rc_fzf=$?
+        if stk_fzf_cancelado "$rc_fzf" "$seleccion"; then break; fi
 
         case ${seleccion:0:1} in
             1) autocopy_atomatic ;;
