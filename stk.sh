@@ -1763,6 +1763,7 @@ Actualizar_sistema() {
                         # La reparación no debe maquillar el fallo de la actualización.
                         if [ "$ESTADO_REPARACION" -ne 0 ]; then
                             pintar $AMARILLO "⚠️ La reparación con dpkg terminó con errores (código $ESTADO_REPARACION)."
+                            registrar_log "$LOG_WARN" "Reparación dpkg --configure -a falló (código $ESTADO_REPARACION)"
                         fi
                     fi
                 fi
@@ -1899,6 +1900,7 @@ instalar_programa() {
                 ESTADO_INSTALACION=$?
                 ;;
             *)
+                registrar_log "$LOG_ERR" "Instalación cancelada: gestor no compatible ($Package) para $programa"
                 stk_mostrar_error "❌ Error: No se pudo identificar un Package compatible." "Presione Enter para volver..."
                 return 1
                 ;;
@@ -1972,6 +1974,7 @@ desinstalar_programa() {
                 ;;
             *)
                 pintar $ROJO "❌ Package no compatible."
+                registrar_log "$LOG_ERR" "Desinstalación cancelada: gestor no compatible ($Package) para $programa"
                 return 1
                 ;;
         esac
@@ -1982,6 +1985,7 @@ desinstalar_programa() {
         pintar $VERDE_BRILLANTE "✔ ¡$programa ha sido eliminado correctamente!"
     else
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
+        registrar_log "$LOG_ERR" "Error al desinstalar $programa con $Package"
     fi
     read -p "Presione Enter para volver..."
 }
@@ -2258,6 +2262,7 @@ menu_operaciones_servicio() {
                     sleep 1.5
                 else
                     pintar $ROJO " [ERROR]"
+                    registrar_log "$LOG_ERR" "Fallo al detener: $svc"
                     sleep 2
                 fi
                 ;;
@@ -2598,6 +2603,7 @@ autocopy_atomatic() {
 
         if ! mkdir -p "$RUTA_FINAL" 2>/dev/null; then
             pintar $ROJO "❌ Error crítico: Sin permisos de escritura en $RUTA_FINAL"
+            registrar_log "$LOG_ERR" "Backup automático: sin permisos de escritura en $RUTA_FINAL"
             sleep 2; continue
         fi
         chmod 700 "$DESTINO_DEF" 2>/dev/null
@@ -3076,6 +3082,7 @@ check_dependencies
 
 if [ ${#missing_tools[@]} -gt 0 ]; then
     echo -e "${ROJO}❌ No se han podido encontrar estas herramientas: ${missing_tools[*]}${RESET}"
+    registrar_log "$LOG_WARN" "Dependencias faltantes detectadas: ${missing_tools[*]}"
     echo -e "${CIAN}¿Qué deseas hacer?${RESET}"
     echo -e "   ${BLANCO}s) Intento de instalación automática${RESET}"
     echo -e "   ${BLANCO}i) Mostrar instrucciones de instalación manual${RESET}"
