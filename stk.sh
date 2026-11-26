@@ -247,7 +247,9 @@ rotar_logs() {
 
     if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
         echo ""
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
         read -p "Presione Enter para volver al menú..."
+        trap salir SIGINT SIGTERM
     fi
 }
 
@@ -281,7 +283,9 @@ ver_logs() {
         pintar "$ROJO" "Aún no hay registros."
     fi
     echo ""
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver..."
+    trap salir SIGINT SIGTERM
 }
 
 ver_logs_actualizaciones() {
@@ -308,7 +312,9 @@ ver_logs_actualizaciones() {
         pintar "$ROJO" "Aún no hay registros."
     fi
     echo ""
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver..."
+    trap salir SIGINT SIGTERM
 }
 
 get_package_name() {
@@ -932,7 +938,9 @@ stk_limpieza_manual_menu() {
     mostrar_logo
     stk_limpieza manual "$pasos_csv"
     echo ""
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver al menú..."
+    trap salir SIGINT SIGTERM
 }
 
 mostrar_info_red() {
@@ -1050,8 +1058,9 @@ mostrar_info_red() {
     fi
 
     registrar_log "$LOG_INFO" "Consulta de red realizada (Interfaz: ${iface_activa:-?} | Local: ${ip_local:-?} | Pública: ${ip_publica})"
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver..."
+    trap salir SIGINT SIGTERM
 }
 
 wifi_detalle() {
@@ -1164,7 +1173,9 @@ modo_auto() {
     if ! declare -F stk_lock_adquirir >/dev/null 2>&1; then
         pintar "$ROJO" "❌ Falta la biblioteca del modo automático (stk_auto_lib.sh)."
         echo ""
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 1" SIGINT
         read -p "Presione Enter para volver al menú principal..."
+        trap salir SIGINT SIGTERM
         return 1
     fi
 
@@ -1184,8 +1195,9 @@ modo_auto() {
     if [ $? -ne 0 ]; then
         pintar "$AMARILLO" "Modo auto cancelado. No se ha ejecutado nada."
         echo ""
-        trap salir SIGINT SIGTERM
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 0" SIGINT
         read -p "Presione Enter para volver al menú principal..."
+        trap salir SIGINT SIGTERM
         return 0
     fi
 
@@ -1198,8 +1210,9 @@ modo_auto() {
     if [ ${#PASOS_EJECUTADOS[@]} -eq 0 ]; then
         pintar "$AMARILLO" "No has seleccionado ningún paso."
         echo ""
-        trap salir SIGINT SIGTERM
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 0" SIGINT
         read -p "Presione Enter para volver al menú principal..."
+        trap salir SIGINT SIGTERM
         return 0
     fi
 
@@ -1207,8 +1220,9 @@ modo_auto() {
     if ! stk_lock_adquirir; then
         pintar "$ROJO" "❌ Ya hay otra ejecución del modo auto en curso."
         echo ""
-        trap salir SIGINT SIGTERM
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 3" SIGINT
         read -p "Presione Enter para volver al menú principal..."
+        trap salir SIGINT SIGTERM
         return 3
     fi
 
@@ -1449,9 +1463,10 @@ modo_auto() {
     echo -e "\n${AMARILLO}➤ Bitácora:${RESET} ${BLANCO}${LOG_FILE}${RESET}"
     echo -e "${AMARILLO}➤ Logs de actualizaciones:${RESET} ${BLANCO}También en Menú Mantenimiento → Logs de actualizaciones${RESET}"
     stk_lock_liberar
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return $rc" SIGINT
     echo ""
     read -p "Presione Enter para volver al menú principal..."
+    trap salir SIGINT SIGTERM
     return $rc
 }
 
@@ -1719,9 +1734,10 @@ auditoria_seguridad() {
 
     registrar_log "$LOG_INFO" "Auditoría completada. Score: ${score}% ($checks_passed/$total_checks). Alertas: $alertas_count"
 
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     echo ""
     read -p "Presione Enter para volver al menú..."
+    trap salir SIGINT SIGTERM
 }
 
 Actualizar_sistema() {
@@ -1831,9 +1847,10 @@ Actualizar_sistema() {
     fi
 
     # Restaurar la trampa de señal por defecto antes de salir
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     echo ""
     read -p "Presione Enter para volver al menú..."
+    trap salir SIGINT SIGTERM
 }
 
 instalar_programa() {
@@ -1921,8 +1938,9 @@ instalar_programa() {
     fi
 
     echo ""
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver al menú..."
+    trap salir SIGINT SIGTERM
 }
 
 desinstalar_programa() {
@@ -1995,8 +2013,9 @@ desinstalar_programa() {
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
         registrar_log "$LOG_ERR" "Error al desinstalar $programa con $Package"
     fi
-    trap salir SIGINT SIGTERM
+    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     read -p "Presione Enter para volver..."
+    trap salir SIGINT SIGTERM
 }
 
 obtener_grupo_sudo() {
