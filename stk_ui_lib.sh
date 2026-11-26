@@ -71,29 +71,44 @@ pintar() {
 }
 # Helpers de UI: unifican mensaje + pausa opcional. El segundo argumento
 # es el texto exacto de la pausa; si se omite, no se espera al usuario.
+_stk_pausa_interactiva() {
+    local aviso="$1"
+    local prev_trap
+    prev_trap=$(trap -p SIGINT)
+    if declare -F salir >/dev/null 2>&1; then
+        trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
+    fi
+    read -p "$aviso"
+    if [ -n "$prev_trap" ]; then
+        eval "$prev_trap"
+    elif declare -F salir >/dev/null 2>&1; then
+        trap salir SIGINT SIGTERM
+    fi
+}
+
 stk_mostrar_error() {
     local mensaje="$1" aviso="${2:-}"
     pintar "$ROJO" "$mensaje"
-    [ -n "$aviso" ] && read -p "$aviso"
+    [ -n "$aviso" ] && _stk_pausa_interactiva "$aviso"
     return 0
 }
 stk_mostrar_info() {
     local mensaje="$1" aviso="${2:-}"
     pintar "$AMARILLO" "$mensaje"
-    [ -n "$aviso" ] && read -p "$aviso"
+    [ -n "$aviso" ] && _stk_pausa_interactiva "$aviso"
     return 0
 }
 stk_mostrar_exito() {
     local mensaje="$1" aviso="${2:-}"
     pintar "$VERDE" "$mensaje"
-    [ -n "$aviso" ] && read -p "$aviso"
+    [ -n "$aviso" ] && _stk_pausa_interactiva "$aviso"
     return 0
 }
 # Pausa estándar al volver de un módulo o submenú.
 stk_volver_menu() {
     local aviso="${1:-Presione Enter para volver al menú...}"
     echo ""
-    read -p "$aviso"
+    _stk_pausa_interactiva "$aviso"
 }
 logo_barra() {
     actualizar_colores_logo

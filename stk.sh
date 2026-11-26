@@ -247,8 +247,7 @@ rotar_logs() {
 
     if [ "$MODO_SILENCIOSO" != "silencioso" ]; then
         echo ""
-        trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-        read -p "Presione Enter para volver al menú..."
+        stk_volver_menu "Presione Enter para volver al menú..."
         trap salir SIGINT SIGTERM
     fi
 }
@@ -283,8 +282,7 @@ ver_logs() {
         pintar "$ROJO" "Aún no hay registros."
     fi
     echo ""
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver..."
+    stk_volver_menu "Presione Enter para volver..."
     trap salir SIGINT SIGTERM
 }
 
@@ -312,8 +310,7 @@ ver_logs_actualizaciones() {
         pintar "$ROJO" "Aún no hay registros."
     fi
     echo ""
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver..."
+    stk_volver_menu "Presione Enter para volver..."
     trap salir SIGINT SIGTERM
 }
 
@@ -938,8 +935,7 @@ stk_limpieza_manual_menu() {
     mostrar_logo
     stk_limpieza manual "$pasos_csv"
     echo ""
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver al menú..."
+    stk_volver_menu "Presione Enter para volver al menú..."
     trap salir SIGINT SIGTERM
 }
 
@@ -1058,8 +1054,7 @@ mostrar_info_red() {
     fi
 
     registrar_log "$LOG_INFO" "Consulta de red realizada (Interfaz: ${iface_activa:-?} | Local: ${ip_local:-?} | Pública: ${ip_publica})"
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver..."
+    stk_volver_menu "Presione Enter para volver..."
     trap salir SIGINT SIGTERM
 }
 
@@ -1173,8 +1168,7 @@ modo_auto() {
     if ! declare -F stk_lock_adquirir >/dev/null 2>&1; then
         pintar "$ROJO" "❌ Falta la biblioteca del modo automático (stk_auto_lib.sh)."
         echo ""
-        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 1" SIGINT
-        read -p "Presione Enter para volver al menú principal..."
+        stk_volver_menu "Presione Enter para volver al menú principal..."
         trap salir SIGINT SIGTERM
         return 1
     fi
@@ -1195,8 +1189,7 @@ modo_auto() {
     if [ $? -ne 0 ]; then
         pintar "$AMARILLO" "Modo auto cancelado. No se ha ejecutado nada."
         echo ""
-        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 0" SIGINT
-        read -p "Presione Enter para volver al menú principal..."
+        stk_volver_menu "Presione Enter para volver al menú principal..."
         trap salir SIGINT SIGTERM
         return 0
     fi
@@ -1210,8 +1203,7 @@ modo_auto() {
     if [ ${#PASOS_EJECUTADOS[@]} -eq 0 ]; then
         pintar "$AMARILLO" "No has seleccionado ningún paso."
         echo ""
-        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 0" SIGINT
-        read -p "Presione Enter para volver al menú principal..."
+        stk_volver_menu "Presione Enter para volver al menú principal..."
         trap salir SIGINT SIGTERM
         return 0
     fi
@@ -1220,8 +1212,7 @@ modo_auto() {
     if ! stk_lock_adquirir; then
         pintar "$ROJO" "❌ Ya hay otra ejecución del modo auto en curso."
         echo ""
-        trap "stk_limpiar; trap salir SIGINT SIGTERM; return 3" SIGINT
-        read -p "Presione Enter para volver al menú principal..."
+        stk_volver_menu "Presione Enter para volver al menú principal..."
         trap salir SIGINT SIGTERM
         return 3
     fi
@@ -1464,8 +1455,7 @@ modo_auto() {
     echo -e "${AMARILLO}➤ Logs de actualizaciones:${RESET} ${BLANCO}También en Menú Mantenimiento → Logs de actualizaciones${RESET}"
     stk_lock_liberar
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return $rc" SIGINT
-    echo ""
-    read -p "Presione Enter para volver al menú principal..."
+    stk_volver_menu "Presione Enter para volver al menú principal..."
     trap salir SIGINT SIGTERM
     return $rc
 }
@@ -1735,8 +1725,7 @@ auditoria_seguridad() {
     registrar_log "$LOG_INFO" "Auditoría completada. Score: ${score}% ($checks_passed/$total_checks). Alertas: $alertas_count"
 
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    echo ""
-    read -p "Presione Enter para volver al menú..."
+    stk_volver_menu "Presione Enter para volver al menú..."
     trap salir SIGINT SIGTERM
 }
 
@@ -1848,8 +1837,7 @@ Actualizar_sistema() {
 
     # Restaurar la trampa de señal por defecto antes de salir
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    echo ""
-    read -p "Presione Enter para volver al menú..."
+    stk_volver_menu "Presione Enter para volver al menú..."
     trap salir SIGINT SIGTERM
 }
 
@@ -1938,8 +1926,7 @@ instalar_programa() {
     fi
 
     echo ""
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver al menú..."
+    stk_volver_menu "Presione Enter para volver al menú..."
     trap salir SIGINT SIGTERM
 }
 
@@ -2013,8 +2000,7 @@ desinstalar_programa() {
         pintar $ROJO "✘ Error al intentar desinstalar $programa."
         registrar_log "$LOG_ERR" "Error al desinstalar $programa con $Package"
     fi
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
-    read -p "Presione Enter para volver..."
+    stk_volver_menu "Presione Enter para volver..."
     trap salir SIGINT SIGTERM
 }
 
@@ -2110,7 +2096,7 @@ gestionar_usuarios() {
                         registrar_log "$LOG_ERR" "Fallo al crear usuario: $user"
                     fi
                 fi
-                read -p "Presione Enter para continuar..."
+                stk_volver_menu "Presione Enter para continuar..."
                 ;;
 
             3)
@@ -2142,7 +2128,7 @@ gestionar_usuarios() {
                     fi
 
                     modificar_permisos_usuario "$user_sel"
-                    read -p "Presione Enter para continuar..."
+                    stk_volver_menu "Presione Enter para continuar..."
                 fi
                 ;;
 
@@ -2177,7 +2163,7 @@ gestionar_usuarios() {
                         pintar $AZUL "Operación cancelada."
                     fi
                 fi
-                read -p "Presione Enter para continuar..."
+                stk_volver_menu "Presione Enter para continuar..."
                 ;;
         esac
     done
@@ -2199,7 +2185,7 @@ listar_usuarios() {
     echo ""
     echo "================================================================="
     echo ""
-    read -p "Presione Enter para continuar..."
+    stk_volver_menu "Presione Enter para continuar..."
 }
 
 pedir_nombre() {
@@ -2301,7 +2287,7 @@ menu_operaciones_servicio() {
                 echo "------------------------------------------------"
                 journalctl -u "$svc" -n 50 --no-pager
                 echo "------------------------------------------------"
-                read -p "Presione Enter para volver a la gestión de $svc..."
+                stk_volver_menu "Presione Enter para volver a la gestión de $svc..."
                 ;;
             4)
                 pintar $AZUL "📋 Estado completo de $svc:"
@@ -2309,7 +2295,7 @@ menu_operaciones_servicio() {
                 # Forzamos --no-pager para que no se bloquee y no necesite Ctrl+C
                 systemctl status "$svc" --no-pager
                 echo "------------------------------------------------"
-                read -p "Presione Enter para volver a la gestión de $svc..."
+                stk_volver_menu "Presione Enter para volver a la gestión de $svc..."
                 ;;
             5)
                 if systemctl is-enabled "$svc" &>/dev/null; then
@@ -2514,7 +2500,7 @@ ver_backups_existentes() {
         --preview="tar -tvf {} | head -n 40" \
         --preview-window="right:60%"
 
-    read -p "Presione Enter para volver..."
+    stk_volver_menu "Presione Enter para volver..."
 }
 
 eliminar_backups() {
@@ -2542,7 +2528,7 @@ eliminar_backups() {
         else
             pintar $AZUL "Operación cancelada."
         fi
-        read -p "Presione Enter..."
+        stk_volver_menu "Presione Enter..."
     fi
 }
 
@@ -2596,7 +2582,7 @@ restaurar_backup() {
         else
             pintar $AZUL "Operación cancelada."
         fi
-        read -p "Presione Enter..."
+        stk_volver_menu "Presione Enter..."
     fi
 }
 
@@ -2694,7 +2680,7 @@ autocopy_atomatic() {
             registrar_log "$LOG_ERR" "Error en tar al respaldar $ORIGEN"
         fi
 
-        read -p "Presione Enter para continuar..."
+        stk_volver_menu "Presione Enter para continuar..."
     done
     trap salir SIGINT SIGTERM
 }
@@ -2842,7 +2828,7 @@ copy4me_tui_main() {
 
                 guardar_perfil_json "$nombre_perfil" "$origen" "$destino"
                 ejecutar_sincronizacion_bash "$origen" "$destino" "$modo"
-                read -p "Presione Enter para continuar..."
+                stk_volver_menu "Presione Enter para continuar..."
                 ;;
 
             2)
@@ -2876,7 +2862,7 @@ copy4me_tui_main() {
                 echo -e "\n${AMARILLO}Rutas de almacenamiento externo detectadas:${RESET}"
                 obtener_puntos_montaje_externos
                 echo ""
-                read -p "Presione Enter para continuar..."
+                stk_volver_menu "Presione Enter para continuar..."
                 ;;
         esac
     done
