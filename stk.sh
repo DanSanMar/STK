@@ -2846,34 +2846,57 @@ hacer_backup() {
     done
 }
 
-ejecutar_dash4me() {
-    local cmd=""
-    # Busca 'dash4me' o 'dash4me.sh' en la misma carpeta que stk2
-    if [ -f "$SCRIPT_DIR/dash4me" ]; then
-        cmd="$SCRIPT_DIR/dash4me"
-    elif [ -f "$SCRIPT_DIR/dash4me.sh" ]; then
-        cmd="$SCRIPT_DIR/dash4me.sh"
-    # Si no está en la carpeta, intenta buscarlo en el PATH global
-    elif command -v dash4me &>/dev/null; then
-        cmd="dash4me"
-    elif command -v dash4me.sh &>/dev/null; then
-        cmd="dash4me.sh"
-    else
-        echo -e "${ROJO}❌ Error: No se encuentra dash4me ni dash4me.sh en $SCRIPT_DIR${RESET}"
-        read -p "Presione Enter para continuar..."
+# Helper unificado para lanzar módulos STK.
+# Uso: stk_ejecutar_modulo <nombre> <modo> [args...]
+#   nombre: nombre base del módulo, sin extensión (ej: "dash4me")
+#   modo:   normal | tui
+#     normal - lanzamiento estándar
+#     tui    - absorbe SIGINT/SIGTERM en STK para que el hijo gestione Ctrl+C
+stk_ejecutar_modulo() {
+    local nombre="${1:-}"
+    local modo="${2:-normal}"
+    shift 2 2>/dev/null || shift $# 2>/dev/null || true
+
+    local dir="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    local target="" rc=0
+
+    if [ -z "$nombre" ]; then
+        echo -e "${ROJO:-}❌ Error: nombre de módulo vacío${RESET:-}" >&2
         return 1
     fi
 
-    # Absorber SIGINT/SIGTERM en STK sin usar SIG_IGN: con SIG_IGN el hijo lo
-    # hereda y no puede atrapar Ctrl+C. Con un handler, el hijo recupera SIG_DFL.
-    trap ':' SIGINT SIGTERM
-    if [[ "$cmd" == /* || "$cmd" == ./* ]]; then
-        bash "$cmd"
+    # Resolución estricta: solo módulos junto a STK
+    if [ -f "$dir/${nombre}.sh" ]; then
+        target="bash:$dir/${nombre}.sh"
     else
-        "$cmd"
+        echo -e "${ROJO:-}❌ Error: No se encuentra ${nombre}.sh en ${dir}${RESET:-}" >&2
+        registrar_log "${LOG_ERR:-ERROR}" "Módulo no encontrado: ${nombre}" 2>/dev/null || true
+        read -r -p "Presione Enter para continuar..."
+        return 1
     fi
-    trap salir SIGINT SIGTERM
+
+    # TUI/monitor: el padre absorbe la señal; el hijo hereda SIG_DFL y puede
+    # instalar su propio trap (restaurar alt-screen/cursor, etc.).
+    if [ "$modo" = "tui" ]; then
+        trap ':' SIGINT SIGTERM
+    fi
+
+    if [[ "$target" == bash:* ]]; then
+        bash "${target#bash:}" "$@"
+        rc=$?
+    else
+        "$target" "$@"
+        rc=$?
+    fi
+
+    if [ "$modo" = "tui" ]; then
+        trap salir SIGINT SIGTERM
+    fi
+
+    return "$rc"
 }
+
+ejecutar_dash4me() { stk_ejecutar_modulo "dash4me" "tui" "$@"; }
 
 # ==============================================================================
 # 5. ORQUESTACIÓN
@@ -2891,83 +2914,13 @@ salir() {
     exit 0
 }
 
-ejecutar_stop4me() {
-  # Obtiene el directorio donde vive ESTE script (garantiza que funcione sin importar desde dónde lo ejecutes)
-  local DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-  # Ejecuta el archivo pasándole argumentos
-  bash "$DIR/stop4me.sh"
-}
-
-ejecutar_proc4me() {
-  # Lanza el investigador de procesos y amenazas desde la misma carpeta que STK
-  if [ -f "$SCRIPT_DIR/proc4me.sh" ]; then
-    bash "$SCRIPT_DIR/proc4me.sh"
-  elif command -v proc4me &>/dev/null; then
-    proc4me
-  elif command -v proc4me.sh &>/dev/null; then
-    proc4me.sh
-  else
-    echo -e "${ROJO}❌ Error: No se encuentra proc4me.sh en $SCRIPT_DIR${RESET}"
-    read -p "Presione Enter para continuar..."
-  fi
-}
-
-ejecutar_jobs4me() {
-  # Lanza el dashboard de análisis de servicios y tareas programadas
-  if [ -f "$SCRIPT_DIR/jobs4me.sh" ]; then
-    bash "$SCRIPT_DIR/jobs4me.sh"
-  elif command -v jobs4me.sh &>/dev/null; then
-    jobs4me.sh
-  elif command -v jobs4me &>/dev/null; then
-    jobs4me
-  else
-    echo -e "${ROJO}❌ Error: No se encuentra jobs4me.sh en $SCRIPT_DIR${RESET}"
-    read -p "Presione Enter para continuar..."
-  fi
-}
-
-ejecutar_hard4me() {
-  # Lanza el dashboard de análisis y monitorización del disco duro
-  if [ -f "$SCRIPT_DIR/hard4me.sh" ]; then
-    bash "$SCRIPT_DIR/hard4me.sh"
-  elif command -v hard4me.sh &>/dev/null; then
-    hard4me.sh
-  elif command -v hard4me &>/dev/null; then
-    hard4me
-  else
-    echo -e "${ROJO}❌ Error: No se encuentra hard4me.sh en $SCRIPT_DIR${RESET}"
-    read -p "Presione Enter para continuar..."
-  fi
-}
-
-ejecutar_install4me() {
-  # Lanza el instalador por categorías (repos, Flatpak, GitHub, AUR)
-  if [ -f "$SCRIPT_DIR/install4me.sh" ]; then
-    bash "$SCRIPT_DIR/install4me.sh"
-  elif command -v install4me.sh &>/dev/null; then
-    install4me.sh
-  elif command -v install4me &>/dev/null; then
-    install4me
-  else
-    echo -e "${ROJO}❌ Error: No se encuentra install4me.sh en $SCRIPT_DIR${RESET}"
-    read -p "Presione Enter para continuar..."
-  fi
-}
-
-ejecutar_localscan4me() {
-  # Lanza el dashboard de auditoría de redes locales (inventario y puertos)
-  if [ -f "$SCRIPT_DIR/localscan4me.sh" ]; then
-    bash "$SCRIPT_DIR/localscan4me.sh"
-  elif command -v localscan4me.sh &>/dev/null; then
-    localscan4me.sh
-  elif command -v localscan4me &>/dev/null; then
-    localscan4me
-  else
-    echo -e "${ROJO}❌ Error: No se encuentra localscan4me.sh en $SCRIPT_DIR${RESET}"
-    read -p "Presione Enter para continuar..."
-  fi
-}
+ejecutar_stop4me()      { stk_ejecutar_modulo "stop4me"      "normal" "$@"; }
+ejecutar_proc4me()      { stk_ejecutar_modulo "proc4me"      "normal" "$@"; }
+ejecutar_jobs4me()      { stk_ejecutar_modulo "jobs4me"      "tui"    "$@"; }
+ejecutar_hard4me()      { stk_ejecutar_modulo "hard4me"      "tui"    "$@"; }
+ejecutar_install4me()   { stk_ejecutar_modulo "install4me"   "normal" "$@"; }
+ejecutar_localscan4me() { stk_ejecutar_modulo "localscan4me" "normal" "$@"; }
+ejecutar_stk_cron()     { stk_ejecutar_modulo "stk_cron"     "normal" "$@"; }
 
 menu() {
     # Precalienta el dashboard mientras el usuario lee el menú (sin bloquear).
@@ -3009,13 +2962,7 @@ opciones="0. 🤖 | MODO AUTO       | Update + Servicios + Auditoria + Limpieza
 
             6)
                 # Gestor de tareas automatizadas
-                if [ -f "$SCRIPT_DIR/stk_cron.sh" ]; then
-                    bash "$SCRIPT_DIR/stk_cron.sh"
-                else
-                    echo -e "${ROJO}❌ Error: No se encuentra stk_cron.sh${RESET}"
-                    echo -e "${AMARILLO}El gestor de tareas debe estar en: $SCRIPT_DIR/stk_cron.sh${RESET}"
-                    read -p "Presione Enter..."
-                fi
+                ejecutar_stk_cron
                 ;;
 
             7) salir ;;
