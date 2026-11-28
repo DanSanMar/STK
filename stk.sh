@@ -3104,6 +3104,8 @@ AUTO_TIMEOUT_UPGRADE=900          # gestor de paquetes
 AUTO_TIMEOUT_DPKG=180             # comprobación de dpkg pendiente (solo avisa)
 AUTO_TIMEOUT_EXTRA=300            # flatpak / snap
 AUTO_MOSTRAR_LATIDO=true          # progreso en TTY; en cron solo se registra
+AUTO_FLATPAK_UPDATE=true          # complementos opcionales del perfil auto
+AUTO_SNAP_REFRESH=true            # (se omiten solos si no están instalados)
 
 # Perfil MANUAL: mantiene full-upgrade y las confirmaciones.
 MANUAL_TIMEOUT_UPDATE=900

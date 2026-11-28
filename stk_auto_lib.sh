@@ -42,6 +42,9 @@
 # Latido de progreso (solo en TTY; en cron se registran las fases en bitácora).
 : "${AUTO_MOSTRAR_LATIDO:=true}"
 : "${STK_LATIDO_INTERVALO:=5}"
+# Complementos opcionales del perfil auto (se omiten solos si no están instalados).
+: "${AUTO_FLATPAK_UPDATE:=true}"
+: "${AUTO_SNAP_REFRESH:=true}"
 
 STK_LATIDO_PID=""
 STK_LATIDO_INICIO=0
@@ -561,8 +564,8 @@ stk_actualizar() {
     fi
     ESTADO_ACT=$rc   # también cubre la rama inmutable (rpm-ostree)
 
-    # Flatpak y Snap: timeout propio y corto; nunca bloquean al gestor principal.
-    if command -v flatpak >/dev/null 2>&1; then
+    # Flatpak y Snap: opcionales, timeout propio y corto; nunca bloquean al gestor.
+    if [ "${AUTO_FLATPAK_UPDATE:-true}" = true ] && command -v flatpak >/dev/null 2>&1; then
         echo ""
         echo "📦 Comprobando y actualizando Flatpak..."
         local LOG_FLATPAK
@@ -584,26 +587,53 @@ stk_actualizar() {
         rm -f "$LOG_FLATPAK"
     fi
 
-    if command -v snap >/dev/null 2>&1; then
+    if [ "${AUTO_SNAP_REFRESH:-true}" = true ] && command -v snap >/dev/null 2>&1; then
         echo ""
-        echo "📦 Comprobando y actualizando Snap..."
-        local LOG_SNAP
-        LOG_SNAP=$(mktemp "${TMPDIR:-/tmp}/stk-snap.XXXXXX" 2>/dev/null) || LOG_SNAP="${TMPDIR:-/tmp}/stk-snap.$$"
-        inicio=$(date +%s)
-        stk_latido_iniciar "snap refresh"
-        "${TMO_EXTRA[@]}" snap refresh </dev/null 9>&- 2>&1 | tee "$LOG_SNAP"
-        rc=${PIPESTATUS[0]}
-        stk_latido_detener
-        fin=$(date +%s)
-        stk_fase_log "$PERFIL" "snap-refresh" "$inicio" "$fin" "$rc"
-        if grep -qi -E "all snaps are up to date|todos los snaps están actualizados" "$LOG_SNAP"; then
-            RES_SNAP="Snap: Sin cambios."
+        echo "📦 Comprobando Snap..."
+        local -a SNAPS_INSTALADOS=()
+        mapfile -t SNAPS_INSTALADOS < <(snap list 2>/dev/null | awk 'NR > 1 && NF > 1 {print $1}')
+        if [ ${#SNAPS_INSTALADOS[@]} -eq 0 ]; then
+            RES_SNAP="Snap: sin paquetes instalados."
+            registrar_log "$LOG_INFO" "[AUTO] SNAP: sin paquetes instalados; se omite el refresco."
         else
-            mapfile -t SNAPS_ACT < <(grep -v "All snaps" "$LOG_SNAP" | awk 'NR>1 {print $1}')
-            RES_SNAP="Snap: ${#SNAPS_ACT[@]} paquete(s) actualizado(s)."
+            # Consulta de solo lectura: evita un refresh innecesario (y su timeout).
+            local LOG_SNAP_LIST LOG_SNAP pendiente=false
+            LOG_SNAP_LIST=$(mktemp "${TMPDIR:-/tmp}/stk-snap-list.XXXXXX" 2>/dev/null) || LOG_SNAP_LIST="${TMPDIR:-/tmp}/stk-snap-list.$$"
+            inicio=$(date +%s)
+            stk_latido_iniciar "snap refresh --list"
+            "${TMO_EXTRA[@]}" snap refresh --list </dev/null 9>&- 2>&1 | tee "$LOG_SNAP_LIST"
+            rc=${PIPESTATUS[0]}
+            stk_latido_detener
+            fin=$(date +%s)
+            stk_fase_log "$PERFIL" "snap-list" "$inicio" "$fin" "$rc"
+            if [ "$rc" -eq 0 ] \
+               && ! grep -qiE 'all snaps? are up.?to.?date|no updates|sin actualizaciones' "$LOG_SNAP_LIST" \
+               && grep -qiE '^Name[[:space:]]+Version' "$LOG_SNAP_LIST"; then
+                pendiente=true
+            fi
+            if [ "$pendiente" = false ]; then
+                RES_SNAP="Snap: sin cambios."
+                registrar_log "$LOG_INFO" "[AUTO] SNAP: sin actualizaciones pendientes."
+            else
+                LOG_SNAP=$(mktemp "${TMPDIR:-/tmp}/stk-snap.XXXXXX" 2>/dev/null) || LOG_SNAP="${TMPDIR:-/tmp}/stk-snap.$$"
+                inicio=$(date +%s)
+                stk_latido_iniciar "snap refresh"
+                "${TMO_EXTRA[@]}" snap refresh </dev/null 9>&- 2>&1 | tee "$LOG_SNAP"
+                rc=${PIPESTATUS[0]}
+                stk_latido_detener
+                fin=$(date +%s)
+                stk_fase_log "$PERFIL" "snap-refresh" "$inicio" "$fin" "$rc"
+                if [ "$rc" -eq 0 ]; then
+                    RES_SNAP="Snap: refresco ejecutado (detalle en bitácora)."
+                else
+                    RES_SNAP="Snap: error al refrescar (código $rc)."
+                fi
+                stk_extraer_incidencias "$LOG_SNAP"
+                rm -f "$LOG_SNAP"
+            fi
+            stk_extraer_incidencias "$LOG_SNAP_LIST"
+            rm -f "$LOG_SNAP_LIST"
         fi
-        stk_extraer_incidencias "$LOG_SNAP"
-        rm -f "$LOG_SNAP"
     fi
 
     if [ -n "$DEBIAN_FRONTEND_SAVE" ]; then
@@ -747,7 +777,8 @@ stk_actualizar_manual() {
         pintar "$AZUL" "📦 Actualizando paquetes Flatpak..."
         "${TMO_EXTRA[@]}" flatpak update 9>&- || true
     fi
-    if command -v snap >/dev/null 2>&1; then
+    if command -v snap >/dev/null 2>&1 \
+       && [ -n "$(snap list 2>/dev/null | awk 'NR > 1 && NF > 1 {print $1}')" ]; then
         echo ""
         pintar "$AZUL" "📦 Actualizando paquetes Snap..."
         "${TMO_EXTRA[@]}" snap refresh 9>&- || true
