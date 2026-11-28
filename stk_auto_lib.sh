@@ -229,7 +229,7 @@ stk_lock_liberar() {
 
 stk_gestor_ocupado() {
     local p
-    for p in apt-get apt dpkg dnf zypper pacman rpm-ostree; do
+    for p in apt-get apt dpkg dnf dnf5 zypper pacman rpm-ostree apk; do
         pgrep -x "$p" >/dev/null 2>&1 && return 0
     done
     return 1
@@ -721,6 +721,18 @@ stk_actualizar_manual() {
                 "${TMO_UP[@]}" zypper refresh 9>&-
                 [ $? -eq 0 ] && "${TMO_UPG[@]}" zypper update 9>&-
                 rc=$?
+                ;;
+            apk)
+                pintar "$VERDE" "Actualizando sistema (APK)..."
+                local estado_update
+                "${TMO_UP[@]}" apk update 9>&-
+                estado_update=$?
+                if [ "$estado_update" -eq 0 ]; then
+                    "${TMO_UPG[@]}" apk upgrade 9>&-
+                    rc=$?
+                else
+                    rc=$estado_update
+                fi
                 ;;
             *)
                 pintar "$ROJO" "❌ Error: No se pudo identificar un gestor de paquetes compatible."
