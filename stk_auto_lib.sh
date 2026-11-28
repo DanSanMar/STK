@@ -21,11 +21,32 @@
 
 # Días de retención de logs del journal en la limpieza automática.
 : "${AUTO_LIMPIEZA_LOG_DIAS:=7}"
-: "${AUTO_TIMEOUT_ACTUALIZACION:=3600}"
+: "${AUTO_TIMEOUT_ACTUALIZACION:=3600}"   # legado: se mantiene por compatibilidad
 : "${AUTO_TIMEOUT_LIMPIEZA:=600}"
 : "${AUTO_MIN_ESPACIO_MB:=1024}"
 : "${AUTO_LIMITE_SUID:=60}"
 : "${STK_ESTADO_DIR:=/var/lib/stk}"
+
+# --- PERFILES DE ACTUALIZACIÓN -------------------------------------------------
+# AUTO: una sola pasada, sin preguntas y NUNCA full-upgrade por defecto.
+: "${AUTO_APT_METODO:=upgrade}"           # upgrade | full-upgrade (solo si se configura)
+: "${AUTO_TIMEOUT_UPDATE:=300}"           # apt-get update
+: "${AUTO_TIMEOUT_UPGRADE:=900}"          # apt-get upgrade
+: "${AUTO_TIMEOUT_DPKG:=180}"             # comprobación/sugerencia de reparación
+: "${AUTO_TIMEOUT_EXTRA:=300}"            # flatpak / snap
+# MANUAL: mantiene full-upgrade, confirmaciones y reparación bajo pregunta.
+: "${MANUAL_TIMEOUT_UPDATE:=900}"
+: "${MANUAL_TIMEOUT_UPGRADE:=3600}"
+: "${MANUAL_TIMEOUT_DPKG:=1800}"
+: "${MANUAL_TIMEOUT_EXTRA:=900}"
+# Latido de progreso (solo en TTY; en cron se registran las fases en bitácora).
+: "${AUTO_MOSTRAR_LATIDO:=true}"
+: "${STK_LATIDO_INTERVALO:=5}"
+
+STK_LATIDO_PID=""
+STK_LATIDO_INICIO=0
+STK_LATIDO_FASE=""
+ACT_FASES=()
 
 # --- registrar_log: se usa la del script padre si ya existe ---
 if ! declare -F registrar_log >/dev/null 2>&1; then
@@ -86,6 +107,92 @@ stk_timeout() {
     if [ -n "$segs" ] && command -v timeout >/dev/null 2>&1; then
         _stk_tmo_ref=(timeout "$segs")
     fi
+}
+
+# Timeout con SIGKILL de respaldo: evita que apt/dpkg queden colgados tras
+# ignorar SIGTERM. El propio `timeout` aísla al hijo en su grupo de procesos.
+stk_timeout_fase() {
+    local -n _ref="$1" 2>/dev/null || return 0
+    local segs="$2"
+    _ref=()
+    if [ -z "$segs" ] || ! command -v timeout >/dev/null 2>&1; then
+        return 0
+    fi
+    if timeout --help 2>&1 | grep -q -- '--kill-after'; then
+        _ref=(timeout --kill-after=30s "$segs")
+    else
+        _ref=(timeout "$segs")
+    fi
+}
+
+# --- LATIDO DE PROGRESO --------------------------------------------------------
+# En TTY muestra "fase · Ns" cada STK_LATIDO_INTERVALO por stderr (no mezcla
+# con el tee de la salida). Sin TTY no dibuja nada: las fases se registran igual.
+stk_latido_detener() {
+    if [ -n "$STK_LATIDO_PID" ]; then
+        kill "$STK_LATIDO_PID" 2>/dev/null || true
+        wait "$STK_LATIDO_PID" 2>/dev/null || true
+        STK_LATIDO_PID=""
+        [ -t 1 ] && printf '\r\e[K'
+    fi
+}
+
+stk_latido_iniciar() {
+    local fase="${1:-}"
+    stk_latido_detener
+    STK_LATIDO_FASE="$fase"
+    STK_LATIDO_INICIO=$(date +%s 2>/dev/null || echo 0)
+    [ "${AUTO_MOSTRAR_LATIDO:-true}" = true ] || return 0
+    [ -t 1 ] || return 0
+    (
+        local ahora
+        while :; do
+            sleep "${STK_LATIDO_INTERVALO:-5}" 2>/dev/null || break
+            ahora=$(date +%s 2>/dev/null || echo 0)
+            printf '\r\e[K  ⏱  %s · %ss' "$fase" "$(( ahora - STK_LATIDO_INICIO ))"
+        done
+    ) &
+    STK_LATIDO_PID=$!
+}
+
+# Registro uniforme de cada fase (inicio/fin/código/duración).
+stk_fase_log() {
+    local perfil="$1" fase="$2" inicio="$3" fin="$4" rc="$5" nivel="$LOG_INFO"
+    [ "$rc" -ne 0 ] && nivel="$LOG_ERR"
+    ACT_FASES+=("$fase:$(( fin - inicio ))s")
+    registrar_log "$nivel" "[$perfil] FASE: $fase | duración $(( fin - inicio ))s | código $rc"
+}
+
+# Entorno no interactivo para gestores de paquetes.
+stk_entorno_sin_prompts() {
+    export DEBIAN_FRONTEND=noninteractive
+    export NEEDRESTART_MODE=a
+    export UCF_FORCE_CONFFOLD=1
+}
+
+# ¿Hay trabajo de dpkg pendiente de configurar? (solo para avisar, nunca reparar en auto)
+stk_dpkg_roto() {
+    if [ -d /var/lib/dpkg/updates ] && [ -n "$(ls -A /var/lib/dpkg/updates 2>/dev/null)" ]; then
+        return 0
+    fi
+    if command -v dpkg >/dev/null 2>&1; then
+        local -a t=() salida
+        stk_timeout_fase t "${AUTO_TIMEOUT_DPKG:-180}"
+        salida=$("${t[@]}" dpkg --audit 2>/dev/null) || salida=""
+        [ -n "$salida" ] && return 0
+    fi
+    return 1
+}
+
+# Espera acotada a que el gestor quede libre; si no, la fase se omite.
+stk_gestor_esperar() {
+    local max="${1:-30}" i
+    stk_gestor_ocupado || return 0
+    for (( i=0; i<max; i+=5 )); do
+        sleep 5
+        stk_gestor_ocupado || return 0
+    done
+    return 1
 }
 
 # ==============================================================================
@@ -283,13 +390,15 @@ stk_extraer_incidencias() {
 
         ACT_INCIDENCIAS+=("$limpia")
         registrar_log "$nivel" "ACTUALIZACIÓN: $limpia"
-    done < <(grep -iE '(error|failed|failure|warning|warn|E:|W:|cannot|unable|no se pudo|no se ha podido|falló|fallido|lock|bloquead)' "$logfile" 2>/dev/null | tail -n 12)
+    done < <(grep -iE '(error|failed|failure|warning|warn|\bE:|\bW:|cannot|unable|no se pudo|no se ha podido|falló|fallido|lock|bloquead)' "$logfile" 2>/dev/null | tail -n 12)
 }
 
 # ==============================================================================
-#  ACTUALIZACIÓN UNIFICADA
+#  ACTUALIZACIÓN UNIFICADA (PERFIL AUTO)
+#  Una sola pasada: sin prompts, con fases acotadas y NUNCA full-upgrade salvo
+#  configuración explícita. Se usa tanto en modo_auto como en el cron.
 #  Rellena: ESTADO_ACT, PKGS_ACTUALIZADOS, FLATPAKS_ACT, SNAPS_ACT,
-#           RES_FLATPAK, RES_SNAP, ACT_INCIDENCIAS, RES_ACTUALIZACION
+#           RES_FLATPAK, RES_SNAP, ACT_INCIDENCIAS, RES_ACTUALIZACION, ACT_FASES
 #  Devuelve: 0 ok | 124 timeout | otro código de error
 # ==============================================================================
 stk_actualizar() {
@@ -302,47 +411,88 @@ stk_actualizar() {
     RES_SNAP=""
     ACT_INCIDENCIAS=()
     RES_ACTUALIZACION="Sin procesar"
+    ACT_FASES=()
 
+    local PERFIL="AUTO"
     local ETIQUETA_GESTOR="${Package}"
     [ "${IMMUTABLE:-false}" = true ] && ETIQUETA_GESTOR="rpm-ostree"
 
     local LOG_TEMP_ACT
     LOG_TEMP_ACT=$(mktemp "${TMPDIR:-/tmp}/stk-act.XXXXXX" 2>/dev/null) || LOG_TEMP_ACT="${TMPDIR:-/tmp}/stk-act.$$"
-    local -a TMO_ACT=()
-    stk_timeout TMO_ACT "$AUTO_TIMEOUT_ACTUALIZACION"
+    local -a TMO_UP=() TMO_UPG=() TMO_DPKG=() TMO_EXTRA=()
+    stk_timeout_fase TMO_UP "$AUTO_TIMEOUT_UPDATE"
+    stk_timeout_fase TMO_UPG "$AUTO_TIMEOUT_UPGRADE"
+    stk_timeout_fase TMO_DPKG "$AUTO_TIMEOUT_DPKG"
+    stk_timeout_fase TMO_EXTRA "$AUTO_TIMEOUT_EXTRA"
+
+    local metodo="${AUTO_APT_METODO:-upgrade}"
+    [[ "$metodo" =~ ^(upgrade|full-upgrade)$ ]] || metodo="upgrade"
+    [ "$metodo" = "full-upgrade" ] && \
+        registrar_log "$LOG_WARN" "[AUTO] AVISO: full-upgrade activado explícitamente."
 
     local DEBIAN_FRONTEND_SAVE="${DEBIAN_FRONTEND:-}"
-    export DEBIAN_FRONTEND=noninteractive
-    export NEEDRESTART_MODE=a
+    local NEEDRESTART_SAVE="${NEEDRESTART_MODE:-}"
+    stk_entorno_sin_prompts
+
+    local inicio fin rc=0
 
     if [ "${IMMUTABLE:-false}" = true ]; then
-        "${TMO_ACT[@]}" rpm-ostree upgrade 2>&1 | tee "$LOG_TEMP_ACT"
-        ESTADO_ACT=${PIPESTATUS[0]}
+        inicio=$(date +%s)
+        stk_latido_iniciar "rpm-ostree upgrade"
+        "${TMO_UPG[@]}" rpm-ostree upgrade </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+        rc=${PIPESTATUS[0]}
+        stk_latido_detener
+        fin=$(date +%s)
+        stk_fase_log "$PERFIL" "rpm-ostree-upgrade" "$inicio" "$fin" "$rc"
     else
         case "${Package:-unknown}" in
             apt)
                 mapfile -t PKGS_ACTUALIZADOS < <(apt list --upgradable 2>/dev/null | grep -v "Listing..." | cut -d/ -f1)
-                "${TMO_ACT[@]}" bash -c 'apt-get update -y \
-                    -o Acquire::http::Timeout=30 \
-                    -o Acquire::https::Timeout=30 \
-                    -o DPkg::Lock::Timeout=120 \
-                    && apt-get full-upgrade -y \
-                    -o Dpkg::Options::="--force-confdef" \
-                    -o Dpkg::Options::="--force-confold" \
-                    -o Acquire::http::Timeout=30 \
-                    -o Acquire::https::Timeout=30 \
-                    -o DPkg::Lock::Timeout=120' 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
-                if [ "$ESTADO_ACT" -ne 0 ]; then
-                    echo "⚠️ Fallo en APT. Intentando reparar con dpkg --configure -a..." | tee -a "$LOG_TEMP_ACT"
-                    "${TMO_ACT[@]}" dpkg --configure -a 2>&1 | tee -a "$LOG_TEMP_ACT"
-                    ESTADO_ACT=${PIPESTATUS[0]}
+                local -a APT_OPTS=(
+                    -o Acquire::http::Timeout=30
+                    -o Acquire::https::Timeout=30
+                    -o DPkg::Lock::Timeout=60
+                    -o Dpkg::Use-Pty=0
+                    -o 'Dpkg::Options::=--force-confdef'
+                    -o 'Dpkg::Options::=--force-confold'
+                )
+                if ! stk_gestor_esperar 30; then
+                    echo "WARNING: gestor de paquetes ocupado; se omite la actualización." >> "$LOG_TEMP_ACT"
+                    rc=1
+                else
+                    inicio=$(date +%s)
+                    stk_latido_iniciar "apt update"
+                    "${TMO_UP[@]}" apt-get update -y "${APT_OPTS[@]}" </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+                    rc=${PIPESTATUS[0]}
+                    stk_latido_detener
+                    fin=$(date +%s)
+                    stk_fase_log "$PERFIL" "apt-update" "$inicio" "$fin" "$rc"
+                    if [ "$rc" -eq 0 ]; then
+                        inicio=$(date +%s)
+                        stk_latido_iniciar "apt $metodo"
+                        "${TMO_UPG[@]}" apt-get "$metodo" -y "${APT_OPTS[@]}" </dev/null 9>&- 2>&1 | tee -a "$LOG_TEMP_ACT"
+                        rc=${PIPESTATUS[0]}
+                        stk_latido_detener
+                        fin=$(date +%s)
+                        stk_fase_log "$PERFIL" "apt-$metodo" "$inicio" "$fin" "$rc"
+                    fi
                 fi
+                # El perfil auto NUNCA repara automáticamente: solo avisa.
+                if [ "$rc" -ne 0 ] && stk_dpkg_roto; then
+                    echo "WARNING: dpkg tiene configuración pendiente; usa Menú Mantenimiento → Reparar." >> "$LOG_TEMP_ACT"
+                fi
+                ESTADO_ACT=$rc
                 ;;
             pacman)
-                "${TMO_ACT[@]}" pacman -Syu --noconfirm --color never 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
-                if [ "$ESTADO_ACT" -eq 0 ]; then
+                inicio=$(date +%s)
+                stk_latido_iniciar "pacman -Syu"
+                "${TMO_UPG[@]}" pacman -Syu --noconfirm --color never --noprogressbar </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+                rc=${PIPESTATUS[0]}
+                stk_latido_detener
+                fin=$(date +%s)
+                stk_fase_log "$PERFIL" "pacman-syu" "$inicio" "$fin" "$rc"
+                ESTADO_ACT=$rc
+                if [ "$rc" -eq 0 ]; then
                     if grep -qiE "there is nothing to do|ya está actualizado|nada que hacer" "$LOG_TEMP_ACT"; then
                         PKGS_ACTUALIZADOS=()
                     else
@@ -351,35 +501,79 @@ stk_actualizar() {
                 fi
                 ;;
             dnf)
-                "${TMO_ACT[@]}" bash -c 'dnf upgrade --refresh -y --color=never' 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
-                [ "$ESTADO_ACT" -eq 0 ] && \
+                inicio=$(date +%s)
+                stk_latido_iniciar "dnf upgrade"
+                "${TMO_UPG[@]}" dnf upgrade --refresh -y --color=never </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+                rc=${PIPESTATUS[0]}
+                stk_latido_detener
+                fin=$(date +%s)
+                stk_fase_log "$PERFIL" "dnf-upgrade" "$inicio" "$fin" "$rc"
+                ESTADO_ACT=$rc
+                [ "$rc" -eq 0 ] && \
                     mapfile -t PKGS_ACTUALIZADOS < <(awk '/^Upgraded:/{f=1; next} /^$/{f=0} f{print $1}' "$LOG_TEMP_ACT")
                 ;;
             zypper)
-                "${TMO_ACT[@]}" bash -c 'zypper refresh && zypper --non-interactive update' 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
+                inicio=$(date +%s)
+                stk_latido_iniciar "zypper refresh"
+                "${TMO_UP[@]}" zypper refresh </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+                rc=${PIPESTATUS[0]}
+                stk_latido_detener
+                fin=$(date +%s)
+                stk_fase_log "$PERFIL" "zypper-refresh" "$inicio" "$fin" "$rc"
+                ESTADO_ACT=$rc
+                if [ "$rc" -eq 0 ]; then
+                    inicio=$(date +%s)
+                    stk_latido_iniciar "zypper update"
+                    "${TMO_UPG[@]}" zypper --non-interactive update </dev/null 9>&- 2>&1 | tee -a "$LOG_TEMP_ACT"
+                    rc=${PIPESTATUS[0]}
+                    stk_latido_detener
+                    fin=$(date +%s)
+                    stk_fase_log "$PERFIL" "zypper-update" "$inicio" "$fin" "$rc"
+                    ESTADO_ACT=$rc
+                fi
                 ;;
             apk)
-                "${TMO_ACT[@]}" bash -c 'apk update && apk upgrade' 2>&1 | tee "$LOG_TEMP_ACT"
-                ESTADO_ACT=${PIPESTATUS[0]}
+                inicio=$(date +%s)
+                stk_latido_iniciar "apk update"
+                "${TMO_UP[@]}" apk update </dev/null 9>&- 2>&1 | tee "$LOG_TEMP_ACT"
+                rc=${PIPESTATUS[0]}
+                stk_latido_detener
+                fin=$(date +%s)
+                stk_fase_log "$PERFIL" "apk-update" "$inicio" "$fin" "$rc"
+                ESTADO_ACT=$rc
+                if [ "$rc" -eq 0 ]; then
+                    inicio=$(date +%s)
+                    stk_latido_iniciar "apk upgrade"
+                    "${TMO_UPG[@]}" apk upgrade </dev/null 9>&- 2>&1 | tee -a "$LOG_TEMP_ACT"
+                    rc=${PIPESTATUS[0]}
+                    stk_latido_detener
+                    fin=$(date +%s)
+                    stk_fase_log "$PERFIL" "apk-upgrade" "$inicio" "$fin" "$rc"
+                    ESTADO_ACT=$rc
+                fi
                 ;;
             *)
                 echo "❌ Actualización no soportada para ${Package:-desconocido}"
-                registrar_log "$LOG_ERR" "ACTUALIZACIÓN: gestor no soportado (${Package:-desconocido})"
-                rm -f "$LOG_TEMP_ACT"
-                return 1
+                registrar_log "$LOG_ERR" "[AUTO] Gestor no soportado (${Package:-desconocido})"
+                rc=1
                 ;;
         esac
     fi
+    ESTADO_ACT=$rc   # también cubre la rama inmutable (rpm-ostree)
 
-    # Flatpak y Snap usan el mismo timeout que el gestor principal.
+    # Flatpak y Snap: timeout propio y corto; nunca bloquean al gestor principal.
     if command -v flatpak >/dev/null 2>&1; then
         echo ""
         echo "📦 Comprobando y actualizando Flatpak..."
         local LOG_FLATPAK
         LOG_FLATPAK=$(mktemp "${TMPDIR:-/tmp}/stk-flatpak.XXXXXX" 2>/dev/null) || LOG_FLATPAK="${TMPDIR:-/tmp}/stk-flatpak.$$"
-        "${TMO_ACT[@]}" flatpak update -y 2>&1 | tee "$LOG_FLATPAK"
+        inicio=$(date +%s)
+        stk_latido_iniciar "flatpak update"
+        "${TMO_EXTRA[@]}" flatpak update -y </dev/null 9>&- 2>&1 | tee "$LOG_FLATPAK"
+        rc=${PIPESTATUS[0]}
+        stk_latido_detener
+        fin=$(date +%s)
+        stk_fase_log "$PERFIL" "flatpak-update" "$inicio" "$fin" "$rc"
         if grep -qi -E "nothing to do|nothing updated|nada que hacer" "$LOG_FLATPAK"; then
             RES_FLATPAK="Flatpak: Sin cambios."
         else
@@ -395,7 +589,13 @@ stk_actualizar() {
         echo "📦 Comprobando y actualizando Snap..."
         local LOG_SNAP
         LOG_SNAP=$(mktemp "${TMPDIR:-/tmp}/stk-snap.XXXXXX" 2>/dev/null) || LOG_SNAP="${TMPDIR:-/tmp}/stk-snap.$$"
-        "${TMO_ACT[@]}" snap refresh 2>&1 | tee "$LOG_SNAP"
+        inicio=$(date +%s)
+        stk_latido_iniciar "snap refresh"
+        "${TMO_EXTRA[@]}" snap refresh </dev/null 9>&- 2>&1 | tee "$LOG_SNAP"
+        rc=${PIPESTATUS[0]}
+        stk_latido_detener
+        fin=$(date +%s)
+        stk_fase_log "$PERFIL" "snap-refresh" "$inicio" "$fin" "$rc"
         if grep -qi -E "all snaps are up to date|todos los snaps están actualizados" "$LOG_SNAP"; then
             RES_SNAP="Snap: Sin cambios."
         else
@@ -406,8 +606,18 @@ stk_actualizar() {
         rm -f "$LOG_SNAP"
     fi
 
-    [ -n "$DEBIAN_FRONTEND_SAVE" ] && export DEBIAN_FRONTEND="$DEBIAN_FRONTEND_SAVE" || unset DEBIAN_FRONTEND
-    unset NEEDRESTART_MODE
+    if [ -n "$DEBIAN_FRONTEND_SAVE" ]; then
+        export DEBIAN_FRONTEND="$DEBIAN_FRONTEND_SAVE"
+    else
+        unset DEBIAN_FRONTEND
+    fi
+    if [ -n "$NEEDRESTART_SAVE" ]; then
+        export NEEDRESTART_MODE="$NEEDRESTART_SAVE"
+    else
+        unset NEEDRESTART_MODE
+    fi
+    unset UCF_FORCE_CONFFOLD
+    stk_latido_detener
 
     # Antes de borrar el log volátil, rescatamos errores y avisos.
     stk_extraer_incidencias "$LOG_TEMP_ACT" "$LOG_ERR"
@@ -416,21 +626,134 @@ stk_actualizar() {
         if [ "${IMMUTABLE:-false}" = true ]; then
             RES_ACTUALIZACION="✔ Imagen del sistema preparada (rpm-ostree). Reinicia para aplicar."
         else
-            RES_ACTUALIZACION="✔ Sistema al día ($ETIQUETA_GESTOR: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
+            RES_ACTUALIZACION="✔ Sistema al día ($ETIQUETA_GESTOR/$metodo: ${#PKGS_ACTUALIZADOS[@]} actualizados | $RES_FLATPAK"
             [ -n "$RES_SNAP" ] && RES_ACTUALIZACION="$RES_ACTUALIZACION | $RES_SNAP"
             RES_ACTUALIZACION="$RES_ACTUALIZACION)"
         fi
-        registrar_log "$LOG_INFO" "ACTUALIZACIÓN: $RES_ACTUALIZACION"
+        registrar_log "$LOG_INFO" "[AUTO] ACTUALIZACIÓN: $RES_ACTUALIZACION"
     elif [ "$ESTADO_ACT" -eq 124 ]; then
-        RES_ACTUALIZACION="⏱ Tiempo agotado en la actualización (${AUTO_TIMEOUT_ACTUALIZACION}s)."
-        registrar_log "$LOG_ERR" "ACTUALIZACIÓN: $RES_ACTUALIZACION"
+        RES_ACTUALIZACION="⏱ Tiempo agotado en una fase de la actualización (ver fases en bitácora)."
+        registrar_log "$LOG_ERR" "[AUTO] ACTUALIZACIÓN: $RES_ACTUALIZACION"
     else
         RES_ACTUALIZACION="❌ Error en la actualización del gestor principal ($ETIQUETA_GESTOR)."
-        registrar_log "$LOG_ERR" "ACTUALIZACIÓN: $RES_ACTUALIZACION (código $ESTADO_ACT)"
+        registrar_log "$LOG_ERR" "[AUTO] ACTUALIZACIÓN: $RES_ACTUALIZACION (código $ESTADO_ACT)"
     fi
 
     rm -f "$LOG_TEMP_ACT"
     return "$ESTADO_ACT"
+}
+
+# ==============================================================================
+#  ACTUALIZACIÓN MANUAL (PERFIL MANUAL)
+#  Conserva full-upgrade, confirmaciones y reparación bajo pregunta. Comparte
+#  el lock con el auto/cron y usa timeouts propios más generosos. La salida y
+#  la interacción corren a cargo del llamador (Actualizar_sistema en stk.sh).
+#  Devuelve: 0 ok | 124 timeout | otro código de error
+# ==============================================================================
+stk_actualizar_manual() {
+    stk_detectar_gestor
+    local rc=0
+    local ETIQUETA_GESTOR="${Package}"
+    [ "${IMMUTABLE:-false}" = true ] && ETIQUETA_GESTOR="rpm-ostree"
+
+    if ! stk_lock_adquirir; then
+        pintar "$ROJO" "❌ Ya hay otra ejecución en curso (modo auto o cron)."
+        registrar_log "$LOG_WARN" "[MANUAL] Actualización cancelada: lock ocupado."
+        return 3
+    fi
+    registrar_log "$LOG_INFO" "[MANUAL] Inicio de actualización ($ETIQUETA_GESTOR)."
+
+    local -a TMO_UP=() TMO_UPG=() TMO_DPKG=() TMO_EXTRA=()
+    stk_timeout_fase TMO_UP "$MANUAL_TIMEOUT_UPDATE"
+    stk_timeout_fase TMO_UPG "$MANUAL_TIMEOUT_UPGRADE"
+    stk_timeout_fase TMO_DPKG "$MANUAL_TIMEOUT_DPKG"
+    stk_timeout_fase TMO_EXTRA "$MANUAL_TIMEOUT_EXTRA"
+    local -a APT_NET_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120)
+
+    if [ "${IMMUTABLE:-false}" = true ]; then
+        pintar "$VERDE" "Actualizando la imagen del sistema (RPM-OSTREE)..."
+        "${TMO_UPG[@]}" rpm-ostree upgrade 9>&-
+        rc=$?
+        [ "$rc" -eq 0 ] && pintar "$AMARILLO" "🔄 Reinicia el sistema para aplicar la nueva imagen."
+    else
+        case "${Package:-unknown}" in
+            apt)
+                pintar "$VERDE" "Actualizando repositorios y paquetes (APT)..."
+                "${TMO_UP[@]}" apt-get update -y "${APT_NET_OPTS[@]}" 9>&-
+                "${TMO_UPG[@]}" apt-get full-upgrade "${APT_NET_OPTS[@]}" 9>&-
+                rc=$?
+                if [ "$rc" -ne 0 ]; then
+                    echo ""
+                    pintar "$AMARILLO" "⚠️ La actualización terminó con errores (código $rc)."
+                    read -r -p "¿Deseas intentar reparar el gestor con dpkg --configure -a? (s/N): " reparar
+                    if [[ "${reparar:-}" =~ ^[sS]$ ]]; then
+                        "${TMO_DPKG[@]}" dpkg --configure -a 9>&-
+                        local estado_reparacion=$?
+                        if [ "$estado_reparacion" -ne 0 ]; then
+                            pintar "$AMARILLO" "⚠️ La reparación con dpkg terminó con errores (código $estado_reparacion)."
+                            registrar_log "$LOG_WARN" "[MANUAL] Reparación dpkg --configure -a falló (código $estado_reparacion)"
+                        else
+                            registrar_log "$LOG_INFO" "[MANUAL] Reparación dpkg --configure -a completada."
+                        fi
+                    fi
+                fi
+                echo ""
+                pintar "$AZUL" "🧹 Comprobando paquetes huérfanos..."
+                "${TMO_EXTRA[@]}" apt-get autoremove 9>&-
+                ;;
+            dnf)
+                pintar "$VERDE" "Actualizando sistema (DNF)..."
+                "${TMO_UPG[@]}" dnf upgrade --refresh 9>&-
+                rc=$?
+                if [ "$rc" -eq 0 ]; then
+                    echo ""
+                    pintar "$AZUL" "🧹 Comprobando paquetes huérfanos..."
+                    "${TMO_EXTRA[@]}" dnf autoremove 9>&-
+                fi
+                ;;
+            pacman)
+                pintar "$VERDE" "Sincronizando repositorios y sistema (PACMAN)..."
+                "${TMO_UPG[@]}" pacman -Syu 9>&-
+                rc=$?
+                ;;
+            zypper)
+                pintar "$VERDE" "Refrescando y actualizando (ZYPPER)..."
+                "${TMO_UP[@]}" zypper refresh 9>&-
+                [ $? -eq 0 ] && "${TMO_UPG[@]}" zypper update 9>&-
+                rc=$?
+                ;;
+            *)
+                pintar "$ROJO" "❌ Error: No se pudo identificar un gestor de paquetes compatible."
+                registrar_log "$LOG_ERR" "[MANUAL] Gestor no soportado (${Package:-desconocido})."
+                rc=1
+                ;;
+        esac
+    fi
+
+    if command -v flatpak >/dev/null 2>&1; then
+        echo ""
+        pintar "$AZUL" "📦 Actualizando paquetes Flatpak..."
+        "${TMO_EXTRA[@]}" flatpak update 9>&- || true
+    fi
+    if command -v snap >/dev/null 2>&1; then
+        echo ""
+        pintar "$AZUL" "📦 Actualizando paquetes Snap..."
+        "${TMO_EXTRA[@]}" snap refresh 9>&- || true
+    fi
+
+    if [ "$rc" -eq 0 ]; then
+        pintar "$VERDE_BRILLANTE" "✔ ¡El sistema se ha actualizado correctamente!"
+        registrar_log "$LOG_INFO" "[MANUAL] Actualización completada con éxito ($ETIQUETA_GESTOR)."
+    elif [ "$rc" -eq 124 ]; then
+        pintar "$AMARILLO" "⏱ Tiempo agotado en la actualización manual."
+        registrar_log "$LOG_ERR" "[MANUAL] Tiempo agotado (código 124)."
+    else
+        pintar "$ROJO" "✘ Hubo un error durante la actualización."
+        registrar_log "$LOG_ERR" "[MANUAL] Fallo en la actualización ($ETIQUETA_GESTOR, código $rc)."
+    fi
+
+    stk_lock_liberar
+    return "$rc"
 }
 
 # ==============================================================================

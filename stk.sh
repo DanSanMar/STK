@@ -1179,8 +1179,10 @@ modo_auto() {
         return 1
     fi
 
-    # Capturar Ctrl+C para liberar el lock y volver de forma segura al menú
-    trap '[ -n "${SPINNER_PID:-}" ] && kill "$SPINNER_PID" 2>/dev/null; stk_lock_liberar; stk_limpiar; trap salir SIGINT SIGTERM; return' SIGINT
+    # Capturar Ctrl+C/SIGTERM: parar el latido, liberar el lock y volver al menú.
+    # No se mata SPINNER_PID (global y posiblemente ajeno); timeout ya aisla al
+    # hijo en su propio grupo de procesos y lo mata con SIGKILL de respaldo.
+    trap 'declare -F stk_latido_detener >/dev/null 2>&1 && stk_latido_detener; stk_lock_liberar; stk_limpiar; trap salir SIGINT SIGTERM; return 130' SIGINT SIGTERM
 
     stk_limpiar
     mostrar_logo
@@ -1399,6 +1401,12 @@ modo_auto() {
     echo -e "${AMARILLO}➤ Tiempo Transcurrido:${RESET}  ${BLANCO}${DURACION} segundos${RESET}"
     echo -e "${AMARILLO}➤ Pasos ejecutados:${RESET}    ${BLANCO}${PASOS_EJECUTADOS[*]}${RESET}"
     [ ${#TIEMPOS[@]} -gt 0 ] && { local TIEMPOS_TXT="" t; for t in "${TIEMPOS[@]}"; do TIEMPOS_TXT+="${TIEMPOS_TXT:+ · }$t"; done; echo -e "${AMARILLO}➤ Duración por paso:${RESET}   ${BLANCO}${TIEMPOS_TXT}${RESET}"; }
+    if [ ${#ACT_FASES[@]} -gt 0 ]; then
+        local FASES_TXT="" f
+        for f in "${ACT_FASES[@]}"; do FASES_TXT+="${FASES_TXT:+ · }$f"; done
+        echo -e "${AMARILLO}➤ Fases de actualización:${RESET} ${BLANCO}${FASES_TXT}${RESET}"
+        registrar_log "$LOG_INFO" "[AUTO] Fases: $FASES_TXT"
+    fi
     echo -e "${AMARILLO}➤ Preflight:${RESET}           ${BLANCO}Red: $PRE_RED · Espacio: ${PRE_ESPACIO_MB} MB · Batería: $PRE_BATERIA${RESET}"
     if [ ${#PRE_AVISOS[@]} -gt 0 ]; then
         local av
@@ -1460,6 +1468,7 @@ modo_auto() {
     echo -e "\n${AMARILLO}➤ Bitácora:${RESET} ${BLANCO}${LOG_FILE}${RESET}"
     echo -e "${AMARILLO}➤ Logs de actualizaciones:${RESET} ${BLANCO}También en Menú Mantenimiento → Logs de actualizaciones${RESET}"
     stk_lock_liberar
+    declare -F stk_latido_detener >/dev/null 2>&1 && stk_latido_detener
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return $rc" SIGINT
     stk_volver_menu "Presione Enter para volver al menú principal..."
     trap salir SIGINT SIGTERM
@@ -1736,117 +1745,28 @@ auditoria_seguridad() {
 }
 
 Actualizar_sistema() {
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
+    trap "stk_limpiar; declare -F stk_lock_liberar >/dev/null 2>&1 && stk_lock_liberar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
     mostrar_logo
-    pintar $AZUL_BRILLANTE "➤ Iniciando actualización automática del sistema..."
+    pintar $AZUL_BRILLANTE "➤ Iniciando actualización manual del sistema..."
     echo ""
 
-    local ESTADO_ACTUALIZACION=0
-    local ETIQUETA_GESTOR="$Package"
-    [ "$IMMUTABLE" = true ] && ETIQUETA_GESTOR="rpm-ostree"
-
-    # 1. Actualización según el gestor principal del sistema
-    if [ "$IMMUTABLE" = true ]; then
-        pintar $VERDE "Actualizando la imagen del sistema (RPM-OSTREE)..."
-        rpm-ostree upgrade
-        ESTADO_ACTUALIZACION=$?
-        if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
-            pintar $AMARILLO "🔄 Reinicia el sistema para aplicar la nueva imagen."
-        fi
-    else
-        case "$Package" in
-            apt)
-                pintar $VERDE "Actualizando repositorios y paquetes (APT)..."
-                local APT_NET_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120)
-
-                apt-get update -y "${APT_NET_OPTS[@]}"
-                apt-get full-upgrade "${APT_NET_OPTS[@]}"
-                ESTADO_ACTUALIZACION=$?
-
-                if [ $ESTADO_ACTUALIZACION -ne 0 ]; then
-                    echo ""
-                    pintar $AMARILLO "⚠️ La actualización terminó con errores (código $ESTADO_ACTUALIZACION)."
-                    read -r -p "¿Deseas intentar reparar el gestor con dpkg --configure -a? (s/N): " reparar
-                    if [[ "$reparar" == "s" || "$reparar" == "S" ]]; then
-                        local ESTADO_REPARACION
-                        dpkg --configure -a
-                        ESTADO_REPARACION=$?
-                        # La reparación no debe maquillar el fallo de la actualización.
-                        if [ "$ESTADO_REPARACION" -ne 0 ]; then
-                            pintar $AMARILLO "⚠️ La reparación con dpkg terminó con errores (código $ESTADO_REPARACION)."
-                            registrar_log "$LOG_WARN" "Reparación dpkg --configure -a falló (código $ESTADO_REPARACION)"
-                        fi
-                    fi
-                fi
-
-                echo ""
-                pintar $AZUL "🧹 Comprobando paquetes huérfanos..."
-                apt-get autoremove
-                ;;
-            dnf)
-                pintar $VERDE "Actualizando sistema (DNF)..."
-                dnf upgrade --refresh
-                ESTADO_ACTUALIZACION=$?
-                if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
-                    echo ""
-                    pintar $AZUL "🧹 Comprobando paquetes huérfanos..."
-                    dnf autoremove
-                fi
-                ;;
-            pacman)
-                pintar $VERDE "Sincronizando repositorios y sistema (PACMAN)..."
-                pacman -Syu
-                ESTADO_ACTUALIZACION=$?
-                ;;
-            zypper)
-                pintar $VERDE "Refrescando y actualizando (ZYPPER)..."
-                zypper refresh && zypper update
-                ESTADO_ACTUALIZACION=$?
-                ;;
-            *)
-                stk_mostrar_error "❌ Error: No se pudo identificar un gestor de paquetes compatible." "Presione Enter para volver..."
-                trap salir SIGINT SIGTERM
-                return 1
-                ;;
-        esac
+    if ! declare -F stk_actualizar_manual >/dev/null 2>&1; then
+        pintar $ROJO "❌ Falta la biblioteca del modo automático (stk_auto_lib.sh)."
+        stk_volver_menu "Presione Enter para volver al menú..."
+        trap salir SIGINT SIGTERM
+        return 1
     fi
 
-    # 2. Actualización opcional para paquetes Flatpak (si está instalado)
-    if command -v flatpak &>/dev/null; then
-        echo ""
-        pintar $AZUL "📦 Actualizando paquetes Flatpak..."
-        flatpak update
-    fi
+    # Perfil MANUAL: full-upgrade, confirmaciones y reparación bajo pregunta.
+    # La librería gestiona el lock y la bitácora; aquí solo se muestra el menú.
+    stk_actualizar_manual
+    local rc=$?
 
-    # 3. Actualización opcional para paquetes Snap (si está instalado)
-    if command -v snap &>/dev/null; then
-        echo ""
-        pintar $AZUL "📦 Actualizando paquetes Snap..."
-        snap refresh
-    fi
-
-    # 4. Evaluación del resultado y registro en logs
-    echo ""
-    if [ $ESTADO_ACTUALIZACION -eq 0 ]; then
-        if [ "$IMMUTABLE" = true ]; then
-            pintar $VERDE_BRILLANTE "✔ Imagen del sistema preparada. Reinicia para aplicar los cambios."
-            registrar_log "$LOG_INFO" "Actualización rpm-ostree preparada; reinicio pendiente."
-        else
-            pintar $VERDE_BRILLANTE "✔ ¡El sistema se ha actualizado correctamente!"
-            registrar_log "$LOG_INFO" "Actualización del sistema completada con éxito ($ETIQUETA_GESTOR)."
-        fi
-    else
-        pintar $ROJO "✘ Hubo un error durante la actualización."
-        registrar_log "$LOG_ERR" "Fallo en la actualización del sistema usando $ETIQUETA_GESTOR."
-    fi
-
-    # Restaurar la trampa de señal por defecto antes de salir
-    trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
+    trap "stk_limpiar; declare -F stk_lock_liberar >/dev/null 2>&1 && stk_lock_liberar; trap salir SIGINT SIGTERM; return $rc" SIGINT
     stk_volver_menu "Presione Enter para volver al menú..."
     trap salir SIGINT SIGTERM
 }
-
 instalar_programa() {
     trap "stk_limpiar; trap salir SIGINT SIGTERM; return" SIGINT
     stk_limpiar
@@ -3171,11 +3091,25 @@ SO_STK="${PRETTY_NAME:-${OS_ID:-Desconocido}}"
 
 # --- CONFIGURACIÓN DEL MODO AUTOMÁTICO ---
 AUTO_MIN_ESPACIO_MB=1024          # Espacio libre mínimo en / para actualizar
-AUTO_TIMEOUT_ACTUALIZACION=3600   # 60 min para el bloque de actualización
+AUTO_TIMEOUT_ACTUALIZACION=3600   # legado: se mantienen por compatibilidad
 AUTO_TIMEOUT_LIMPIEZA=600         # 10 min por comando de limpieza
 AUTO_LIMPIEZA_LOG_DIAS=7          # Retención de logs del journal (limpieza segura)
 AUTO_LIMITE_SUID=60               # Umbral de binarios SUID considerados anormales en auditoria
 STK_ESTADO_DIR="/var/lib/stk"     # snapshots lógicos (sin informes JSON)
+
+# Perfil AUTO: una sola pasada, sin preguntas y sin full-upgrade por defecto.
+AUTO_APT_METODO=upgrade           # upgrade | full-upgrade (solo si se configura explícitamente)
+AUTO_TIMEOUT_UPDATE=300           # apt-get update
+AUTO_TIMEOUT_UPGRADE=900          # gestor de paquetes
+AUTO_TIMEOUT_DPKG=180             # comprobación de dpkg pendiente (solo avisa)
+AUTO_TIMEOUT_EXTRA=300            # flatpak / snap
+AUTO_MOSTRAR_LATIDO=true          # progreso en TTY; en cron solo se registra
+
+# Perfil MANUAL: mantiene full-upgrade y las confirmaciones.
+MANUAL_TIMEOUT_UPDATE=900
+MANUAL_TIMEOUT_UPGRADE=3600
+MANUAL_TIMEOUT_DPKG=1800
+MANUAL_TIMEOUT_EXTRA=900
 
 # --- BIBLIOTECA COMPARTIDA DEL MODO AUTOMÁTICO ---
 # Una sola implementación de lock, preflight, snapshot, actualización,
